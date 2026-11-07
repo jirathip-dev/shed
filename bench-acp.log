@@ -1,0 +1,35 @@
+base: throughput 34473 us
+head: throughput 30680 us
+base: throughput 42685 us
+head: throughput 40305 us
+base: throughput 27770 us
+head: throughput 27188 us
+base: throughput 26975 us
+head: throughput 27711 us
+base: throughput 50676 us
+head: throughput 28502 us
+acp throughput median of 5: base 34473 us, head 28502 us (head/base 82%)
+base: shed_only 2125 ns
+head: shed_only 2054 ns
+base: shed_only 2175 ns
+head: shed_only 2183 ns
+base: shed_only 2126 ns
+head: shed_only 2101 ns
+base: shed_only 2225 ns
+head: shed_only 1825 ns
+base: shed_only 2014 ns
+head: shed_only 2235 ns
+base: shed_only 2110 ns
+head: shed_only 2169 ns
+base: shed_only 2134 ns
+head: shed_only 2153 ns
+base: shed_only 2445 ns
+head: shed_only 2399 ns
+base: shed_only 2171 ns
+head: shed_only 2264 ns
+acp shed_only median of 9: base 2134 ns, head 2169 ns (head/base 101%)
+acp replay: 62324 us
+acp hibernate: 10 idle agents, hibernation off: 196864 KiB
+acp hibernate: 10 idle agents, hibernation on: 77056 KiB
+acp hibernate: fake agent wake 85 ms
+bench exit 0

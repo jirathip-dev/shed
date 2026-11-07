@@ -1,0 +1,8 @@
+
+running 1 test
+acp hibernate: 10 idle agents, hibernation off: 197248 KiB
+acp hibernate: 10 idle agents, hibernation on: 77568 KiB
+acp hibernate: fake agent wake 76 ms
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 8.83s
+

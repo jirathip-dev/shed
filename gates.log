@@ -1,0 +1,267 @@
+== cargo fmt --all --check
+cargo fmt --all --check -> exit 0
+== cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking shed-server v0.0.0 (/home/user/.herdr/worktrees/shed/issue-47/crates/shed-server)
+    Checking shed v0.0.0 (/home/user/.herdr/worktrees/shed/issue-47/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.14s
+cargo clippy --workspace --all-targets --locked -- -D warnings -> exit 0
+== sh -c test "$(grep -rE "allow\(" crates | wc -l)" -le 10
+sh -c test "$(grep -rE "allow\(" crates | wc -l)" -le 10 -> exit 1
+== timeout 1500 cargo test --workspace --locked
+   Compiling shed-server v0.0.0 (/home/user/.herdr/worktrees/shed/issue-47/crates/shed-server)
+   Compiling shed v0.0.0 (/home/user/.herdr/worktrees/shed/issue-47/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.72s
+     Running unittests src/main.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/shed-845dd2653689c996)
+
+running 4 tests
+test watch::tests::a_narrow_terminal_hides_the_preview ... ok
+test watch::tests::the_preview_shows_the_screen_at_most_ten_times_a_second ... ok
+test watch::tests::the_list_follows_the_event_stream ... ok
+test watch::tests::enter_attaches_and_ctrl_backslash_comes_back_to_the_selection ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acp.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/acp-401721295dd9113d)
+
+running 20 tests
+test an_agent_that_fails_the_handshake_reports_error ... ok
+test a_model_switch_is_reported_and_the_next_turn_uses_it ... ok
+test a_turn_with_an_approval_matches_the_golden_event_log ... ok
+test an_unknown_update_kind_is_skipped ... ok
+test cancel_ends_a_turn_mid_way ... ok
+test each_change_of_the_slash_commands_is_one_session_event ... ok
+test an_expired_login_ends_the_turn_as_an_auth_error ... ok
+test a_prompt_wakes_the_agent_and_its_history_is_not_repeated ... ok
+test mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden ... ok
+test registry_installs_pinned_agents_from_a_fixture ... ok
+test resume_is_refused_without_load_session ... ok
+test resume_replays_the_history_once_marked_replay ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... ok
+test sse_servers_pass_only_when_the_agent_advertises_them ... ok
+test the_deny_policy_rejects_permission_requests ... ok
+test sends_during_a_wake_are_delivered_in_order ... ok
+test unknown_or_malformed_mcp_servers_are_refused ... ok
+test no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn ... ok
+test the_watchdog_ends_a_silent_turn_but_not_a_busy_one ... ok
+test an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.19s
+
+     Running tests/acp_bench.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/acp_bench-05482be23ea37ea0)
+
+running 5 tests
+test hibernate ... ignored, a memory bench: scripts/bench-acp.sh
+test hibernate_live ... ignored, a live bench: needs SHED_BENCH_LIVE and a logged-in agent
+test replay ... ignored, a timing bench: scripts/bench-acp.sh
+test shed_only ... ignored, a timing bench: scripts/bench-acp.sh
+test throughput ... ignored, a timing bench: scripts/bench-acp.sh
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/cli-579cf767eec6efea)
+
+running 14 tests
+test a_server_that_exits_before_it_is_ready_is_reported_as_an_exit ... ok
+test a_terminal_has_shed_set ... ok
+test attach_ends_when_the_program_exits ... ok
+test hello_prints_the_version ... ok
+test help_lists_every_command ... ok
+test run_autostart_starts_a_detached_server ... ok
+test a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list ... ok
+test serve_prints_one_ready_line_once_its_socket_accepts ... ok
+test a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each ... ok
+test version_flag_prints_the_version ... ok
+test run_read_send_exit_ls_and_labels_match_the_golden ... ok
+test timing_report ... ok
+test attach_types_resizes_and_detaches_in_a_pty ... ok
+test wait_matches_output_by_pattern_and_falls_back_to_idle ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.19s
+
+     Running tests/idle_bench.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/idle_bench-bd70c387382a776b)
+
+running 1 test
+test idle_connections ... ignored, a timing report: scripts/bench-fanout.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/machines.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/machines-62f9c9c2d506d709)
+
+running 5 tests
+test connect_carries_the_protocol_over_a_socketpair ... ok
+down added
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test events_on_a_machine_stream_prefixed_and_reconnect_after_the_link_drops ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.27s
+
+     Running tests/reliability.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/reliability-1389b910f185bdd3)
+
+running 7 tests
+test a_first_start_menu_is_seen_read_and_answered ... ok
+test a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over ... ok
+test malformed_requests_are_denied_with_a_reason_and_never_pass_the_handshake ... ok
+test a_terminal_replaced_under_the_same_name_gets_the_messages ... ok
+test two_autostarts_at_once_share_one_server ... ok
+test kill_ends_only_its_own_tree_and_the_other_terminals_survive ... ok
+test a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.14s
+
+     Running tests/server.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/server-4b56b96f33d413f4)
+
+running 9 tests
+test a_version_mismatch_is_refused ... ok
+test jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored ... ok
+test screen_watch_sends_at_most_20_updates_a_second ... ok
+test a_kept_terminal_comes_back_as_a_shell_in_its_cwd ... ok
+test run_ls_read_kill_over_the_socket_match_the_goldens ... ok
+test events_stream_in_seq_order_filter_by_label_and_replay_since ... ok
+test screen_watch_sends_the_full_screen_then_diffs_and_since_skips_the_full_one ... ok
+test terminal_input_and_keys_arrive_and_a_readonly_client_is_refused ... ok
+test terminal_resize_from_the_watcher_resizes_the_screen_and_the_program ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.97s
+
+     Running tests/service.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/service-b70401052cddc1a1)
+
+running 2 tests
+test install_writes_the_job_once_and_refuses_other_contents_without_force ... ok
+test doctor_reports_a_missing_job_and_server_with_their_fix_lines ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s
+
+     Running unittests src/lib.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/shed_core-d505665a7cba36fc)
+
+running 20 tests
+test keys::tests::unknown_keys_are_errors ... ok
+test keys::tests::key_encoding_table ... ok
+test pattern::tests::rejects_broken_patterns ... ok
+test pattern::tests::matches_the_supported_subset ... ok
+test proctree::tests::parses_proc_stat ... ok
+test proctree::tests::parses_ps_lines ... ok
+test proctree::tests::tree_takes_the_group_descendants_and_known_orphans ... ok
+test screen::tests::alternate_screen_keeps_the_primary_and_no_history ... ok
+test screen::tests::answers_cursor_position_queries ... ok
+test history::tests::the_log_stays_under_twice_the_cap_and_restores_the_tail ... ok
+test screen::tests::cursor_moves_and_erases ... ok
+test screen::tests::jan_osc_9999_maps_waiting_to_blocked_and_ignores_garbage ... ok
+test screen::tests::osc_7501_reports_state_and_never_reaches_the_screen ... ok
+test screen::tests::prints_lines_and_drops_trailing_blanks ... ok
+test screen::tests::resize_moves_rows_into_scrollback ... ok
+test screen::tests::scrollback_bytes_are_bounded_by_whole_lines ... ok
+test screen::tests::scrollback_is_bounded ... ok
+test screen::tests::sgr_sets_the_pen_and_snapshot_groups_cells_into_runs ... ok
+test screen::tests::wraps_at_the_last_column ... ok
+test history::tests::tail_reads_only_the_tail_and_skips_a_cut_character ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/history.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/history-e25b0f9e368df9df)
+
+running 2 tests
+test a_terminal_starts_from_its_log ... ok
+test throughput_report_with_full_scrollback ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.55s
+
+     Running tests/terminal.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/terminal-812b5c8b3dcb873b)
+
+running 7 tests
+test kill_ends_the_whole_tree ... ok
+test reads_printf_output_exactly ... ok
+test passes_cwd_env_and_input ... ok
+test subscribers_get_raw_output_until_the_pty_closes ... ok
+test scrollback_is_bounded ... ok
+test resize_reaches_the_program_and_the_screen ... ok
+test kill_escalates_to_sigkill_after_the_grace_period ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running unittests src/lib.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/shed_proto-25d81afb5352376f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_doc.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/protocol_doc-b2b70d2cc6e011ed)
+
+running 4 tests
+test version_refusal_reads_as_specified ... ok
+test method_names_round_trip ... ok
+test emit_params_round_trip ... ok
+test protocol_md_matches_the_types ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/shed_server-b97769b95b463a02)
+
+running 18 tests
+test events::bench::fanout ... ignored, a timing bench: scripts/bench-fanout.sh
+test acp::tests::frames_are_one_line_of_json ... ok
+test acp::tests::render_keeps_prompts_one_line_per_tool_call_and_replies ... ok
+test acp::tests::a_text_chunk_skips_the_sdk_parse_and_matches_it ... ok
+test events::tests::since_beyond_seq_still_gets_new_events ... ok
+test events::tests::every_subscriber_shares_the_one_serialised_line ... ok
+test machines::tests::a_dropped_link_reports_reconnecting_and_comes_back_on_the_backoff_schedule ... ok
+test machines::tests::add_ls_rm_round_trip_through_the_file ... ok
+test machines::tests::bad_names_targets_and_files_are_refused ... ok
+test machines::tests::the_berth_release_config_loads ... ok
+test registry::tests::a_corrupt_state_file_is_refused_and_kept ... ok
+test events::tests::the_log_keeps_the_last_thousand_for_since ... ok
+test events::tests::a_slow_subscriber_misses_nothing_and_the_log_is_trimmed_without_one ... ok
+test machines::tests::parallel_writes_never_share_a_temp_file ... ok
+test stats::tests::parses_macos_sysctl ... ok
+test registry::tests::state_files_of_every_past_release_load ... ok
+test registry::tests::leftovers_go_on_load_and_a_removed_terminal_leaves_nothing ... ok
+test stats::tests::one_sample_a_minute_on_a_fake_clock_and_24_hours_kept ... ok
+
+test result: ok. 17 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 3.89s
+
+     Running tests/client.rs (/home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/debug/deps/client-fb3678132852071b)
+
+running 1 test
+test a_server_of_another_version_is_refused_by_the_client ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_proto
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+timeout 1500 cargo test --workspace --locked -> exit 0
+== env RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked
+env: ‘warnings’: No such file or directory
+env RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps --locked -> exit 127
+== scripts/line-cap.sh
+non-test lines: 7190 / 7350
+scripts/line-cap.sh -> exit 0
+== scripts/dep-direction.sh
+shed-core has no workspace deps
+scripts/dep-direction.sh -> exit 0
+== scripts/hygiene.sh
+no setup-specific names
+scripts/hygiene.sh -> exit 0
+== allow( count
+0
+allow count <= 10 -> exit 0
+== RUSTDOCFLAGS='-D warnings' cargo doc
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.70s
+   Generated /home/user/.cache/herdsman/target/.scratch/berth-impl-47/target/doc/shed/index.html and 3 other files
+cargo doc -> exit 0

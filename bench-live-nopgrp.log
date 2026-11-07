@@ -1,0 +1,14 @@
+
+running 1 test
+acp hibernate live: awake 486264 KiB in 7 processes
+acp hibernate live: hibernated 8064 KiB in 1 processes
+acp hibernate live: wake 2952 ms
+acp hibernate live: read
+> Remember the word lantern. Reply with just OK.
+OK
+> Which word did I ask you to remember? One word.
+lantern
+
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 16.37s
+
