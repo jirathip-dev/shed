@@ -10,7 +10,9 @@ reason on stderr) on the first that does not fit. Prompts:
 - "auth": the expired-login reply of claude-acp 0.100.0, then like "slow" (that adapter never ends it).
 - "silent": nothing, then like "slow".
 - "busy": a tool call with a progress update every 0.3 s for 2.4 s, then the reply "busy done".
-- "flood N": N one-character chunks, then the reply.
+- "flood N": N one-character chunks, then the reply. With `--canned` they are one pre-built write (no
+  per-update encoding) 0.2 s after the prompt (once shed has saved the turn's `working` state), so a
+  bench timing from the first chunk to the reply times shed's throughput rather than this agent.
 - "unknown": an update of a kind no ACP schema has, then the reply "still here".
 - "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
 - anything else: the reply "you said: <prompt>" ("[<model>] you said: …" after a switch from "fast").
@@ -35,6 +37,7 @@ MODEL = "fast"
 MCP = json.load(open(sys.argv[sys.argv.index("--mcp") + 1])) if "--mcp" in sys.argv else []
 CAPS = sys.argv[sys.argv.index("--mcp-caps") + 1].split(",") if "--mcp-caps" in sys.argv else []
 KEPT = []
+CANNED = "--canned" in sys.argv
 
 
 def options():
@@ -209,6 +212,13 @@ def main():
                         "status": "completed"})
                 update({"sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "busy done"}})
+                stop = "end_turn"
+            elif text.startswith("flood ") and CANNED:
+                chunk = {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "x"}}
+                line = json.dumps({"jsonrpc": "2.0", "method": "session/update",
+                                   "params": {"sessionId": SESSION, "update": chunk}}) + "\n"
+                time.sleep(0.2)
+                sys.stdout.write(line * int(text.split()[1]))
                 stop = "end_turn"
             elif text.startswith("flood "):
                 for _ in range(int(text.split()[1])):
