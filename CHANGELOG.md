@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The ACP path is faster per update: the bridge reads a text chunk straight from the agent's JSON instead of
+  the SDK's types, writes its notifications without a `Value` between, and the server parses each request line
+  once, straight into a request, and reads params without copying them.
+
 - The server runs on one tokio runtime: connections, streams and watchers are tasks instead of threads (20
   terminals and 50 `events` clients: 24 threads instead of 143). Events go to every client from one shared log,
   each client's new events written as one batch. The ACP bridge lost its two glue threads. The CLI and the
@@ -61,7 +65,9 @@ All notable changes to this project are documented here. The format follows
 - cooee: pin shed at this release for `run.resume`, `acp.model`, the `session` event and `TerminalInfo.session`,
   and `Event.replay` / `EmitParams.replay`.
 - The ACP throughput bench (`scripts/bench-acp.sh`, CI job `bench-acp`): 1,000 updates through the bridge at the
-  base and the head, failing over 10% slower, plus the head's 1,000-update replay time.
+  base and the head, failing over 10% slower, plus the head's 1,000-update replay time. Beside it a shed-only
+  bench: the fake agent writes 10,000 canned updates at once (`fake_acp.py --canned`), timed per update through
+  the bridge and the server, median of 9, also failing over 10% slower.
 
 - `shed watch [--label k=v] [--on M]`: a full-screen live list of the terminals (a state dot, name, fleet,
   issue and role, age; grouped by machine and fleet; an exited one stays dim for 60 s) beside a read-only

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# The ACP throughput bench (crates/shed/tests/acp_bench.rs: fake_acp.py streams 1,000 session/updates
-# through the bridge to a socket client) at the base and the head checkouts: the median of 5 interleaved
-# release runs each. Fails if the head is more than 10% slower. Then the head's 1,000-update session/load
-# replay and the hibernation bench (10 idle fake agents' RSS with hibernation off and on, failing unless
-# it is lower on; the wake time), reported only. Both sides run the head's bench and fake agent. Builds go to
-# $BENCH_TARGET/acp-{base,head}.
+# The ACP benches (crates/shed/tests/acp_bench.rs) at the base and the head checkouts, interleaved release
+# runs: the throughput bench (fake_acp.py streams 1,000 session/updates through the bridge to a socket
+# client), median of 5, and the shed-only bench (10,000 canned updates; ns per update through the bridge
+# and the server), median of 9. Fails if the head is more than 10% slower on either. Then the head's
+# 1,000-update session/load replay, reported only, and the hibernation bench (10 idle fake agents' RSS
+# with hibernation off and on, failing unless it is lower on; the wake time). Both sides run the head's
+# bench and fake agent. Builds go to $BENCH_TARGET/acp-{base,head}.
 set -euo pipefail
 base=$(cd "$1" && pwd) head=$(cd "$2" && pwd)
 target=${BENCH_TARGET:-$head/target}
@@ -15,23 +16,28 @@ run() {
   (cd "$1" && CARGO_TARGET_DIR="$target/acp-$2" cargo test -q -p shed --release --locked --test acp_bench \
     "$3" -- --ignored --exact --nocapture)
 }
-median() { printf '%s\n' "$@" | sort -n | sed -n 3p; }
-b=() h=()
-for side in base head; do run "${!side}" "$side" throughput >/dev/null; done
-for _ in 1 2 3 4 5; do
-  for side in base head; do
-    out=$(run "${!side}" "$side" throughput)
-    us=$(echo "$out" | sed -n 's/^acp throughput: \([0-9]*\) us$/\1/p')
-    [ -n "$us" ] || { echo "$out"; exit 1; }
-    echo "$side: acp throughput $us us"
-    if [ "$side" = base ]; then b+=("$us"); else h+=("$us"); fi
+median() { printf '%s\n' "${@:2}" | sort -n | sed -n "$(($1 / 2 + 1))p"; }
+# bench <test> <runs> <sed pattern for the number> <unit>: sets $slower when the head's median is over 110%.
+slower=0
+bench() {
+  local b=() h=() out n
+  for _ in $(seq "$2"); do
+    for side in base head; do
+      out=$(run "${!side}" "$side" "$1")
+      n=$(echo "$out" | sed -n "$3")
+      [ -n "$n" ] || { echo "$out"; exit 1; }
+      echo "$side: $1 $n $4"
+      if [ "$side" = base ]; then b+=("$n"); else h+=("$n"); fi
+    done
   done
-done
-mb=$(median "${b[@]}") mh=$(median "${h[@]}")
-echo "acp throughput median of 5: base $mb us, head $mh us (head/base $((mh * 100 / mb))%)"
+  local mb mh
+  mb=$(median "$2" "${b[@]}") mh=$(median "$2" "${h[@]}")
+  echo "acp $1 median of $2: base $mb $4, head $mh $4 (head/base $((mh * 100 / mb))%)"
+  [ $((mh * 10)) -le $((mb * 11)) ] || { echo "FAIL: $1: the head is more than 10% slower"; slower=1; }
+}
+for side in base head; do run "${!side}" "$side" throughput >/dev/null; done
+bench throughput 5 's/^acp throughput: \([0-9]*\) us$/\1/p' us
+bench shed_only 9 's/^acp shed-only: \([0-9]*\) ns per update.*/\1/p' ns
 run "$head" head replay | grep '^acp replay:'
 run "$head" head hibernate | grep '^acp hibernate'
-if [ $((mh * 10)) -gt $((mb * 11)) ]; then
-  echo "FAIL: the head is more than 10% slower than the base"
-  exit 1
-fi
+exit "$slower"

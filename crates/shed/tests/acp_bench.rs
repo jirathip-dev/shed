@@ -1,6 +1,6 @@
 //! The ACP benches (`scripts/bench-acp.sh` runs them): `fake_acp.py` streams 1,000 `session/update`s
-//! through the bridge to a socket client (at a PR's base and head), and a 1,000-update `session/load`
-//! replay and the hibernation bench (at the head).
+//! through the bridge to a socket client, and 10,000 canned ones that time shed alone (both at a PR's
+//! base and head), and a 1,000-update `session/load` replay and the hibernation bench (at the head).
 
 mod common;
 
@@ -40,7 +40,7 @@ fn start(dir: &Path, name: &str, extra: &[&str], fake: &[&str]) {
 }
 
 /// The events of terminals labelled `run=<name>` from now on.
-fn events(dir: &Path, name: &str) -> impl Iterator<Item = Value> {
+fn events(dir: &Path, name: &str) -> impl Iterator<Item = Value> + use<> {
     let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
     let params = EventsParams {
         labels: [("run".to_owned(), name.to_owned())].into(),
@@ -63,15 +63,22 @@ fn texts_until(events: &mut impl Iterator<Item = Value>, last: &str) -> usize {
     panic!("the events ended before {last}");
 }
 
-#[test]
-#[ignore = "a timing bench: scripts/bench-acp.sh"]
-fn throughput() {
-    let dir = temp_dir("acp-bench");
+/// The best of 3 turns of `updates` one-character chunks from fake agent `name` (started with `fake`),
+/// at a socket client, in ns to the reply. `count` reads the client's events until the reply and returns
+/// how many were text and when the time starts: the prompt's `sent`, or the first update.
+fn best_turn<E>(
+    name: &str,
+    fake: &[&str],
+    updates: usize,
+    events: impl Fn(&Path) -> E,
+    count: impl Fn(&mut E, Instant) -> (usize, Instant),
+) -> u128 {
+    let dir = temp_dir(&format!("acp-bench-{name}"));
     let _server = Server::start(&dir);
-    start(&dir, "b", &[], &[]);
+    start(&dir, name, &[], fake);
     let ready = [
         "wait",
-        "b",
+        name,
         "--output",
         "ACP session ready",
         "--timeout",
@@ -79,23 +86,64 @@ fn throughput() {
     ];
     shed(&dir, &ready);
     let mut client = Client::connect(&Paths::in_dir(&dir).socket).expect("connect");
-    // The best of 3 turns: from the prompt to its reply at a socket client.
-    let us = (0..3)
+    (0..3)
         .map(|_| {
-            let mut events = events(&dir, "b");
-            let text = frame(&Input::Prompt(format!("flood {UPDATES}")));
-            let start = Instant::now();
+            let mut events = events(&dir);
+            let text = frame(&Input::Prompt(format!("flood {updates}")));
+            let sent = Instant::now();
             let params = SendParams {
-                name: "b".to_owned(),
+                name: name.to_owned(),
                 text,
             };
             let _: Value = client.call(Method::Send, &params).expect("send");
-            assert_eq!(texts_until(&mut events, "reply"), UPDATES);
-            start.elapsed().as_micros()
+            let (texts, first) = count(&mut events, sent);
+            assert_eq!(texts, updates);
+            first.elapsed().as_nanos()
         })
         .min()
-        .unwrap_or_default();
-    println!("acp throughput: {us} us");
+        .unwrap_or_default()
+}
+
+#[test]
+#[ignore = "a timing bench: scripts/bench-acp.sh"]
+fn throughput() {
+    let count = |e: &mut _, sent| (texts_until(e, "reply"), sent);
+    let ns = best_turn("b", &[], UPDATES, |d| events(d, "b"), count);
+    println!("acp throughput: {} us", ns / 1_000);
+}
+
+/// Shed's own share: the agent writes 10,000 canned update lines at once and the client counts raw event
+/// lines without parsing them, so nearly all the time from the first update to the reply is the bridge
+/// and the server (the turn's start, before the agent's 0.2 s pause, is not timed).
+#[test]
+#[ignore = "a timing bench: scripts/bench-acp.sh"]
+fn shed_only() {
+    const CANNED: usize = 10_000;
+    let lines = |dir: &Path| {
+        let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
+        let labels = [("run".to_owned(), "c".to_owned())].into();
+        let params = EventsParams {
+            labels,
+            since: None,
+        };
+        let _: Value = client.call(Method::Events, &params).expect("events");
+        client.split().0.lines()
+    };
+    let count = |lines: &mut std::io::Lines<_>, sent| {
+        let (mut texts, mut first) = (0, sent);
+        for line in lines.map(|l| l.expect("an event line")) {
+            if line.contains(r#""event":"reply""#) {
+                return (texts, first);
+            }
+            if line.contains(r#""event":"text""#) {
+                texts += 1;
+                first = if texts == 1 { Instant::now() } else { first };
+            }
+        }
+        panic!("the events ended before the reply");
+    };
+    let ns = best_turn("c", &["--canned"], CANNED, lines, count);
+    println!("acp shed-only: {} ns per update", ns / (CANNED as u128 - 1));
 }
 
 #[test]

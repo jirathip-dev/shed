@@ -72,8 +72,9 @@ jobs:
       - name: fan-out bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-fanout.sh base .
 
-  # The ACP throughput bench at the PR's base and head on one runner, median of 5 each; fails if the head
-  # is more than 10% slower. Then the head's session/load replay time.
+  # The ACP benches at the PR's base and head on one runner: throughput (median of 5) and shed-only (canned
+  # updates, median of 9); fails if the head is more than 10% slower on either. Then the head's
+  # session/load replay time.
   bench-acp:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
