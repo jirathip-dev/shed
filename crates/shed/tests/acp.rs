@@ -774,9 +774,9 @@ fn each_change_of_the_slash_commands_is_one_session_event() {
     assert_eq!(ok(&dir, &["read", "k"]), "> commands\ncommands sent\n");
 }
 
-/// A server whose idle ACP agents hibernate after a second.
+/// A server whose idle ACP agents hibernate after 2 s (long enough for a `wait` to see the state before).
 fn sleepy_server(dir: &Path) -> Server {
-    Server::with_env(dir, "3600", &[("SHED_ACP_HIBERNATE_AFTER", "1")])
+    Server::with_env(dir, "3600", &[("SHED_ACP_HIBERNATE_AFTER", "2")])
 }
 
 /// The live processes of terminal `name`: its bridge, plus the agent's while it is awake.
@@ -793,9 +793,15 @@ fn until(dir: &Path, name: &str, state: &str) {
     assert_eq!(ok(dir, &wait), format!("{name} {state}\n"));
 }
 
+/// Sends `name` its first prompt and waits for the reply: a session hibernates only once it has a turn.
+fn first_turn(dir: &Path, name: &str) {
+    ok(dir, &["send", name, "hi"]);
+    until(dir, name, "done");
+}
+
 /// Twice the hibernation delay, to show an agent that stays awake.
 fn past_the_delay() {
-    std::thread::sleep(std::time::Duration::from_millis(2500));
+    std::thread::sleep(std::time::Duration::from_millis(4500));
 }
 
 #[test]
@@ -804,6 +810,7 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
     let history = dir.join("history.jsonl");
     let _server = sleepy_server(&dir);
     start_with_history(&dir, "h", &history, &[]);
+    first_turn(&dir, "h");
     until(&dir, "h", "hibernated");
     assert_eq!(processes(&dir, "h"), 1, "the agent is gone");
     assert_eq!(reported(&dir, "h"), json!({"state": "hibernated"}));
@@ -880,6 +887,7 @@ fn sends_during_a_wake_are_delivered_in_order() {
     let history = dir.join("history.jsonl");
     let _server = sleepy_server(&dir);
     start_with_history(&dir, "h", &history, &[]);
+    first_turn(&dir, "h");
     until(&dir, "h", "hibernated");
     // The model switch wakes the agent; both prompts queue behind it.
     ok(&dir, &["model", "h", "smart"]);
@@ -888,28 +896,40 @@ fn sends_during_a_wake_are_delivered_in_order() {
     events_until(&dir, "h", |e| {
         e["event"] == "reply" && e["text"] == "[smart] you said: two"
     });
+    // The second prompt may reach the agent before or after the first reply; the order holds either way.
+    let read = ok(&dir, &["read", "h"]);
+    let (prompts, replies): (Vec<&str>, Vec<&str>) =
+        read.lines().partition(|l| l.starts_with("> "));
+    assert_eq!(prompts, ["> hi", "> one", "> two"], "{read}");
     assert_eq!(
-        ok(&dir, &["read", "h"]),
-        "> one\n> two\n[smart] you said: one\n[smart] you said: two\n"
+        replies,
+        [
+            "you said: hi",
+            "[smart] you said: one",
+            "[smart] you said: two"
+        ],
+        "{read}"
     );
 }
 
 #[test]
-fn no_hibernation_without_load_session_or_with_no_hibernate() {
+fn no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn() {
     let dir = temp_dir("acp-awake");
-    let history = dir.join("history.jsonl");
     let _server = sleepy_server(&dir);
     start_fake(&dir, "a", "fake");
-    start_with_history(&dir, "b", &history, &["--no-hibernate"]);
+    start_with_history(&dir, "b", &dir.join("b.jsonl"), &["--no-hibernate"]);
+    start_with_history(&dir, "c", &dir.join("c.jsonl"), &[]);
     for name in ["a", "b"] {
-        ok(&dir, &["send", name, "hi"]);
-        until(&dir, name, "done");
+        first_turn(&dir, name);
     }
     past_the_delay();
     for name in ["a", "b"] {
         assert_eq!(reported(&dir, name)["state"], "done", "{name}");
         assert_eq!(processes(&dir, name), 2, "{name}");
     }
+    // A session with no turn yet stays awake: an agent may have nothing to load for it.
+    assert_ne!(reported(&dir, "c")["state"], "hibernated");
+    assert_eq!(processes(&dir, "c"), 2);
 }
 
 #[test]
@@ -922,11 +942,15 @@ fn mcp_secrets_stay_in_memory_through_a_hibernation() {
     let file = mcp_file("acp-hibernate-mcp-in", &servers);
     let _server = sleepy_server(&dir);
     start_with_mcp(&dir, "m", &file, &[], &["--history", history]);
+    first_turn(&dir, "m");
     until(&dir, "m", "hibernated");
     // The fake agent exits unless session/load brings the same servers, secret and all.
-    ok(&dir, &["send", "m", "hi"]);
+    ok(&dir, &["send", "m", "again"]);
     until(&dir, "m", "done");
-    assert_eq!(ok(&dir, &["read", "m"]), "> hi\nyou said: hi\n");
-    let events = events_until(&dir, "mcp", |e| e["event"] == "reply");
+    let read = ok(&dir, &["read", "m"]);
+    assert_eq!(read, "> hi\nyou said: hi\n> again\nyou said: again\n");
+    let events = events_until(&dir, "mcp", |e| {
+        e["event"] == "reply" && e["text"] == "you said: again"
+    });
     assert_hidden(&dir, events.join("\n") + &ok(&dir, &["get", "m"]));
 }

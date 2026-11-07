@@ -133,7 +133,11 @@ fn rss(dir: &Path, name: &str) -> (u64, usize) {
     let info: Value = serde_json::from_str(&out(dir, &["get", name])).expect("JSON");
     let pid = i32::try_from(info["pid"].as_i64().expect("a pid")).expect("a pid");
     let procs = proctree::system().list().expect("the process table");
-    let usage = proctree::usage(&proctree::tree(&procs, pid, &Default::default()));
+    let usage = proctree::usage(&proctree::tree(
+        &procs,
+        pid,
+        &std::collections::BTreeSet::new(),
+    ));
     (usage.rss_bytes / 1024, usage.processes)
 }
 

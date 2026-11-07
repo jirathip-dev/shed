@@ -551,6 +551,7 @@ async fn drive(
         let why = format!("MCP server {name}: the agent takes no {kind} servers (mcpCapabilities)");
         return Err(acp_error(why));
     }
+    let resumed = resume.is_some();
     let options = match resume {
         Some(_) if !init.agent_capabilities.load_session => {
             let why = "the agent cannot resume a session (no loadSession)";
@@ -586,7 +587,8 @@ async fn drive(
         s.input(input)?;
     }
     let idle = std::env::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
-    // Only an agent that can load its session again hibernates.
+    // Only an agent that can load its session again hibernates, once the session has a turn to load
+    // (claude-agent-acp keeps no session before its first prompt).
     let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
     let mut typing = true;
     loop {
@@ -606,7 +608,9 @@ async fn drive(
                     // A request waits for `approve`.
                 } else if !s.prompts.is_empty() && quiet.as_secs() >= idle {
                     s.fail("no response".to_owned())?;
-                } else if s.prompts.is_empty() && typing && sleep_after.is_some_and(|d| quiet >= d) {
+                } else if s.prompts.is_empty() && typing && (resumed || s.next > 0)
+                    && sleep_after.is_some_and(|d| quiet >= d)
+                {
                     return Ok(Some(s));
                 }
             }
@@ -734,7 +738,7 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 /// `session/new`, both with the MCP servers in `$SHED_ACP_MCP`, then prompts, updates and permission
 /// requests until the agent exits. Returns the agent's exit code.
 ///
-/// After `$SHED_ACP_HIBERNATE_AFTER` idle seconds (see [`hibernate_after`]) it stops the agent's process
+/// After `$SHED_ACP_HIBERNATE_AFTER` idle seconds (default 600, `0` never) it stops the agent's process
 /// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
 /// starts the agent again, loads the session and then delivers it.
 ///
