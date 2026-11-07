@@ -324,7 +324,7 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle."
             }
             Self::Ls => {
                 "List terminals, by name; `labels` keeps those that carry every given label."
@@ -439,6 +439,9 @@ pub struct RunParams {
     /// `{type: "http" | "sse", name, url, headers}`. Kept in memory only; send them again to resume.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<Value>,
+    /// ACP: never hibernate the agent when idle.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_hibernate: bool,
 }
 
 /// `ls` params.

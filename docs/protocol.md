@@ -34,7 +34,7 @@ The handshake; must come first on every connection. Another product or version i
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build"}}
@@ -225,7 +225,7 @@ Switch an ACP terminal's model to one of its `session.models`: its bridge asks t
 
 An event names its terminal, carries its labels and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
 
-An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`) and `session` (the session is ready, or its model or slash commands changed). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new.
+An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`) and `session` (the session is ready, or its model or slash commands changed). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
 
 ```json
 {"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"event":"started"}

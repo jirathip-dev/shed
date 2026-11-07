@@ -344,6 +344,9 @@ struct RunArgs {
     /// with `--resume`.
     #[arg(long, value_name = "FILE", requires = "acp")]
     mcp: Option<PathBuf>,
+    /// ACP: keep the agent running when idle instead of hibernating it.
+    #[arg(long, requires = "acp")]
+    no_hibernate: bool,
     /// The program and its arguments.
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
@@ -356,7 +359,7 @@ struct WaitArgs {
     name: String,
     /// States that end the wait.
     #[arg(long, num_args = 1.., value_name = "STATE",
-          value_parser = ["working", "blocked", "done", "error", "idle"])]
+          value_parser = ["working", "blocked", "done", "error", "idle", "hibernated"])]
     until: Vec<String>,
     /// A pattern (`.`, `[…]`, `\d \w \s`, `* + ?`, `^ $`) that ends the wait when a screen line matches.
     #[arg(long, value_name = "RE")]
@@ -523,6 +526,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         acp: args.acp,
         resume: args.resume,
         mcp_servers,
+        no_hibernate: args.no_hibernate,
     };
     let mut client = server.connect(Some(args.autostart))?;
     let info: TerminalInfo = client.call(Method::Run, &params)?;

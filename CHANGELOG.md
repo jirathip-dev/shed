@@ -39,6 +39,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- ACP agents hibernate when idle: after `$SHED_ACP_HIBERNATE_AFTER` seconds (default 600) with no turn and no
+  waiting permission request, shed stops the agent's processes and reports `hibernated`; the next send starts it
+  again and loads its session (`session/load`) before delivering it. `run --acp … --no-hibernate` keeps one
+  running. Ten idle fake agents: 197,248 KiB awake, 77,568 KiB hibernated; claude-agent-acp: 502,700 KiB to
+  8,064 KiB, waking in about 2 s.
+
 - `shed run --acp … --mcp <file.json>` (the `run` method's `mcp_servers`): MCP servers in ACP's shapes (stdio,
   `http`, `sse`) passed to the agent in `session/new` and `session/load`. `http` and `sse` need the agent's
   `mcpCapabilities`, else the terminal ends as `error` naming the server; an unknown or malformed entry is
