@@ -20,13 +20,13 @@ use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
-    AvailableCommandInput, CancelNotification, ContentBlock, Implementation, InitializeRequest,
-    LoadSessionRequest, McpServer, McpServerHttp, McpServerSse, NewSessionRequest, PromptRequest,
-    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionConfigKind as Kind, SessionConfigOption,
-    SessionConfigOptionCategory as Category, SessionConfigOptionValue, SessionConfigSelectOption,
-    SessionConfigSelectOptions as Choices, SessionId, SessionNotification, SessionUpdate,
-    SetSessionConfigOptionRequest, TextContent,
+    AvailableCommandInput, CancelNotification, ContentBlock, ContentChunk, Implementation,
+    InitializeRequest, LoadSessionRequest, McpServer, McpServerHttp, McpServerSse,
+    NewSessionRequest, PromptRequest, PromptResponse, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionConfigKind as Kind, SessionConfigOption, SessionConfigOptionCategory as Category,
+    SessionConfigOptionValue, SessionConfigSelectOption, SessionConfigSelectOptions as Choices,
+    SessionId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::v1::{ConnectionTo, Responder};
 use agent_client_protocol::{Agent, ErrorCode, JsonRpcMessage as _, Lines, UntypedMessage};
@@ -165,6 +165,18 @@ enum FromAgent {
     Prompt(u64, AcpResult<PromptResponse>),
     /// The config options after `session/set_config_option`.
     Config(AcpResult<Vec<SessionConfigOption>>),
+}
+
+/// A `session/update`'s update: a text chunk (most of a turn) read straight from the JSON, else typed.
+fn update(params: &Value) -> Result<Box<SessionUpdate>, String> {
+    let u = &params["update"];
+    let chunk = u["sessionUpdate"] == "agent_message_chunk" && u["content"]["type"] == "text";
+    if let Some(text) = u["content"]["text"].as_str().filter(|_| chunk) {
+        let chunk = ContentChunk::new(text.into());
+        return Ok(Box::new(SessionUpdate::AgentMessageChunk(chunk)));
+    }
+    let n = SessionNotification::parse_message("session/update", params);
+    n.map(|n| Box::new(n.update)).map_err(|e| e.to_string())
 }
 
 /// What the session task hands the writer task, in order.
@@ -822,9 +834,7 @@ fn run(
             .on_receive_notification(
                 async move |n: UntypedMessage, _| {
                     if SessionNotification::matches_method(n.method()) {
-                        let n = SessionNotification::parse_message(n.method(), n.params());
-                        let update = n.map(|n| Box::new(n.update)).map_err(|e| e.to_string());
-                        let _ = updates.send(FromAgent::Update(update));
+                        let _ = updates.send(FromAgent::Update(update(n.params())));
                     }
                     Ok(())
                 },
@@ -873,6 +883,25 @@ mod tests {
             render(&jsonl.join("\n")),
             "> fix it\n[tool] Edit (completed)\n[tool] Run (pending)\nDone?[2J"
         );
+    }
+
+    /// A text chunk read straight from the JSON is the update the SDK makes of it; any other goes
+    /// through the SDK, and one it does not know is an error.
+    #[test]
+    fn a_text_chunk_skips_the_sdk_parse_and_matches_it() {
+        let params = |update: Value| json!({"sessionId": "s", "update": update});
+        let text = params(json!({"sessionUpdate": "agent_message_chunk",
+            "content": {"type": "text", "text": "hi"}}));
+        let typed = SessionNotification::parse_message("session/update", &text).unwrap();
+        assert_eq!(update(&text), Ok(Box::new(typed.update)));
+        let image = params(json!({"sessionUpdate": "agent_message_chunk",
+            "content": {"type": "image", "data": "", "mimeType": "image/png"}}));
+        let Ok(image) = update(&image).map(|u| *u) else {
+            panic!("an image chunk parses");
+        };
+        assert!(matches!(image, SessionUpdate::AgentMessageChunk(c)
+            if matches!(c.content, ContentBlock::Image(_))));
+        assert!(update(&params(json!({"sessionUpdate": "brand_new_kind"}))).is_err());
     }
 
     #[test]
