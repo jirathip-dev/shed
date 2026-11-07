@@ -352,27 +352,17 @@ async fn connection(registry: Shared, stream: tokio::net::UnixStream) {
 
 /// The response to one request line; `None` for a notification.
 async fn respond(registry: &Shared, session: &mut Session, line: &str) -> Option<Response> {
-    let value: Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(e) => {
-            return Some(Response::err(
-                Value::Null,
-                RpcError::new(ErrorCode::Parse, e),
-            ));
-        }
-    };
-    let id = value.get("id").cloned().unwrap_or(Value::Null);
-    let request: Request = match serde_json::from_value::<Request>(value) {
+    let request = match serde_json::from_str::<Request>(line) {
         Ok(r) if r.jsonrpc == proto::JSONRPC => r,
-        Ok(_) => {
-            let e = RpcError::new(ErrorCode::InvalidRequest, "jsonrpc must be \"2.0\"");
-            return Some(Response::err(id, e));
-        }
-        Err(e) => {
-            return Some(Response::err(
-                id,
-                RpcError::new(ErrorCode::InvalidRequest, e),
-            ));
+        r => {
+            let value = serde_json::from_str::<Value>(line);
+            let id = value.as_ref().ok().and_then(|v| v.get("id").cloned());
+            let e = match (value, r) {
+                (Err(e), _) => RpcError::new(ErrorCode::Parse, e),
+                (_, Ok(_)) => RpcError::new(ErrorCode::InvalidRequest, "jsonrpc must be \"2.0\""),
+                (_, Err(e)) => RpcError::new(ErrorCode::InvalidRequest, e),
+            };
+            return Some(Response::err(id.unwrap_or(Value::Null), e));
         }
     };
     let result = dispatch(registry, session, &request).await;
@@ -384,11 +374,11 @@ async fn respond(registry: &Shared, session: &mut Session, line: &str) -> Option
 }
 
 fn params<T: DeserializeOwned>(request: &Request) -> Result<T, RpcError> {
-    let p = match &request.params {
-        Value::Null => Value::Object(serde_json::Map::new()),
-        p => p.clone(),
-    };
-    serde_json::from_value(p).map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))
+    let empty = Value::Object(serde_json::Map::new());
+    let p = Some(&request.params)
+        .filter(|p| !p.is_null())
+        .unwrap_or(&empty);
+    T::deserialize(p).map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))
 }
 
 fn json<T: Serialize>(value: &T) -> Result<Value, RpcError> {
@@ -443,6 +433,9 @@ async fn dispatch(
         return json(&reg.machine_stats(now, p.since));
     }
     let mut reg = lock(registry);
+    if method == Method::Emit {
+        return reg.emit(params(request)?).map(|()| empty());
+    }
     reg.refresh()?;
     match method {
         Method::Run => {
@@ -492,9 +485,8 @@ async fn dispatch(
             Ok(empty())
         }
         Method::State => json(&reg.state(params(request)?)?),
-        Method::Emit => reg.emit(params(request)?).map(|()| empty()),
         Method::Model => reg.model(params(request)?).map(|()| empty()),
-        Method::Hello | Method::Kill | Method::Wait | Method::MachineStats => {
+        Method::Hello | Method::Kill | Method::Wait | Method::MachineStats | Method::Emit => {
             Err(RpcError::new(ErrorCode::Internal, "handled above"))
         }
     }
@@ -641,10 +633,13 @@ impl Client {
 /// # Errors
 /// [`Error::Json`] when `params` cannot be serialised.
 pub fn notification<P: Serialize>(method: Method, params: &P) -> Result<Vec<u8>, Error> {
-    let mut request = Request::new(0, method, serde_json::to_value(params)?);
-    request.id = None;
-    let mut line = serde_json::to_vec(&request)?;
-    line.push(b'\n');
+    let head = format!(
+        r#"{{"jsonrpc":"2.0","method":"{}","params":"#,
+        method.name()
+    );
+    let mut line = head.into_bytes();
+    serde_json::to_writer(&mut line, params)?;
+    line.extend(b"}\n");
     Ok(line)
 }
 

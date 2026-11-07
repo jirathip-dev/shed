@@ -11,6 +11,7 @@ reason on stderr) on the first that does not fit. Prompts:
 - "silent": nothing, then like "slow".
 - "busy": a tool call with a progress update every 0.3 s for 2.4 s, then the reply "busy done".
 - "flood N": N one-character chunks, then the reply.
+- "blob N": the same N chunks as one pre-built write (no per-update encoding), then the reply.
 - "unknown": an update of a kind no ACP schema has, then the reply "still here".
 - "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
 - anything else: the reply "you said: <prompt>" ("[<model>] you said: …" after a switch from "fast").
@@ -214,6 +215,12 @@ def main():
                 for _ in range(int(text.split()[1])):
                     update({"sessionUpdate": "agent_message_chunk",
                             "content": {"type": "text", "text": "x"}})
+                stop = "end_turn"
+            elif text.startswith("blob "):
+                chunk = {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "x"}}
+                line = json.dumps({"jsonrpc": "2.0", "method": "session/update",
+                                   "params": {"sessionId": SESSION, "update": chunk}}) + "\n"
+                sys.stdout.write(line * int(text.split()[1]))
                 stop = "end_turn"
             elif text == "commands":
                 plan = {"name": "plan", "description": "Make a plan"}

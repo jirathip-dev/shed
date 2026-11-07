@@ -29,8 +29,9 @@ use agent_client_protocol::v1::schema::{
     SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::v1::{ConnectionTo, Responder};
-use agent_client_protocol::{Agent, ErrorCode, JsonRpcMessage as _, Lines, UntypedMessage};
+use agent_client_protocol::{Agent, ErrorCode, Lines};
 use futures::{sink, stream};
+use serde::de::IgnoredAny;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shed_proto::{
@@ -165,6 +166,22 @@ enum FromAgent {
     Prompt(u64, AcpResult<PromptResponse>),
     /// The config options after `session/set_config_option`.
     Config(AcpResult<Vec<SessionConfigOption>>),
+}
+
+/// The update of a `session/update` line, or why it does not parse; `None` for any other line.
+fn update(line: &str) -> Option<Result<Box<SessionUpdate>, String>> {
+    #[derive(Deserialize)]
+    struct Note<P> {
+        method: String,
+        params: P,
+    }
+    match serde_json::from_str::<Note<SessionNotification>>(line) {
+        Ok(n) => (n.method == "session/update").then(|| Ok(Box::new(n.params.update))),
+        Err(e) => {
+            let n: Note<IgnoredAny> = serde_json::from_str(line).ok()?;
+            (n.method == "session/update").then(|| Err(e.to_string()))
+        }
+    }
 }
 
 /// What the session task hands the writer task, in order.
@@ -376,9 +393,13 @@ impl Session {
         match u {
             SessionUpdate::AgentMessageChunk(c) => {
                 if let Some(chunk) = text(c.content) {
+                    // A new match overlaps the chunk, so the text before it needs no second look.
+                    let from = self
+                        .reply
+                        .floor_char_boundary(self.reply.len().saturating_sub(64));
                     self.reply.push_str(&chunk);
                     self.emit(EventKind::Text { text: chunk });
-                    if !self.prompts.is_empty() && self.auth(&self.reply).is_some() {
+                    if !self.prompts.is_empty() && self.auth(&self.reply[from..]).is_some() {
                         return self.fail(self.reply.clone());
                     }
                 }
@@ -613,6 +634,7 @@ impl Writer {
                             EventKind::Approved { option } => {
                                 clean(&format!("[approved] {option}"))
                             }
+                            EventKind::Text { .. } => String::new(),
                             _ => render(&line),
                         };
                         let params = EmitParams { name, kind, replay };
@@ -806,30 +828,28 @@ fn run(
         let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
             return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
         };
-        let incoming = stream::unfold(BufReader::new(stdout).lines(), async |mut lines| {
-            Some((lines.next_line().await.transpose()?, lines))
+        let (back, from_agent) = unbounded_channel();
+        // `session/update`s go straight to the session task; the SDK gets every other line.
+        let lines = (BufReader::new(stdout).lines(), back.clone());
+        let incoming = stream::unfold(lines, async |(mut lines, updates)| {
+            loop {
+                match lines.next_line().await.transpose()? {
+                    Ok(line) if let Some(u) = update(&line) => {
+                        drop(updates.send(FromAgent::Update(u)))
+                    }
+                    line => return Some((line, (lines, updates))),
+                }
+            }
         });
         let outgoing = sink::unfold(stdin, async |mut stdin, line: String| {
             stdin.write_all(format!("{line}\n").as_bytes()).await?;
             stdin.flush().await?;
             Ok::<_, io::Error>(stdin)
         });
-        let (back, from_agent) = unbounded_channel();
-        let (updates, asks) = (back.clone(), back.clone());
+        let asks = back.clone();
         agent_client_protocol::Client
             .v1()
             .name("shed")
-            .on_receive_notification(
-                async move |n: UntypedMessage, _| {
-                    if SessionNotification::matches_method(n.method()) {
-                        let n = SessionNotification::parse_message(n.method(), n.params());
-                        let update = n.map(|n| Box::new(n.update)).map_err(|e| e.to_string());
-                        let _ = updates.send(FromAgent::Update(update));
-                    }
-                    Ok(())
-                },
-                agent_client_protocol::on_receive_notification!(),
-            )
             .on_receive_request(
                 async move |r: RequestPermissionRequest, asked, _| {
                     let _ = asks.send(FromAgent::Permission(Box::new(r), asked));

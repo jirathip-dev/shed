@@ -1,6 +1,7 @@
 //! The ACP benches (`scripts/bench-acp.sh` runs them): `fake_acp.py` streams 1,000 `session/update`s
-//! through the bridge to a socket client (at a PR's base and head), and a 1,000-update `session/load`
-//! replay (at the head).
+//! through the bridge to a socket client (at a PR's base and head); the shed-only bench, where it writes
+//! 10,000 pre-built ones at once so nearly all the time is shed's (at the base and head); and a
+//! 1,000-update `session/load` replay (at the head).
 
 mod common;
 
@@ -62,12 +63,9 @@ fn texts_until(events: &mut impl Iterator<Item = Value>, last: &str) -> usize {
     panic!("the events ended before {last}");
 }
 
-#[test]
-#[ignore = "a timing bench: scripts/bench-acp.sh"]
-fn throughput() {
-    let dir = temp_dir("acp-bench");
-    let _server = Server::start(&dir);
-    start(&dir, "b", &[], &[]);
+/// Starts the fake agent as terminal `b` and waits for its session; a client to send prompts with.
+fn ready(dir: &Path) -> Client {
+    start(dir, "b", &[], &[]);
     let ready = [
         "wait",
         "b",
@@ -76,25 +74,70 @@ fn throughput() {
         "--timeout",
         "10",
     ];
-    shed(&dir, &ready);
-    let mut client = Client::connect(&Paths::in_dir(&dir).socket).expect("connect");
+    shed(dir, &ready);
+    Client::connect(&Paths::in_dir(dir).socket).expect("connect")
+}
+
+fn send(client: &mut Client, input: &Input) {
+    let params = SendParams {
+        name: "b".to_owned(),
+        text: frame(input),
+    };
+    let _: Value = client.call(Method::Send, &params).expect("send");
+}
+
+#[test]
+#[ignore = "a timing bench: scripts/bench-acp.sh"]
+fn throughput() {
+    let dir = temp_dir("acp-bench");
+    let _server = Server::start(&dir);
+    let mut client = ready(&dir);
     // The best of 3 turns: from the prompt to its reply at a socket client.
     let us = (0..3)
         .map(|_| {
             let mut events = events(&dir, "b");
-            let text = frame(&Input::Prompt(format!("flood {UPDATES}")));
             let start = Instant::now();
-            let params = SendParams {
-                name: "b".to_owned(),
-                text,
-            };
-            let _: Value = client.call(Method::Send, &params).expect("send");
+            send(&mut client, &Input::Prompt(format!("flood {UPDATES}")));
             assert_eq!(texts_until(&mut events, "reply"), UPDATES);
             start.elapsed().as_micros()
         })
         .min()
         .unwrap_or_default();
     println!("acp throughput: {us} us");
+}
+
+/// Updates per shed-only turn.
+const BLOB: u128 = 10_000;
+
+/// The shed-only bench: the agent writes `BLOB` pre-built updates at once; the median of 11 turns, from
+/// the prompt to its reply at a socket client that counts the text events without parsing them.
+#[test]
+#[ignore = "a timing bench: scripts/bench-acp.sh"]
+fn shed_only() {
+    let dir = temp_dir("acp-shed-only");
+    let _server = Server::start(&dir);
+    let mut client = ready(&dir);
+    let mut ns: Vec<u128> = (0..11)
+        .map(|_| {
+            let mut sub = Client::connect(&Paths::in_dir(&dir).socket).expect("connect");
+            let params = EventsParams {
+                labels: [("run".to_owned(), "b".to_owned())].into(),
+                since: None,
+            };
+            let _: Value = sub.call(Method::Events, &params).expect("events");
+            let mut lines = sub.split().0.lines().map(|l| l.expect("an event line"));
+            let start = Instant::now();
+            send(&mut client, &Input::Prompt(format!("blob {BLOB}")));
+            let texts = lines
+                .by_ref()
+                .take_while(|l| !l.contains(r#""event":"reply""#));
+            let texts = texts.filter(|l| l.contains(r#""event":"text""#)).count();
+            assert_eq!(texts as u128, BLOB);
+            start.elapsed().as_nanos() / BLOB
+        })
+        .collect();
+    ns.sort_unstable();
+    println!("acp shed-only: {} ns per update", ns[ns.len() / 2]);
 }
 
 #[test]
