@@ -166,7 +166,8 @@ def main():
             check(params.get("sessionId") == SESSION, "session/load: sessionId")
             check(str(params.get("cwd", "")).startswith("/"), "session/load: absolute cwd")
             check_mcp("session/load", params.get("mcpServers"))
-            with open(HISTORY) as f:
+            with open(HISTORY, "a+") as f:
+                f.seek(0)
                 for line in f:
                     send({"method": "session/update",
                           "params": {"sessionId": SESSION, "update": json.loads(line)}})

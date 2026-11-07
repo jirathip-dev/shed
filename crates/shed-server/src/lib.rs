@@ -515,7 +515,7 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
     if let Some(s) = p
         .until
         .iter()
-        .find(|s| *s != "idle" && !STATES.contains(&s.as_str()))
+        .find(|s| !["idle", "hibernated"].contains(&s.as_str()) && !STATES.contains(&s.as_str()))
     {
         return Err(bad(&format!("unknown state {s:?}")));
     }

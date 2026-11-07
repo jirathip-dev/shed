@@ -203,6 +203,7 @@ fn run_params() -> Value {
         acp: None,
         resume: None,
         mcp_servers: Vec::new(),
+        no_hibernate: false,
     })
     .unwrap()
 }
@@ -438,7 +439,8 @@ fn markdown() -> String {
          `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer \
          with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`) and `session` (the \
          session is ready, or its model or slash commands changed). A resumed session's history (`run` with `resume`) comes first, \
-         its events marked `\"replay\": true` so a client does not count them as new.\n\n```json\n",
+         its events marked `\"replay\": true` so a client does not count them as new. An idle agent hibernates \
+         (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.\n\n```json\n",
     );
     for event in events() {
         writeln!(md, "{}", line(&event)).unwrap();

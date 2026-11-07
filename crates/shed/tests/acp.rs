@@ -14,6 +14,7 @@ use std::process::{Command, Output};
 
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
+use shed_core::proctree::{self, ProcessTable as _};
 use shed_server::proto::{EventsParams, Method};
 use shed_server::{Client, Paths};
 
@@ -671,10 +672,15 @@ fn mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden() {
     for name in ["m1", "m2"] {
         shown.push_str(&ok(&dir, &["get", name]));
     }
-    shown.push_str(&ok(&dir, &["ls", "--json"]));
+    assert_hidden(&dir, shown);
+}
+
+/// `SECRET` is in neither `shown` (which has the redacted servers) nor `ls`, nor any file under `dir`.
+fn assert_hidden(dir: &Path, mut shown: String) {
+    shown.push_str(&ok(dir, &["ls", "--json"]));
     assert!(shown.contains("TOKEN") && shown.contains("***"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");
-    let mut dirs = vec![dir.clone()];
+    let mut dirs = vec![dir.to_owned()];
     while let Some(d) = dirs.pop() {
         for entry in std::fs::read_dir(&d).expect("read the state dir") {
             let path = entry.expect("an entry").path();
@@ -766,4 +772,161 @@ fn each_change_of_the_slash_commands_is_one_session_event() {
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "k"])).expect("JSON");
     assert_eq!(info["session"]["commands"], both);
     assert_eq!(ok(&dir, &["read", "k"]), "> commands\ncommands sent\n");
+}
+
+/// A server whose idle ACP agents hibernate after a second.
+fn sleepy_server(dir: &Path) -> Server {
+    Server::with_env(dir, "3600", &[("SHED_ACP_HIBERNATE_AFTER", "1")])
+}
+
+/// The live processes of terminal `name`: its bridge, plus the agent's while it is awake.
+fn processes(dir: &Path, name: &str) -> usize {
+    let info: Value = serde_json::from_str(&ok(dir, &["get", name])).expect("JSON");
+    let pid = i32::try_from(info["pid"].as_i64().expect("a pid")).expect("a pid");
+    let procs = proctree::system().list().expect("the process table");
+    proctree::tree(&procs, pid, &std::collections::BTreeSet::new()).len()
+}
+
+/// Waits for `state` of terminal `name`.
+fn until(dir: &Path, name: &str, state: &str) {
+    let wait = ["wait", name, "--until", state, "--timeout", "10"];
+    assert_eq!(ok(dir, &wait), format!("{name} {state}\n"));
+}
+
+/// Twice the hibernation delay, to show an agent that stays awake.
+fn past_the_delay() {
+    std::thread::sleep(std::time::Duration::from_millis(2500));
+}
+
+#[test]
+fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
+    let dir = temp_dir("acp-hibernate");
+    let history = dir.join("history.jsonl");
+    let _server = sleepy_server(&dir);
+    start_with_history(&dir, "h", &history, &[]);
+    until(&dir, "h", "hibernated");
+    assert_eq!(processes(&dir, "h"), 1, "the agent is gone");
+    assert_eq!(reported(&dir, "h"), json!({"state": "hibernated"}));
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "h"])).expect("JSON");
+    assert_eq!(
+        (&info["state"], &info["session"]["id"]),
+        (&json!("running"), &json!("sess-1"))
+    );
+    // A turn that hears nothing for longer than the delay, and a permission request, keep it awake.
+    ok(&dir, &["send", "h", "slow"]);
+    past_the_delay();
+    assert_eq!(reported(&dir, "h")["state"], "working");
+    assert_eq!(processes(&dir, "h"), 2);
+    ok(&dir, &["cancel", "h"]);
+    until(&dir, "h", "done");
+    ok(&dir, &["send", "h", "tool"]);
+    until(&dir, "h", "blocked");
+    past_the_delay();
+    assert_eq!(reported(&dir, "h")["state"], "blocked");
+    assert_eq!(processes(&dir, "h"), 2);
+    ok(&dir, &["approve", "h", "allow-once"]);
+    until(&dir, "h", "done");
+    until(&dir, "h", "hibernated");
+    assert_eq!(processes(&dir, "h"), 1);
+}
+
+#[test]
+fn a_prompt_wakes_the_agent_and_its_history_is_not_repeated() {
+    let dir = temp_dir("acp-wake");
+    let history = dir.join("history.jsonl");
+    let _server = sleepy_server(&dir);
+    start_with_history(&dir, "h", &history, &[]);
+    ok(&dir, &["send", "h", "hi"]);
+    until(&dir, "h", "done");
+    until(&dir, "h", "hibernated");
+    ok(&dir, &["send", "h", "more"]);
+    until(&dir, "h", "done");
+    assert_eq!(processes(&dir, "h"), 2, "awake again");
+    assert_eq!(
+        ok(&dir, &["read", "h"]),
+        "> hi\nyou said: hi\n> more\nyou said: more\n"
+    );
+    let events = events_until(&dir, "h", |e| {
+        e["event"] == "reply" && e["text"] == "you said: more"
+    });
+    let acp: Vec<Value> = events
+        .iter()
+        .map(|l| serde_json::from_str::<Value>(l).expect("JSON"))
+        .filter(|e| ["turn", "reply"].contains(&e["event"].as_str().unwrap_or_default()))
+        .map(|e| {
+            json!([
+                e["event"],
+                e.get("prompt").or(e.get("text")),
+                e.get("replay")
+            ])
+        })
+        .collect();
+    assert_eq!(
+        acp,
+        [
+            json!(["turn", "hi", null]),
+            json!(["reply", "you said: hi", null]),
+            json!(["turn", "hi", true]),
+            json!(["reply", "you said: hi", true]),
+            json!(["turn", "more", null]),
+            json!(["reply", "you said: more", null]),
+        ]
+    );
+}
+
+#[test]
+fn sends_during_a_wake_are_delivered_in_order() {
+    let dir = temp_dir("acp-wake-order");
+    let history = dir.join("history.jsonl");
+    let _server = sleepy_server(&dir);
+    start_with_history(&dir, "h", &history, &[]);
+    until(&dir, "h", "hibernated");
+    // The model switch wakes the agent; both prompts queue behind it.
+    ok(&dir, &["model", "h", "smart"]);
+    ok(&dir, &["send", "h", "one"]);
+    ok(&dir, &["send", "h", "two"]);
+    events_until(&dir, "h", |e| {
+        e["event"] == "reply" && e["text"] == "[smart] you said: two"
+    });
+    assert_eq!(
+        ok(&dir, &["read", "h"]),
+        "> one\n> two\n[smart] you said: one\n[smart] you said: two\n"
+    );
+}
+
+#[test]
+fn no_hibernation_without_load_session_or_with_no_hibernate() {
+    let dir = temp_dir("acp-awake");
+    let history = dir.join("history.jsonl");
+    let _server = sleepy_server(&dir);
+    start_fake(&dir, "a", "fake");
+    start_with_history(&dir, "b", &history, &["--no-hibernate"]);
+    for name in ["a", "b"] {
+        ok(&dir, &["send", name, "hi"]);
+        until(&dir, name, "done");
+    }
+    past_the_delay();
+    for name in ["a", "b"] {
+        assert_eq!(reported(&dir, name)["state"], "done", "{name}");
+        assert_eq!(processes(&dir, name), 2, "{name}");
+    }
+}
+
+#[test]
+fn mcp_secrets_stay_in_memory_through_a_hibernation() {
+    let dir = temp_dir("acp-hibernate-mcp");
+    let history = dir.join("history.jsonl");
+    let history = history.to_str().expect("utf-8");
+    let servers = json!([{"name": "files", "command": "/bin/echo", "args": [],
+                          "env": [{"name": "TOKEN", "value": SECRET}]}]);
+    let file = mcp_file("acp-hibernate-mcp-in", &servers);
+    let _server = sleepy_server(&dir);
+    start_with_mcp(&dir, "m", &file, &[], &["--history", history]);
+    until(&dir, "m", "hibernated");
+    // The fake agent exits unless session/load brings the same servers, secret and all.
+    ok(&dir, &["send", "m", "hi"]);
+    until(&dir, "m", "done");
+    assert_eq!(ok(&dir, &["read", "m"]), "> hi\nyou said: hi\n");
+    let events = events_until(&dir, "mcp", |e| e["event"] == "reply");
+    assert_hidden(&dir, events.join("\n") + &ok(&dir, &["get", "m"]));
 }

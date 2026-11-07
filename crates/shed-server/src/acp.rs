@@ -169,8 +169,8 @@ enum FromAgent {
 
 /// What the session task hands the writer task, in order.
 enum Out {
-    /// An event; `true` when replayed.
-    Emit(EventKind, bool),
+    /// An event; `true` when replayed, then `true` to keep it in the transcript.
+    Emit(EventKind, bool, bool),
     State(Reported),
     /// A line for the terminal only.
     Say(String),
@@ -209,6 +209,10 @@ struct Session {
     heard: Instant,
     /// Replaying a resumed session's history.
     replay: bool,
+    /// Loading the session again on a wake: its replay is already in the transcript.
+    waking: bool,
+    /// The last state reported but `hibernated`, restored by a wake that starts no turn.
+    last: (String, Option<String>),
     /// The agent's `model` config option, if it has one.
     model: Option<String>,
     shown: AcpSession,
@@ -223,10 +227,13 @@ impl Session {
     }
 
     fn emit(&self, kind: EventKind) {
-        let _ = self.send(Out::Emit(kind, self.replay));
+        let _ = self.send(Out::Emit(kind, self.replay, !self.waking));
     }
 
-    fn state(&self, state: &str, note: Option<String>) {
+    fn state(&mut self, state: &str, note: Option<String>) {
+        if state != "hibernated" {
+            self.last = (state.to_owned(), note.clone());
+        }
         let (state, state_source) = (state.to_owned(), None);
         let _ = self.send(Out::State(Reported {
             state,
@@ -464,6 +471,7 @@ impl Session {
         self.send(Out::Emit(
             EventKind::Session(self.shown.clone()),
             self.replay,
+            !self.waking,
         ))
     }
 
@@ -504,15 +512,23 @@ impl Session {
     }
 }
 
-/// The session task: the handshake, then the agent's messages, the inputs and the watchdog, one at a
-/// time, until the agent closes its stdout.
+/// Seconds of idle before an ACP agent hibernates: `$SHED_ACP_HIBERNATE_AFTER` (default 600, `0` never).
+fn hibernate_after() -> Option<Duration> {
+    let secs = std::env::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
+    (secs > 0).then(|| Duration::from_secs(secs))
+}
+
+/// The session task: the handshake (loading the session again and then handing it `wake` when it
+/// wakes), then the agent's messages, the inputs and the watchdog, one at a time, until the agent
+/// closes its stdout (`None`) or the session has been idle long enough to hibernate (the session back).
 async fn drive(
     mut s: Session,
     mut from_agent: UnboundedReceiver<FromAgent>,
-    mut inputs: UnboundedReceiver<Input>,
+    inputs: &mut UnboundedReceiver<Input>,
     cwd: &Path,
     resume: Option<String>,
-) -> AcpResult<()> {
+    wake: Option<Input>,
+) -> AcpResult<Option<Session>> {
     let cx = s.cx.clone();
     let refused = |e| {
         let closed = cx.is_incoming_closed();
@@ -541,7 +557,7 @@ async fn drive(
             return Err(acp_error(why));
         }
         Some(id) => {
-            (s.id, s.replay) = (SessionId::new(id), true);
+            (s.id, s.replay, s.waking) = (SessionId::new(id), true, wake.is_some());
             let load = LoadSessionRequest::new(s.id.clone(), cwd).mcp_servers(s.mcp.clone());
             let loaded = cx.send_request(load).block_task().await.map_err(refused)?;
             // The updates before the response, all queued by now, are the history.
@@ -549,7 +565,7 @@ async fn drive(
                 s.message(m)?;
             }
             s.end_replayed_turn();
-            s.replay = false;
+            (s.replay, s.waking) = (false, false);
             loaded.config_options
         }
         None => {
@@ -562,7 +578,16 @@ async fn drive(
     (s.shown.id, s.shown.mcp_servers) = (s.id.to_string(), redacted(&s.mcp));
     s.models(&options.unwrap_or_default())?;
     s.say(format!("shed: ACP session ready ({}); send a prompt", s.id))?;
+    if let Some(input) = wake {
+        if !matches!(input, Input::Prompt(_)) {
+            let (state, note) = s.last.clone();
+            s.state(&state, note);
+        }
+        s.input(input)?;
+    }
     let idle = std::env::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
+    // Only an agent that can load its session again hibernates.
+    let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
     let mut typing = true;
     loop {
         tokio::select! {
@@ -572,11 +597,17 @@ async fn drive(
                 Some(input) => s.input(input)?,
                 None => typing = false,
             },
-            () = cx.incoming_closed() => return Ok(()),
-            // Ends a turn that heard nothing for `idle` seconds, but while a request waits for `approve`.
+            () = cx.incoming_closed() => return Ok(None),
+            // Ends a turn that heard nothing for `idle` seconds, but while a request waits for `approve`;
+            // hibernates when no turn runs and no request waits.
             () = tokio::time::sleep(Duration::from_millis(100)) => {
-                if !s.prompts.is_empty() && s.asks.is_empty() && s.heard.elapsed().as_secs() >= idle {
+                let quiet = s.heard.elapsed();
+                if !s.asks.is_empty() {
+                    // A request waits for `approve`.
+                } else if !s.prompts.is_empty() && quiet.as_secs() >= idle {
                     s.fail("no response".to_owned())?;
+                } else if s.prompts.is_empty() && typing && sleep_after.is_some_and(|d| quiet >= d) {
+                    return Ok(Some(s));
                 }
             }
         }
@@ -601,9 +632,11 @@ impl Writer {
             for out in batch.drain(..) {
                 let name = self.name.clone();
                 let (shown, call) = match out {
-                    Out::Emit(kind, replay) => {
+                    Out::Emit(kind, replay, keep) => {
                         let line = serde_json::to_string(&kind).unwrap_or_default();
-                        let _ = writeln!(self.transcript, "{line}");
+                        if keep {
+                            let _ = writeln!(self.transcript, "{line}");
+                        }
                         let shown = match &kind {
                             EventKind::ApprovalRequest { tool, options } => {
                                 let ids: Vec<&str> =
@@ -701,6 +734,10 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 /// `session/new`, both with the MCP servers in `$SHED_ACP_MCP`, then prompts, updates and permission
 /// requests until the agent exits. Returns the agent's exit code.
 ///
+/// After `$SHED_ACP_HIBERNATE_AFTER` idle seconds (see [`hibernate_after`]) it stops the agent's process
+/// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
+/// starts the agent again, loads the session and then delivers it.
+///
 /// A failure to start is reported as the terminal's state `error`, with the reason as its note.
 ///
 /// # Errors
@@ -746,6 +783,58 @@ fn open_transcript(state: &Path, name: &str) -> io::Result<File> {
         .open(&path)
 }
 
+/// Speaks ACP to `child` over its stdio: runs `main` (the session task) with the connection and the
+/// sender and receiver of the agent's messages, until it returns.
+async fn connect(
+    child: &mut tokio::process::Child,
+    main: impl AsyncFnOnce(
+        ConnectionTo<Agent>,
+        UnboundedSender<FromAgent>,
+        UnboundedReceiver<FromAgent>,
+    ) -> AcpResult<Option<Session>>,
+) -> Result<Option<Session>, Error> {
+    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
+    };
+    let incoming = stream::unfold(BufReader::new(stdout).lines(), async |mut lines| {
+        Some((lines.next_line().await.transpose()?, lines))
+    });
+    let outgoing = sink::unfold(stdin, async |mut stdin, line: String| {
+        stdin.write_all(format!("{line}\n").as_bytes()).await?;
+        stdin.flush().await?;
+        Ok::<_, io::Error>(stdin)
+    });
+    let (back, from_agent) = unbounded_channel();
+    let (updates, asks) = (back.clone(), back.clone());
+    agent_client_protocol::Client
+        .v1()
+        .name("shed")
+        .on_receive_notification(
+            async move |n: UntypedMessage, _| {
+                if SessionNotification::matches_method(n.method()) {
+                    let n = SessionNotification::parse_message(n.method(), n.params());
+                    let update = n.map(|n| Box::new(n.update)).map_err(|e| e.to_string());
+                    let _ = updates.send(FromAgent::Update(update));
+                }
+                Ok(())
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
+        .on_receive_request(
+            async move |r: RequestPermissionRequest, asked, _| {
+                let _ = asks.send(FromAgent::Permission(Box::new(r), asked));
+                Ok(())
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .connect_with(
+            Lines::new(Box::pin(outgoing), Box::pin(incoming)),
+            async move |cx| main(cx, back, from_agent).await,
+        )
+        .await
+        .map_err(|e| Error::Acp(e.to_string()))
+}
+
 fn run(
     cmd: &[String],
     cwd: &Path,
@@ -765,26 +854,32 @@ fn run(
         socket: socket.to_owned(),
         name: name.to_owned(),
     };
-    let (typed, inputs) = unbounded_channel();
-    let session = |cx, back| Session {
-        cx,
-        back,
-        out,
-        id: SessionId::new(""),
-        policy,
-        prompts: BTreeSet::new(),
-        next: 0,
-        asks: VecDeque::new(),
-        titles: BTreeMap::new(),
-        reply: String::new(),
-        auth: crate::agents::auth_failures(agent_id),
-        heard: Instant::now(),
-        replay: false,
-        model: None,
-        shown: AcpSession::default(),
-        mcp,
+    let (typed, mut inputs) = unbounded_channel();
+    // A woken session keeps its state; a new one starts empty.
+    let session = move |cx, back, kept: Option<Session>| match kept {
+        Some(s) => Session { cx, back, ..s },
+        None => Session {
+            cx,
+            back,
+            out: out.clone(),
+            id: SessionId::new(""),
+            policy,
+            prompts: BTreeSet::new(),
+            next: 0,
+            asks: VecDeque::new(),
+            titles: BTreeMap::new(),
+            reply: String::new(),
+            auth: crate::agents::auth_failures(agent_id),
+            heard: Instant::now(),
+            replay: false,
+            waking: false,
+            last: ("idle".to_owned(), None),
+            model: None,
+            shown: AcpSession::default(),
+            mcp: mcp.clone(),
+        },
     };
-    let resume = std::env::var("SHED_ACP_RESUME").ok();
+    let mut resume = std::env::var("SHED_ACP_RESUME").ok();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -795,55 +890,38 @@ fn run(
         let (program, args) = cmd
             .split_first()
             .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
-        let mut child = tokio::process::Command::new(program)
-            .args(args)
-            .current_dir(cwd)
-            .env_remove("SHED_ACP_MCP")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
-        let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-            return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
-        };
-        let incoming = stream::unfold(BufReader::new(stdout).lines(), async |mut lines| {
-            Some((lines.next_line().await.transpose()?, lines))
-        });
-        let outgoing = sink::unfold(stdin, async |mut stdin, line: String| {
-            stdin.write_all(format!("{line}\n").as_bytes()).await?;
-            stdin.flush().await?;
-            Ok::<_, io::Error>(stdin)
-        });
-        let (back, from_agent) = unbounded_channel();
-        let (updates, asks) = (back.clone(), back.clone());
-        agent_client_protocol::Client
-            .v1()
-            .name("shed")
-            .on_receive_notification(
-                async move |n: UntypedMessage, _| {
-                    if SessionNotification::matches_method(n.method()) {
-                        let n = SessionNotification::parse_message(n.method(), n.params());
-                        let update = n.map(|n| Box::new(n.update)).map_err(|e| e.to_string());
-                        let _ = updates.send(FromAgent::Update(update));
-                    }
-                    Ok(())
-                },
-                agent_client_protocol::on_receive_notification!(),
-            )
-            .on_receive_request(
-                async move |r: RequestPermissionRequest, asked, _| {
-                    let _ = asks.send(FromAgent::Permission(Box::new(r), asked));
-                    Ok(())
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .connect_with(
-                Lines::new(Box::pin(outgoing), Box::pin(incoming)),
-                async move |cx| drive(session(cx, back), from_agent, inputs, cwd, resume).await,
-            )
-            .await
-            .map_err(|e| Error::Acp(e.to_string()))?;
-        Ok(child.wait().await?.code().unwrap_or(1))
+        let (mut kept, mut wake) = (None, None);
+        loop {
+            let mut child = tokio::process::Command::new(program)
+                .args(args)
+                .current_dir(cwd)
+                .env_remove("SHED_ACP_MCP")
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
+            let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
+            let slept = connect(&mut child, async |cx, back, from_agent| {
+                let s = session(cx, back, prev);
+                drive(s, from_agent, rx, cwd, loaded, first).await
+            })
+            .await?;
+            let Some(mut s) = slept else {
+                return Ok(child.wait().await?.code().unwrap_or(1));
+            };
+            if let Some(pid) = child.id().and_then(|p| i32::try_from(p).ok()) {
+                let table = shed_core::proctree::system();
+                let reap = || drop(child.try_wait());
+                shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap)?;
+            }
+            s.state("hibernated", None);
+            // Inputs from now on queue up in order; the first one wakes the agent.
+            let Some(input) = inputs.recv().await else {
+                return Ok(0);
+            };
+            (resume, wake) = (Some(s.id.to_string()), Some(input));
+            kept = Some(s);
+        }
     });
     // The session's sender is gone with it: the writer drains what is queued and ends. The stdin read
     // never ends on its own, so the runtime does not wait for it.

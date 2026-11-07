@@ -2,7 +2,8 @@
 # The ACP throughput bench (crates/shed/tests/acp_bench.rs: fake_acp.py streams 1,000 session/updates
 # through the bridge to a socket client) at the base and the head checkouts: the median of 5 interleaved
 # release runs each. Fails if the head is more than 10% slower. Then the head's 1,000-update session/load
-# replay, reported only. Both sides run the head's bench and fake agent. Builds go to
+# replay and the hibernation bench (10 idle fake agents' RSS with hibernation off and on, failing unless
+# it is lower on; the wake time), reported only. Both sides run the head's bench and fake agent. Builds go to
 # $BENCH_TARGET/acp-{base,head}.
 set -euo pipefail
 base=$(cd "$1" && pwd) head=$(cd "$2" && pwd)
@@ -29,6 +30,7 @@ done
 mb=$(median "${b[@]}") mh=$(median "${h[@]}")
 echo "acp throughput median of 5: base $mb us, head $mh us (head/base $((mh * 100 / mb))%)"
 run "$head" head replay | grep '^acp replay:'
+run "$head" head hibernate | grep '^acp hibernate'
 if [ $((mh * 10)) -gt $((mb * 11)) ]; then
   echo "FAIL: the head is more than 10% slower than the base"
   exit 1
