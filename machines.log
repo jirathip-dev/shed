@@ -1,0 +1,13 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/machines.rs (/Volumes/NVMe/herdsman/.build/berth-impl-52/debug/deps/machines-be75072b72df5ea5)
+
+running 5 tests
+down added
+test connect_carries_the_protocol_over_a_socketpair ... ok
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test events_on_a_machine_stream_prefixed_and_reconnect_after_the_link_drops ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.03s
+
