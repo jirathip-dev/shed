@@ -15,6 +15,8 @@ reason on stderr) on the first that does not fit. Prompts:
   bench timing from the first chunk to the reply times shed's throughput rather than this agent.
 - "unknown": an update of a kind no ACP schema has, then the reply "still here".
 - "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
+- "replay": with `--replay FILE`, FILE's recorded session updates (JSON lines) in order; a line
+  `{"request_permission": {...}}` is sent as that request and waits for its answer.
 - anything else: the reply "you said: <prompt>" ("[<model>] you said: …" after a switch from "fast").
 
 It offers the models "fast" and "smart" (a `model` config option). `--history FILE` keeps the session's
@@ -38,6 +40,7 @@ MCP = json.load(open(sys.argv[sys.argv.index("--mcp") + 1])) if "--mcp" in sys.a
 CAPS = sys.argv[sys.argv.index("--mcp-caps") + 1].split(",") if "--mcp-caps" in sys.argv else []
 KEPT = []
 CANNED = "--canned" in sys.argv
+REPLAY = sys.argv[sys.argv.index("--replay") + 1] if "--replay" in sys.argv else None
 
 
 def options():
@@ -193,6 +196,16 @@ def main():
                          "content": {"type": "text", "text": text}})
             if text == "tool":
                 stop = tool_turn()
+            elif text == "replay" and REPLAY:
+                for n, line in enumerate(open(REPLAY)):
+                    u = json.loads(line)
+                    if "request_permission" in u:
+                        send({"id": 200 + n, "method": "session/request_permission",
+                              "params": {"sessionId": SESSION, **u["request_permission"]}})
+                        wait_response(200 + n)
+                    else:
+                        update(u)
+                stop = "end_turn"
             elif text in ("slow", "auth", "silent"):
                 said = {"slow": "thinking", "silent": None, "auth": "Failed to authenticate: "
                         "OAuth session expired and could not be refreshed"}[text]

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use shed_core::proctree::{self, ProcessInfo};
 use shed_core::{History, Report, STATES, Size, Terminal};
 use shed_proto::{
-    EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, LsParams, MachineStats,
+    EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams, MachineStats,
     ModelParams, ReadParams, ReadResult, Reported, ResizeParams, Resources, RpcError, RunParams,
     Sample, SendParams, State, StateParams, TerminalInfo,
 };
@@ -473,16 +473,20 @@ impl Registry {
     /// a restart, from the tail of its log.
     pub(crate) fn read(&self, p: &ReadParams) -> Result<ReadResult, RpcError> {
         let entry = self.entry(&p.name)?;
-        if entry.info.acp.is_some() {
-            let file = fs::read_to_string(crate::acp::transcript(&self.path, &p.name));
-            let text = crate::acp::render(&file.unwrap_or_default());
-            let lines: Vec<&str> = text.lines().collect();
-            let n = p.lines.unwrap_or(usize::MAX);
-            let text = lines[lines.len().saturating_sub(n)..].join("\n");
-            return Ok(ReadResult { text });
-        }
-        let n = p.lines.unwrap_or(usize::MAX);
-        let text = match &entry.term {
+        let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
+        let acp = entry.info.acp.is_some();
+        let file = || fs::read_to_string(crate::acp::transcript(&self.path, &p.name));
+        let mut text = match &entry.term {
+            _ if acp && !p.events => crate::acp::render(&file().unwrap_or_default()),
+            _ if acp => {
+                let (file, before) = (file().unwrap_or_default(), p.before.unwrap_or(u64::MAX));
+                let lines = (file.lines().zip(1..)).take_while(|&(_, seq)| seq < before);
+                let parsed =
+                    lines.filter_map(|(l, seq)| Some((seq, serde_json::from_str(l).ok()?)));
+                events = parsed.map(|(seq, kind)| Logged { seq, kind }).collect();
+                events.drain(..events.len().saturating_sub(p.n.unwrap_or(usize::MAX)));
+                String::new()
+            }
             Some(term) if p.history => term.history(n),
             Some(term) => term.screen(),
             None => {
@@ -496,12 +500,11 @@ impl Registry {
                 }
             }
         };
-        if p.history {
-            return Ok(ReadResult { text });
+        if acp || !p.history {
+            let lines: Vec<&str> = text.lines().collect();
+            text = lines[lines.len().saturating_sub(n)..].join("\n");
         }
-        let lines: Vec<&str> = text.lines().collect();
-        let text = lines[lines.len().saturating_sub(n)..].join("\n");
-        Ok(ReadResult { text })
+        Ok(ReadResult { text, events })
     }
 
     /// `send`: types text.

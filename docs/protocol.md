@@ -61,7 +61,7 @@ One terminal.
 
 ### `read`
 
-The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines.
+The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"read","params":{"history":false,"lines":2,"name":"build"}}
@@ -235,7 +235,7 @@ An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridg
 {"seq":5,"name":"build","labels":{"issue":"7","role":"impl"},"event":"killed"}
 {"seq":6,"name":"build","labels":{"issue":"7","role":"impl"},"event":"turn","prompt":"Fix the failing test"}
 {"seq":7,"name":"build","labels":{"issue":"7","role":"impl"},"event":"text","text":"Looking at the test"}
-{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending"}
+{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending","kind":"edit"}
 {"seq":9,"name":"build","labels":{"issue":"7","role":"impl"},"event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
 {"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"event":"mode","mode":"default"}
 {"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}

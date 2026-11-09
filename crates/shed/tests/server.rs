@@ -293,6 +293,7 @@ fn a_kept_terminal_comes_back_as_a_shell_in_its_cwd() {
             name: name.into(),
             lines: None,
             history: true,
+            ..read_params()
         };
         client
             .call::<_, ReadResult>(Method::Read, &read)
@@ -351,6 +352,7 @@ fn a_kept_terminal_comes_back_as_a_shell_in_its_cwd() {
             name: "kept".into(),
             lines: None,
             history: false,
+            ..read_params()
         };
         let screen: ReadResult = client.call(Method::Read, &read).expect("read");
         screen.text.replace('\n', "").contains(&want)
@@ -741,4 +743,9 @@ fn terminal_resize_from_the_watcher_resizes_the_screen_and_the_program() {
     until_row(&mut watch, "10 40");
     let (_, _, none) = c.call(1, "terminal.resize", &json!({"cols": 40, "rows": 10}));
     assert_eq!(none["error"]["code"], -32602);
+}
+
+/// `read` params with only the name set.
+fn read_params() -> ReadParams {
+    serde_json::from_value(serde_json::json!({"name": ""})).expect("read params")
 }

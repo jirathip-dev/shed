@@ -25,12 +25,12 @@ $ shed events --label run=golden --since 0
 {"seq":4,"name":"a","labels":{"run":"golden"},"event":"turn","prompt":"tool"}
 {"seq":5,"name":"a","labels":{"run":"golden"},"event":"plan","entries":[{"content":"Write notes","priority":"high","status":"in_progress"}]}
 {"seq":6,"name":"a","labels":{"run":"golden"},"event":"mode","mode":"code"}
-{"seq":7,"name":"a","labels":{"run":"golden"},"event":"tool_call","id":"call-1","title":"Write notes.txt","status":"pending"}
+{"seq":7,"name":"a","labels":{"run":"golden"},"event":"tool_call","id":"call-1","title":"Write notes.txt","status":"pending","kind":"edit"}
 {"seq":8,"name":"a","labels":{"run":"golden"},"event":"approval_request","tool":"Write notes.txt","options":[{"id":"allow-once","name":"Allow","kind":"allow_once"},{"id":"reject-once","name":"Reject","kind":"reject_once"}]}
 {"seq":9,"name":"a","labels":{"run":"golden"},"event":"state","state":"blocked","note":"Write notes.txt"}
 {"seq":10,"name":"a","labels":{"run":"golden"},"event":"approved","option":"allow-once"}
 {"seq":11,"name":"a","labels":{"run":"golden"},"event":"state","state":"working"}
-{"seq":12,"name":"a","labels":{"run":"golden"},"event":"tool_call","id":"call-1","title":"Write notes.txt","status":"completed"}
+{"seq":12,"name":"a","labels":{"run":"golden"},"event":"tool_call","id":"call-1","title":"Write notes.txt","status":"completed","kind":"edit"}
 {"seq":13,"name":"a","labels":{"run":"golden"},"event":"text","text":"wrote "}
 {"seq":14,"name":"a","labels":{"run":"golden"},"event":"text","text":"notes.txt"}
 {"seq":15,"name":"a","labels":{"run":"golden"},"event":"reply","text":"wrote notes.txt","stop_reason":"end_turn"}
