@@ -27,6 +27,8 @@ shed send t1 "Fix the failing test"
 shed wait t1 --until done blocked error
 shed approve t1 allow-once        # an option id, or a kind: allow_once, reject_once, …
 shed read t1                      # > prompt, [tool] title (status), the final reply
+shed read t1 --events             # the same events drawn: › prompt, ✓ kind title, the reply styled
+shed read t1 --events --json      # each event with its seq; page with --before <seq> --lines <n>
 shed cancel t1                    # or: shed keys t1 esc
 shed model t1 opus                # one of `shed get t1`'s session.models
 shed run --acp claude-acp --resume <session id>   # load a past session (`shed get`'s session.id)
@@ -105,6 +107,10 @@ capabilities) and `session/new` (the terminal's cwd and MCP servers) or `session
 - reports its events with the `emit` method and its states with `state`, as notifications over the server
   socket, written in batches by a task of their own;
 - appends every event to `acp/<name>.jsonl` beside the state file, which `read` renders;
+- redraws its screen (what `attach` and `shed watch` show) from those events on each change: the prompt bold
+  after `›`, each tool call as one dim line (`…` running, `✓` done, `✗` failed, ACP's `kind`, the title's first
+  line), approvals in yellow, the plan as a checklist and the reply's markdown lightly styled, wrapped to the
+  terminal and without colour under `NO_COLOR`; only ACP's own fields are read, never an agent's wording;
 - answers requests it does not offer (file system, terminals) with "method not found".
 
 So kill, process-tree cleanup, resources and `wait` work as for any terminal. Agent text is shown with its

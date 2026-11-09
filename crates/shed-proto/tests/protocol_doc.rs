@@ -73,6 +73,7 @@ fn events() -> Vec<Event> {
             id: "call_1".into(),
             title: "Edit src/lib.rs".into(),
             status: "pending".into(),
+            kind: Some("edit".into()),
         },
         EventKind::Plan {
             entries: vec![
@@ -227,6 +228,26 @@ fn emit_params_round_trip() {
     assert!(p.kind.is_acp());
 }
 
+/// `read`'s example params and result.
+fn read_example() -> (Value, Value) {
+    (
+        to_value(ReadParams {
+            name: "build".into(),
+            lines: Some(2),
+            history: false,
+            events: false,
+            before: None,
+            n: None,
+        })
+        .unwrap(),
+        to_value(ReadResult {
+            text: "ok 12 tests\n$".into(),
+            events: Vec::new(),
+        })
+        .unwrap(),
+    )
+}
+
 /// An example params and result for each method, built from the typed structs.
 fn example(method: Method) -> (Value, Value) {
     let running = || to_value(info(State::Running)).unwrap();
@@ -245,18 +266,7 @@ fn example(method: Method) -> (Value, Value) {
             json!([running()]),
         ),
         Method::Get | Method::Attach => (target(), running()),
-        Method::Read => (
-            to_value(ReadParams {
-                name: "build".into(),
-                lines: Some(2),
-                history: false,
-            })
-            .unwrap(),
-            to_value(ReadResult {
-                text: "ok 12 tests\n$".into(),
-            })
-            .unwrap(),
-        ),
+        Method::Read => read_example(),
         Method::Send => (
             to_value(SendParams {
                 name: "build".into(),

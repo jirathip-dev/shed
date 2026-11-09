@@ -331,7 +331,7 @@ impl Method {
             }
             Self::Get => "One terminal.",
             Self::Read => {
-                "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines."
+                "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`."
             }
             Self::Send => "Type text into the terminal.",
             Self::Keys => {
@@ -470,6 +470,15 @@ pub struct ReadParams {
     /// Scrollback and screen instead of the screen alone.
     #[serde(default)]
     pub history: bool,
+    /// ACP: the transcript's events instead of text.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub events: bool,
+    /// With `events`: only those before this `seq`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before: Option<u64>,
+    /// With `events`: only the last N.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n: Option<usize>,
 }
 
 /// `read` result.
@@ -477,6 +486,19 @@ pub struct ReadParams {
 pub struct ReadResult {
     /// Plain text, one line per row, trailing blanks dropped.
     pub text: String,
+    /// With `events`: the transcript's events, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<Logged>,
+}
+
+/// One event of an ACP terminal's transcript.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Logged {
+    /// Its place in the transcript, from 1.
+    pub seq: u64,
+    /// The event.
+    #[serde(flatten)]
+    pub kind: EventKind,
 }
 
 /// `send` and `terminal.input` params.
@@ -634,6 +656,9 @@ pub enum EventKind {
         title: String,
         /// `pending`, `in_progress`, `completed` or `failed`.
         status: String,
+        /// ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
     },
     /// ACP: the agent's plan, as it sent it.
     Plan {

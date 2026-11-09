@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `shed read --events [--json]` (`read` with `events`, paged by `before` and `n`): an ACP terminal's transcript
+  as events, each with its `seq`; `tool_call` events carry ACP's tool `kind` when the agent sends one.
+- An ACP terminal's screen (`attach`, the `shed watch` preview) draws its events readably: the prompt bold, one
+  line per tool call with a status glyph, approvals, the plan as a checklist and the reply's markdown styled.
+
 ### Changed
 
 - The ACP path is faster per update: the bridge reads a text chunk straight from the agent's JSON instead of

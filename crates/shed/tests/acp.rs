@@ -15,7 +15,8 @@ use std::process::{Command, Output};
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
 use shed_core::proctree::{self, ProcessTable as _};
-use shed_server::proto::{EventsParams, Method};
+use shed_server::acp::Preview;
+use shed_server::proto::{EventKind, EventsParams, Logged, Method, ReadResult};
 use shed_server::{Client, Paths};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
@@ -953,4 +954,141 @@ fn mcp_secrets_stay_in_memory_through_a_hibernation() {
         e["event"] == "reply" && e["text"] == "you said: again"
     });
     assert_hidden(&dir, events.join("\n") + &ok(&dir, &["get", "m"]));
+}
+
+/// Checks `have` against `tests/golden/<name>`; `SHED_BLESS=1` writes it.
+fn golden(name: &str, have: &str) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name);
+    if std::env::var_os("SHED_BLESS").is_some() {
+        std::fs::write(&path, have).expect("write golden");
+    }
+    let want = std::fs::read_to_string(&path).unwrap_or_default();
+    assert_eq!(
+        want,
+        have,
+        "{} differs; SHED_BLESS=1 to update",
+        path.display()
+    );
+}
+
+#[test]
+fn recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks() {
+    let dir = temp_dir("acp-replay");
+    let _server = Server::start(&dir);
+    let fake = fake_agent();
+    let mut shapes = Vec::new();
+    for agent in ["claude", "codex", "gemini"] {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/acp");
+        let fixture = fixtures.join(format!("{agent}.jsonl"));
+        let label = format!("run={agent}");
+        let run = ["run", "--name", agent, "--label", &label, "--acp", "fake"];
+        let cmd = [
+            "--policy",
+            "allow",
+            "--",
+            "python3",
+            fake.to_str().expect("utf-8"),
+        ];
+        ok(
+            &dir,
+            &[
+                &run[..],
+                &cmd,
+                &["--replay", fixture.to_str().expect("utf-8")],
+            ]
+            .concat(),
+        );
+        ok(
+            &dir,
+            &[
+                "wait",
+                agent,
+                "--output",
+                "ACP session ready",
+                "--timeout",
+                "10",
+            ],
+        );
+        ok(&dir, &["send", agent, "replay"]);
+        ok(&dir, &["wait", agent, "--until", "done", "--timeout", "10"]);
+
+        let json = ok(&dir, &["read", agent, "--events", "--json"]);
+        let read: ReadResult = serde_json::from_str(&json).expect("a read result");
+        golden(&format!("acp-{agent}.events.jsonl"), &json);
+        let mut preview = Preview::default();
+        for e in read.events.clone() {
+            preview.push(e.kind);
+        }
+        let colour = preview.draw(80, true, usize::MAX).join("\n") + "\n";
+        golden(&format!("acp-{agent}.80.txt"), &colour);
+        let out = Command::new(SHED)
+            .arg("--dir")
+            .arg(&dir)
+            .args(["read", agent, "--events"])
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("shed runs");
+        assert!(out.status.success(), "{out:?}");
+        let plain = String::from_utf8(out.stdout).expect("utf-8");
+        assert!(!plain.contains('\x1b'), "{plain}");
+        assert!(plain.lines().all(|l| l.chars().count() <= 80), "{plain}");
+        golden(&format!("acp-{agent}.no-color.txt"), &plain);
+
+        // The multi-line command: whole in the events, its first line alone on one preview line.
+        let title = (read.events.iter())
+            .find_map(|e| match &e.kind {
+                EventKind::ToolCall { title, kind, .. } if kind.as_deref() == Some("execute") => {
+                    Some(title.clone())
+                }
+                _ => None,
+            })
+            .expect("an execute tool call");
+        let (first, second) = title.split_once('\n').expect("a multi-line title");
+        let line = format!("✓ execute {first}");
+        let line: String = line.chars().take(80).collect();
+        assert_eq!(plain.lines().filter(|l| *l == line).count(), 1, "{plain}");
+        assert!(!plain.contains(second.trim()), "{plain}");
+        // The terminal itself (what attach and watch show) draws the same line.
+        let escape = |c: char| {
+            let slash = if c.is_ascii_punctuation() { "\\" } else { "" };
+            format!("{slash}{c}")
+        };
+        let pattern: String = line.chars().map(escape).collect();
+        ok(
+            &dir,
+            &["wait", agent, "--output", &pattern, "--timeout", "5"],
+        );
+
+        shapes.push(shape(&read.events));
+    }
+    assert_eq!(shapes[0], shapes[1], "claude and codex");
+    assert_eq!(shapes[0], shapes[2], "claude and gemini");
+    assert_eq!(shapes[0].len(), 8, "{:?}", shapes[0]);
+}
+
+/// A transcript's block structure: each tool call once (kind and last status), in order.
+fn shape(events: &[Logged]) -> Vec<String> {
+    let mut shape: Vec<String> = Vec::new();
+    let mut seen = std::collections::BTreeMap::new();
+    for e in events {
+        let at = shape.len();
+        match &e.kind {
+            EventKind::ToolCall {
+                id, kind, status, ..
+            } => {
+                let at = *seen.entry(id.clone()).or_insert(at);
+                let block = format!("tool {} {status}", kind.as_deref().unwrap_or("-"));
+                if at == shape.len() {
+                    shape.push(block);
+                } else {
+                    shape[at] = block;
+                }
+            }
+            EventKind::Text { .. } | EventKind::Mode { .. } | EventKind::Session(_) => {}
+            kind => shape.push(serde_json::to_value(kind).expect("JSON")["event"].to_string()),
+        }
+    }
+    shape
 }

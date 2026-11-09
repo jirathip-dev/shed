@@ -78,7 +78,7 @@ enum Command {
     Read {
         /// The terminal.
         name: String,
-        /// Only the last N lines.
+        /// Only the last N lines (with `--events`, events).
         #[arg(long)]
         lines: Option<usize>,
         /// The visible screen (the default).
@@ -87,6 +87,12 @@ enum Command {
         /// The scrollback and the screen.
         #[arg(long)]
         history: bool,
+        /// ACP: the transcript's events, drawn (`--json`: as they are, each with its `seq`).
+        #[arg(long, conflicts_with_all = ["history", "screen"])]
+        events: bool,
+        /// With `--events`: only those before this `seq`.
+        #[arg(long, requires = "events")]
+        before: Option<u64>,
     },
     /// Type text; to an ACP terminal, send it as a prompt.
     Send {
@@ -412,16 +418,20 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             name,
             lines,
             history,
+            events,
+            before,
             ..
         } => {
+            let n = lines.filter(|_| events);
             let params = ReadParams {
                 name,
                 lines,
                 history,
+                events,
+                before,
+                n,
             };
-            let read: ReadResult = server.connect(None)?.call(Method::Read, &params)?;
-            let end = if read.text.is_empty() { "" } else { "\n" };
-            print(json, &read, || format!("{}{end}", read.text))?;
+            read(&server, json, &params)?;
         }
         Command::Send { name, text } => send(&server, json, name, text)?,
         Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
@@ -549,6 +559,21 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
 
 /// `shed send`: an ACP terminal gets a framed prompt, reported `working` first so `send; wait --until
 /// done` never sees the last turn.
+/// `shed read`; with `--events` (but not `--json`) the events drawn as the preview.
+fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> {
+    let mut read: ReadResult = server.connect(None)?.call(Method::Read, params)?;
+    if params.events && !json {
+        let mut preview = shed_server::acp::Preview::default();
+        for e in read.events.drain(..) {
+            preview.push(e.kind);
+        }
+        let (cols, _, color) = shed_server::acp::stdout_style();
+        read.text = preview.draw(cols, color, usize::MAX).join("\n");
+    }
+    let end = if read.text.is_empty() { "" } else { "\n" };
+    print(json, &read, || format!("{}{end}", read.text))
+}
+
 fn send(server: &Server, json: bool, name: String, text: String) -> anyhow::Result<()> {
     let mut client = server.connect(None)?;
     let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;

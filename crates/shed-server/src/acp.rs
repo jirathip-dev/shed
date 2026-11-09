@@ -105,7 +105,9 @@ pub fn render(transcript: &str) -> String {
     {
         match kind {
             EventKind::Turn { prompt } => lines.push(format!("> {prompt}")),
-            EventKind::ToolCall { id, title, status } => {
+            EventKind::ToolCall {
+                id, title, status, ..
+            } => {
                 let line = format!("[tool] {title} ({status})");
                 if let Some(&at) = tools.get(&id) {
                     lines[at] = line;
@@ -119,6 +121,184 @@ pub fn render(transcript: &str) -> String {
         }
     }
     clean(&lines.join("\n"))
+}
+
+/// A transcript drawn for a reader: each block styled and wrapped, every tool call on one line at its
+/// first place with its last status. Only ACP's own fields are read; an unknown status gets no glyph.
+#[derive(Default)]
+pub struct Preview {
+    blocks: Vec<Result<EventKind, String>>,
+    tools: BTreeMap<String, usize>,
+}
+
+impl Preview {
+    /// Adds an event; `false` when it draws nothing.
+    pub fn push(&mut self, kind: EventKind) -> bool {
+        match &kind {
+            EventKind::ToolCall { id, .. } if self.tools.contains_key(id) => {
+                let at = self.tools[id];
+                self.blocks[at] = Ok(kind);
+                return true;
+            }
+            EventKind::ToolCall { id, .. } => _ = self.tools.insert(id.clone(), self.blocks.len()),
+            EventKind::Reply { text, .. } if text.is_empty() => return false,
+            EventKind::Turn { .. }
+            | EventKind::Reply { .. }
+            | EventKind::Plan { .. }
+            | EventKind::ApprovalRequest { .. }
+            | EventKind::Approved { .. } => {}
+            _ => return false,
+        }
+        self.blocks.push(Ok(kind));
+        true
+    }
+
+    /// The last `rows` lines, `width` columns wide, with SGR colours when `color`.
+    #[must_use]
+    pub fn draw(&self, width: usize, color: bool, rows: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        for block in self.blocks.iter().rev() {
+            if lines.len() >= rows {
+                break;
+            }
+            let mut out = Vec::new();
+            let mut put = |sgr: &str, first: &str, rest: &str, text: &str| {
+                let room = width.saturating_sub(first.chars().count()).max(1);
+                let text = clean(text);
+                for (i, l) in text.split('\n').flat_map(|l| wrap(l, room)).enumerate() {
+                    let lead = if i == 0 { first } else { rest };
+                    out.push(match (color, sgr) {
+                        (false, _) => format!("{lead}{l}"),
+                        (true, "") => format!("{lead}{}", code(&l)),
+                        (true, _) => format!("{lead}\x1b[{sgr}m{l}\x1b[0m"),
+                    });
+                }
+            };
+            match block {
+                Err(line) => put("", "", "", line),
+                Ok(EventKind::Turn { prompt }) => put("1", "› ", "  ", prompt),
+                Ok(EventKind::Reply { text, .. }) => markdown(text, &mut put),
+                Ok(EventKind::ToolCall {
+                    title,
+                    status,
+                    kind,
+                    ..
+                }) => {
+                    let glyph = mark(status).0;
+                    let kind = kind.as_deref().map(|k| format!("{k} ")).unwrap_or_default();
+                    let line = format!("{glyph}{kind}{}", title.lines().next().unwrap_or(""));
+                    put("2", "", "", &line.chars().take(width).collect::<String>());
+                }
+                Ok(EventKind::Plan { entries }) => {
+                    for e in entries {
+                        let mark = mark(e["status"].as_str().unwrap_or("")).1;
+                        put("", mark, "    ", e["content"].as_str().unwrap_or(""));
+                    }
+                }
+                Ok(EventKind::ApprovalRequest { tool, options }) => {
+                    let options = options.iter().map(|o| format!("{} ({})", o.id, o.name));
+                    let options = options.collect::<Vec<_>>().join(" | ");
+                    let tool = tool.lines().next().unwrap_or("");
+                    put("33", "? ", "  ", &format!("{tool}: {options}"));
+                }
+                Ok(EventKind::Approved { option }) => {
+                    put("2", "", "", &format!("approved {option}"));
+                }
+                Ok(_) => {}
+            }
+            lines.extend(out.into_iter().rev());
+        }
+        lines.truncate(rows);
+        lines.reverse();
+        lines
+    }
+}
+
+/// A status's tool glyph and plan checkbox; an unknown one has no glyph.
+fn mark(status: &str) -> (&'static str, &'static str) {
+    let at = ["pending", "in_progress", "completed", "failed"]
+        .iter()
+        .position(|s| *s == status);
+    at.map_or(("", "[ ] "), |i| {
+        (
+            ["… ", "… ", "✓ ", "✗ "][i],
+            ["[ ] ", "[~] ", "[x] ", "[!] "][i],
+        )
+    })
+}
+
+/// A reply's markdown, lightly: headings bold, list items indented, fenced code indented and dim
+/// under its language.
+fn markdown(text: &str, put: &mut impl FnMut(&str, &str, &str, &str)) {
+    let mut fence = false;
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        let numbered = trimmed.split_once(". ").map(|(n, _)| n);
+        let item = trimmed
+            .strip_prefix(['-', '*', '+'])
+            .filter(|r| r.starts_with(' '));
+        if let Some(lang) = trimmed.strip_prefix("```") {
+            fence = !fence;
+            if fence && !lang.is_empty() {
+                put("2", "    ", "    ", lang);
+            }
+        } else if fence {
+            put("2", "    ", "    ", line);
+        } else if let Some(h) = trimmed.strip_prefix('#') {
+            put("1", "", "", h.trim_start_matches('#').trim_start());
+        } else if let Some(item) = item {
+            put("", "  •", "    ", item);
+        } else if numbered.is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) {
+            put("", "  ", "     ", trimmed);
+        } else {
+            put("", "", "", line);
+        }
+    }
+}
+
+/// A line's inline code (`` `x` ``) highlighted.
+fn code(line: &str) -> String {
+    let parts = line.split('`').enumerate();
+    let parts = parts.map(|(i, p)| match i % 2 {
+        1 => format!("\x1b[36m{p}\x1b[39m"),
+        _ => p.to_owned(),
+    });
+    parts.collect()
+}
+
+/// `line` wrapped at spaces to `width` columns; a longer word is cut.
+fn wrap(line: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![String::new()];
+    for (i, word) in line.split(' ').enumerate() {
+        let last = lines.len() - 1;
+        if i > 0 && lines[last].chars().count() + 1 + word.chars().count() <= width {
+            lines[last].push(' ');
+        } else if i > 0 {
+            lines.push(String::new());
+        }
+        for (j, chunk) in word.chars().collect::<Vec<_>>().chunks(width).enumerate() {
+            if j > 0 {
+                lines.push(String::new());
+            }
+            let last = lines.len() - 1;
+            lines[last].extend(chunk);
+        }
+    }
+    lines
+}
+
+/// Columns, rows and colour for drawing to stdout: 80 × 24 unless it is a terminal, and colour only
+/// on a terminal without `NO_COLOR`.
+#[must_use]
+pub fn stdout_style() -> (usize, usize, bool) {
+    let tty = rustix::termios::isatty(io::stdout());
+    let size = (rustix::termios::tcgetwinsize(io::stdout()).ok()).filter(|_| tty);
+    let size = size.map_or((80, 24), |s| (s.ws_col.max(20), s.ws_row.max(2)));
+    (
+        size.0.into(),
+        size.1.into(),
+        tty && std::env::var_os("NO_COLOR").is_none(),
+    )
 }
 
 /// `run`'s `mcp_servers` as the SDK's entries; an error names the first unknown or malformed one.
@@ -213,8 +393,8 @@ struct Session {
     next: u64,
     /// Permission requests waiting for `approve`: their responder and options.
     asks: VecDeque<(Asked, Vec<ApprovalOption>)>,
-    /// Tool call titles by id, for updates that carry none.
-    titles: BTreeMap<String, String>,
+    /// Tool call titles and kinds by id, for updates that carry none.
+    titles: BTreeMap<String, (String, Option<String>)>,
     /// The current turn's reply so far.
     reply: String,
     auth: &'static [&'static str],
@@ -410,20 +590,23 @@ impl Session {
                 }
             }
             SessionUpdate::ToolCall(call) => {
-                let (id, status) = (call.tool_call_id.to_string(), wire(&call.status));
-                self.titles.insert(id.clone(), call.title.clone());
-                let title = call.title;
-                self.emit(EventKind::ToolCall { id, title, status });
+                return self.update(SessionUpdate::ToolCallUpdate(call.into()));
             }
             SessionUpdate::ToolCallUpdate(call) => {
                 let id = call.tool_call_id.to_string();
-                let title = match call.fields.title {
-                    Some(title) => title,
-                    None => self.titles.get(&id).cloned().unwrap_or_else(|| id.clone()),
-                };
-                self.titles.insert(id.clone(), title.clone());
+                let (title, kind) = (self.titles.get(&id).cloned()).unwrap_or((id.clone(), None));
+                let title = call.fields.title.unwrap_or(title);
+                let kind = (call.fields.kind.map(|k| wire(&k)).filter(|k| k != "other")).or(kind);
+                self.titles
+                    .insert(id.clone(), (title.clone(), kind.clone()));
                 let status = wire(&call.fields.status.unwrap_or_default());
-                self.emit(EventKind::ToolCall { id, title, status });
+                let call = EventKind::ToolCall {
+                    id,
+                    title,
+                    status,
+                    kind,
+                };
+                self.emit(call);
             }
             SessionUpdate::Plan(plan) => {
                 let entries = plan.entries.iter().map(serde_json::to_value);
@@ -490,7 +673,7 @@ impl Session {
     fn permission(&mut self, p: RequestPermissionRequest, asked: Asked) -> AcpResult<()> {
         let call = p.tool_call;
         let tool = (call.fields.title)
-            .or_else(|| self.titles.get(&call.tool_call_id.to_string()).cloned())
+            .or_else(|| (self.titles.get(&call.tool_call_id.to_string())).map(|t| t.0.clone()))
             .unwrap_or_else(|| "tool".to_owned());
         let options: Vec<ApprovalOption> = (p.options.into_iter())
             .map(|o| ApprovalOption {
@@ -636,6 +819,8 @@ struct Writer {
     server: Option<tokio::net::UnixStream>,
     socket: PathBuf,
     name: String,
+    /// What the terminal shows, redrawn whole on each change.
+    preview: Preview,
 }
 
 impl Writer {
@@ -644,44 +829,39 @@ impl Writer {
     async fn run(mut self, mut outs: UnboundedReceiver<Out>) {
         let mut batch = Vec::new();
         while outs.recv_many(&mut batch, 4096).await > 0 {
-            let (mut screen, mut calls) = (Vec::new(), Vec::new());
+            let (mut redraw, mut calls) = (false, Vec::new());
             for out in batch.drain(..) {
                 let name = self.name.clone();
-                let (shown, call) = match out {
+                let call = match out {
                     Out::Emit(kind, replay, keep) => {
-                        let line = serde_json::to_string(&kind).unwrap_or_default();
                         if keep {
+                            let line = serde_json::to_string(&kind).unwrap_or_default();
                             let _ = writeln!(self.transcript, "{line}");
+                            redraw |= self.preview.push(kind.clone());
                         }
-                        let shown = match &kind {
-                            EventKind::ApprovalRequest { tool, options } => {
-                                let ids: Vec<&str> =
-                                    options.iter().map(|o| o.id.as_str()).collect();
-                                clean(&format!("[approve?] {tool}: {}", ids.join(" | ")))
-                            }
-                            EventKind::Approved { option } => {
-                                clean(&format!("[approved] {option}"))
-                            }
-                            _ => render(&line),
-                        };
                         let params = EmitParams { name, kind, replay };
-                        (shown, crate::notification(Method::Emit, &params))
+                        crate::notification(Method::Emit, &params)
                     }
                     Out::State(report) => {
                         let params = StateParams { name, report };
-                        (String::new(), crate::notification(Method::State, &params))
+                        crate::notification(Method::State, &params)
                     }
-                    Out::Say(line) => (line, Ok(Vec::new())),
+                    Out::Say(line) => {
+                        self.preview.blocks.push(Err(line));
+                        redraw = true;
+                        Ok(Vec::new())
+                    }
                 };
-                if !shown.is_empty() {
-                    let _ = write!(screen, "{}\r\n", shown.replace('\n', "\r\n"));
-                }
                 calls.extend(call.unwrap_or_default());
             }
             let _ = self.transcript.flush();
             self.send(&calls).await;
-            let mut stdout = io::stdout().lock();
-            let _ = stdout.write_all(&screen).and_then(|()| stdout.flush());
+            if redraw {
+                let (cols, rows, color) = stdout_style();
+                let lines = self.preview.draw(cols, color, rows - 1).join("\r\n");
+                let mut stdout = io::stdout().lock();
+                let _ = write!(stdout, "\x1b[H\x1b[2J{lines}\r\n").and_then(|()| stdout.flush());
+            }
         }
     }
 
@@ -867,6 +1047,7 @@ fn run(
         server: None,
         socket: socket.to_owned(),
         name: name.to_owned(),
+        preview: Preview::default(),
     };
     let (typed, mut inputs) = unbounded_channel();
     // A woken session keeps its state; a new one starts empty.
@@ -949,6 +1130,25 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+
+    #[test]
+    fn the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line() {
+        let call = |id: &str, status: &str, kind: Option<&str>| EventKind::ToolCall {
+            id: id.into(),
+            title: "line one\nline two".into(),
+            status: status.into(),
+            kind: kind.map(Into::into),
+        };
+        let mut preview = Preview::default();
+        assert!(preview.push(call("a", "pending", Some("execute"))));
+        assert!(preview.push(call("b", "teleported", Some("warp"))));
+        assert!(!preview.push(EventKind::Text { text: "x".into() }));
+        assert!(preview.push(call("a", "failed", None)));
+        assert_eq!(preview.draw(12, false, 9), ["✗ line one", "warp line on"]);
+        assert_eq!(preview.draw(40, false, 1), ["warp line one"]);
+        let styled = preview.draw(40, true, 9);
+        assert_eq!(styled[0], "\x1b[2m✗ line one\x1b[0m");
+    }
 
     #[test]
     fn render_keeps_prompts_one_line_per_tool_call_and_replies() {
