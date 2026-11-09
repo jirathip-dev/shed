@@ -1,0 +1,6 @@
+Decided: raise line_cap from 7350 to 7500 in ci/cap.toml with a cap-history note
+Because: q942
+Because: "Raise shed's line cap from 7,350 to 7,500"
+Rejected: cutting the reply markdown styling in #52 — turned down by the owner in q942
+Check: scripts/line-cap.sh prints 7190 / 7500 and exits 0
+Owner: The size limit goes to 7,500 lines so #52 fits.
