@@ -1,0 +1,7 @@
+Decided: merge origin/staging (line_cap 7500) instead of trimming; no source change this round
+Because: q942
+Because: ci/cap.toml:3
+Rejected: trimming the renderer below 7350 — the owner chose to raise the cap in q942
+Check: scripts/line-cap.sh prints 7414 / 7500 and exits 0 at this head
+Check: machines stats test passes with /usr/sbin on PATH; lane PATH lacks sysctl
+Owner: The line-cap failure is fixed by picking up the raised cap; the feature code is unchanged.
