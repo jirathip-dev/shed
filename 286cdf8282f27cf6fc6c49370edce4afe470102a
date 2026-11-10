@@ -1,0 +1,13 @@
+Decided: integration test crates get `#![cfg(test)]` so clippy's allow-*-in-tests covers their helper functions too
+Because: "tests may unwrap/expect/index via clippy.toml `allow-*-in-tests`"
+Decided: one print module, crates/shed/src/out.rs, holds the only print_stdout/print_stderr expects
+Because: "allowed only in the CLI's one output module, by `#[expect(..., reason)]` there"
+Decided: shed-core/src/clock.rs owns now/unix_now/sleep, shed-server/src/config.rs owns env reads, runner re-exports process types
+Because: "`SystemTime::now`, `Instant::now`: only the clock module"
+Decided: scripts/banned.sh builds each ci/fixtures/banned/<lint>.rs under the workspace's own [workspace.lints] and clippy.toml
+Because: "CI fails on a fixture (or test) for each banned item and passes on staging."
+Rejected: a fixture crate with its own lint list — it would drift from Cargo.toml and prove nothing about the real config
+Decided: `let _ = x;` became `x.ok();` — the same discard, without the must-use lint
+Check: each fixture fails with exactly one lint error, its own (scripts/banned.sh greps `-D clippy::<lint>`)
+Check: `herdsman arch-check` reports 0 at head; each new ci/fixtures/arch-* fails on its one ban
+Owner: shed's CI now refuses the banned risky calls, every existing one is fixed, and behaviour is unchanged.
