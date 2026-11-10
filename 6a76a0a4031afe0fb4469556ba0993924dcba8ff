@@ -1,0 +1,13 @@
+Decided: the server running a session builds its ACP bridge command, for local runs too; the CLI sends agent id, adapter cmd and policy
+Because: "The remote builds the bridge command itself, from its own socket, state path and installed agents."
+Rejected: keeping the client-side bridge_cmd for local runs — two ways to do one thing
+Decided: Policy moved to shed-proto as a serde enum; RunParams.policy carries it
+Because: crates/shed-server/src/registry.rs:338
+Decided: a forwarded wait opens its own ssh stream over the machine's shared ControlMaster connection
+Because: "`wait` on `<machine>/<name>` is forwarded over the link (shed-server links.rs `remote()`)"
+Rejected: waiting on the held calls stream — a long wait would block every other call to that machine
+Check: get box/a's cmd names the remote's shed.sock and state.json and no local path (machines.rs acp test)
+Check: wait box/a returns output/exit 0, timeout/exit 124, and --json terminal.name is box/a
+Check: an unknown agent on the remote is refused with "installed: fake"
+Check: line cap 7746/7800
+Owner: ACP agent sessions can now be started and waited on on another machine over its standing link
