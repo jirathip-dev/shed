@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: fmt clippy test doc deny cap deps hygiene neutral comments
+check: fmt clippy test doc deny cap deps hygiene neutral comments actionlint arch lessons temp-left
 
 fmt:
     cargo fmt --all --check
@@ -38,6 +38,30 @@ comments:
     ! scripts/comment-rule.py ci/fixtures/comment-plain
     ! scripts/comment-rule.py ci/fixtures/comment-private-doc
     scripts/comment-rule.py ci/fixtures/comment-allowed
+
+# The GitHub workflows lint clean; the broken fixture proves the check bites.
+actionlint:
+    actionlint
+    ! actionlint ci/fixtures/actionlint-bad.yml
+
+# Layers, banned calls (only shed_core::runner starts processes) and size limits in .herdsman/arch.toml; one
+# fixture breaks each.
+arch:
+    herdsman arch-check
+    cd ci/fixtures/arch-layer && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-spawn && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-size && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+
+# The lesson checks in .herdsman/rules.md: an active one that fails fails, a shadow one only reports.
+lessons:
+    herdsman lesson-check
+    ! env -u GITHUB_STEP_SUMMARY herdsman lesson-check --rules ci/fixtures/lesson-active.md
+    env -u GITHUB_STEP_SUMMARY herdsman lesson-check --rules ci/fixtures/lesson-shadow.md
+
+# Tests leave no shed-* temp folders (run after `just test`); the fixture folder proves the check bites.
+temp-left:
+    scripts/temp-left.sh
+    ! scripts/temp-left.sh ci/fixtures/temp-left
 
 # The CLI timing report (soft target: a non-waiting call under 20 ms) and the history throughput report.
 bench:

@@ -18,7 +18,6 @@ use std::os::fd::OwnedFd;
 use std::os::unix::fs::DirBuilderExt as _;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -191,7 +190,7 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
         .recursive(true)
         .mode(0o700)
         .create(control_dir);
-    let mut cmd = Command::new("ssh");
+    let mut args = vec![];
     for option in [
         "BatchMode=yes".to_owned(),
         format!("ConnectTimeout={CONNECT_TIMEOUT}"),
@@ -199,18 +198,14 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
         format!("ControlPath={}", control_dir.join("ssh-%C").display()),
         "ControlPersist=60".to_owned(),
     ] {
-        cmd.arg("-o").arg(option);
+        args.extend(["-o".to_owned(), option]);
     }
-    cmd.args(["--", &machine.target, "shed", "connect"]);
+    args.extend(["--", &machine.target, "shed", "connect"].map(str::to_owned));
     if autostart {
-        cmd.arg("--autostart");
+        args.push("--autostart".to_owned());
     }
-    let mut child = cmd
-        .stdin(Stdio::from(OwnedFd::from(theirs.try_clone()?)))
-        .stdout(Stdio::from(OwnedFd::from(theirs)))
-        .spawn()?;
+    let mut child = shed_core::runner::over("ssh", args, OwnedFd::from(theirs))?;
     std::thread::spawn(move || child.wait());
-    drop(cmd);
     match Client::over(ours) {
         Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
             let there = e.message.split("server ").nth(1).unwrap_or_default();
@@ -295,9 +290,7 @@ mod tests {
     use super::*;
 
     fn dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("shed-machines-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        dir
+        crate::temp_dir(&format!("machines-{name}"))
     }
 
     #[test]

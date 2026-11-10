@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use shed_proto::Sample;
@@ -15,8 +14,8 @@ pub(crate) fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-fn stdout(cmd: &mut Command) -> String {
-    cmd.output()
+fn stdout<A: AsRef<std::ffi::OsStr>>(program: &str, args: impl IntoIterator<Item = A>) -> String {
+    shed_core::runner::output(program, args, &[])
         .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
         .unwrap_or_default()
 }
@@ -25,7 +24,7 @@ pub(crate) fn system(dir: &Path) -> Sample {
     let cpus =
         std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(1));
     let (load, mem_pressure_pct, swap_used_mb, uptime_s) = probe();
-    let df = stdout(Command::new("df").arg("-Pk").arg(dir));
+    let df = stdout("df", [Path::new("-Pk"), dir]);
     let free_kb = df.lines().nth(1).and_then(|l| l.split_whitespace().nth(3));
     Sample {
         at: unix_now(),
@@ -77,7 +76,7 @@ fn probe() -> (f64, u64, u64, u64) {
         "kern.boottime",
     ];
     parse_sysctl(
-        &stdout(Command::new("sysctl").arg("-n").args(keys)),
+        &stdout("sysctl", std::iter::once("-n").chain(keys)),
         unix_now(),
     )
 }
@@ -154,10 +153,7 @@ mod tests {
 
     #[test]
     fn one_sample_a_minute_on_a_fake_clock_and_24_hours_kept() {
-        let dir = std::env::temp_dir().join(format!("shed-stats-{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("stats.json");
-        let _ = fs::remove_file(&path);
+        let path = crate::temp_dir("stats").join("stats.json");
         let mut stats = Stats::load(&path);
         let t0 = 1_762_000_000;
         for now in (t0..t0 + 25 * 3600).step_by(10) {

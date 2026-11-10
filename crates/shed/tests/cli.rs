@@ -526,3 +526,19 @@ fn a_terminal_has_shed_set() {
         stdout(&shed_in(&dir, &["read", "envs"])).contains("shed=envs")
     });
 }
+
+#[test]
+fn a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail() {
+    let passed = std::thread::spawn(|| temp_dir("ends-pass"))
+        .join()
+        .expect("passes");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let failed = std::thread::spawn(move || {
+        tx.send(temp_dir("ends-fail")).expect("send");
+        panic!("a failing test");
+    });
+    assert!(failed.join().is_err());
+    let failed = rx.recv().expect("the failed test's dir");
+    assert!(!passed.exists(), "{}", passed.display());
+    assert!(!failed.exists(), "{}", failed.display());
+}

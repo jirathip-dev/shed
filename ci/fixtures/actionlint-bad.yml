@@ -1,0 +1,6 @@
+name: bad
+on: push
+jobs:
+  build:
+    steps:
+      - run: echo "${{ github.no_such_context }}"

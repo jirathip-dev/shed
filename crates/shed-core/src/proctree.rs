@@ -89,10 +89,11 @@ pub struct Ps;
 #[cfg(not(target_os = "linux"))]
 impl ProcessTable for Ps {
     fn list(&self) -> io::Result<Vec<ProcessInfo>> {
-        let out = std::process::Command::new("ps")
-            .args(["-A", "-o", "pid=,ppid=,pgid=,rss=,time=,stat="])
-            .env("LC_ALL", "C")
-            .output()?;
+        let out = crate::runner::output(
+            "ps",
+            ["-A", "-o", "pid=,ppid=,pgid=,rss=,time=,stat="],
+            &[("LC_ALL", "C")],
+        )?;
         if !out.status.success() {
             return Err(io::Error::other(format!("ps failed: {}", out.status)));
         }
