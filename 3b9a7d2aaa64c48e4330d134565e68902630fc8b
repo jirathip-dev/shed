@@ -1,0 +1,12 @@
+Decided: a Python lexer script, scripts/comment-rule.py, run by `just comments` in CI, with two breaking fixtures and one allowed fixture
+Because: "fails on a fixture with a plain `//` comment and on a `///` on a private item"
+Decided: public API = bare pub item, or item of a pub enum/pub trait, in a pub-mod chain of a library crate; shed is bin-only so its docs go
+Because: "`///` (and TS `/** */`) only on public API"
+Decided: //! allowed at the top of crate roots and public module files
+Because: Cargo.toml:31
+Rejected: #![allow(missing_docs)] in tests and main.rs — adds code and spends the 10-allow budget
+Rejected: renaming or new tests in place of stripped comments — AC asks for comment lines only in the diff
+Because: "`git diff -w` shows comment lines only, plus the check"
+Check: git diff -w origin/staging -- crates removes only comment and blank lines and adds none
+Check: TODO(#N) is checked for form only, not that the issue is open (no network in CI)
+Owner: shed's code now follows the one comment rule, and CI fails any PR that breaks it.
