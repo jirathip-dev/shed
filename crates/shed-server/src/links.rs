@@ -41,13 +41,9 @@ impl Held {
 /// The machine and the request for it when `request` names `<machine>/<name>` (or `run` names a
 /// `machine`), its params rewritten for the server there.
 pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value)> {
-    let mut params = request.params.clone();
-    let machine = match method {
-        Method::Run => params
-            .as_object_mut()?
-            .remove("machine")?
-            .as_str()?
-            .to_owned(),
+    // Checked before any clone: every request passes here, ACP's `emit` once per update.
+    let field = match method {
+        Method::Run => "machine",
         Method::Get
         | Method::Read
         | Method::Send
@@ -55,15 +51,20 @@ pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value
         | Method::Kill
         | Method::Rm
         | Method::State
-        | Method::Model => {
-            let (machine, name) = params.get("name")?.as_str()?.split_once('/')?;
-            let machine = machine.to_owned();
-            params["name"] = name.into();
-            machine
-        }
+        | Method::Model => "name",
         _ => return None,
     };
-    Some((machine, params))
+    let value = request.params.get(field)?.as_str()?;
+    let (machine, name) = match method {
+        Method::Run => (value, None),
+        _ => value.split_once('/').map(|(m, n)| (m, Some(n)))?,
+    };
+    let mut params = request.params.clone();
+    match name {
+        Some(name) => params["name"] = name.into(),
+        None => _ = params.as_object_mut()?.remove(field),
+    }
+    Some((machine.to_owned(), params))
 }
 
 /// `name` (of a result, or each in a list) as `<machine>/<name>`.
