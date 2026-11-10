@@ -1,0 +1,7 @@
+Decided: a scripts/install.sh that builds, signs with "herdsman-local" by SHA-1 and only then swaps the binary in
+Because: "shed's install path signs every build"
+Because: "Sign shed's builds with the same stable identity as herdsman"
+Rejected: a second identity-creation script in shed — herdsman's signing-identity.sh already creates the one shared identity
+Rejected: signing after cargo install in place — a failed sign would leave an unsigned binary installed
+Check: two installs give the same designated requirement and codesign -R exits 0 for both, 3 for the unsigned build
+Owner: Run scripts/install.sh (or just install) to get a shed that keeps its Keychain access across rebuilds.
