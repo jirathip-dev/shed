@@ -43,7 +43,7 @@ pub struct Procfs;
 #[cfg(target_os = "linux")]
 impl ProcessTable for Procfs {
     fn list(&self) -> io::Result<Vec<ProcessInfo>> {
-        let page = rustix::param::page_size() as u64;
+        let page = u64::try_from(rustix::param::page_size()).unwrap_or(4096);
         let ticks = rustix::param::clock_ticks_per_second().max(1);
         let mut out = Vec::new();
         for entry in std::fs::read_dir("/proc")? {

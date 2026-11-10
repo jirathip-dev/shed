@@ -331,10 +331,14 @@ enum FromAgent {
 }
 
 fn update(params: &Value) -> Result<Box<SessionUpdate>, String> {
-    let at = |path| params.pointer(path).and_then(Value::as_str);
-    let chunk = at("/update/sessionUpdate") == Some("agent_message_chunk")
-        && at("/update/content/type") == Some("text");
-    if let Some(text) = at("/update/content/text").filter(|_| chunk) {
+    fn at<'a>(v: Option<&'a Value>, key: &str) -> Option<&'a str> {
+        v.and_then(|v| v.get(key)).and_then(Value::as_str)
+    }
+    let u = params.get("update");
+    let content = u.and_then(|u| u.get("content"));
+    let chunk = at(u, "sessionUpdate") == Some("agent_message_chunk")
+        && at(content, "type") == Some("text");
+    if let Some(text) = at(content, "text").filter(|_| chunk) {
         let chunk = ContentChunk::new(text.into());
         return Ok(Box::new(SessionUpdate::AgentMessageChunk(chunk)));
     }
