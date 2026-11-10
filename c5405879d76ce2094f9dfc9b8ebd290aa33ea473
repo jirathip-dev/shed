@@ -1,0 +1,9 @@
+Decided: agent specifics live in crates/shed-server/src/providers/<name>.rs behind the Provider trait, one line each in ALL
+Because: "One module per provider (providers/<name>.rs) behind a common trait"
+Rejected: auth patterns as ACP registry data — the registry is an external schema with no such field
+Decided: the CI check scans crates/*/src outside providers/ and before a file's first #[cfg(test)], like line-cap.sh
+Because: "fails on claude, anthropic, codex, openai, gemini or hermes names outside the providers folder, tests and docs"
+Check: just neutral passes on the repo and requires failure on ci/fixtures/leaky-core
+Check: an_expired_login_ends_the_turn_as_an_auth_error still passes (claude-acp auth failure ends as error)
+Check: the machine_stats test fails on the unchanged base on this host too (uptime_s is 0); this change didn't cause it
+Owner: Agent names now live only in one file per agent, and CI blocks them anywhere else.
