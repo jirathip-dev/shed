@@ -1,26 +1,18 @@
-//! Agent specifics, one module per agent behind [`Provider`]: core code names no agent (#64,
-//! `scripts/neutral-core.sh`). Adding one is a new file here plus one line in [`ALL`].
-
 mod claude;
 #[cfg(test)]
 mod fake;
 
-/// What shed knows about one agent beyond its ACP registry entry.
 pub trait Provider: Sync {
-    /// The ACP registry id it covers.
     fn id(&self) -> &'static str;
-    /// Patterns that mark a reply or error line as an auth failure: the turn ends as `error`.
     fn auth_failures(&self) -> &'static [&'static str];
 }
 
-/// Every provider, one line each.
 static ALL: &[&dyn Provider] = &[
     &claude::Claude,
     #[cfg(test)]
     &fake::Fake,
 ];
 
-/// Agent `id`'s auth-failure patterns; none for an agent with no provider.
 #[must_use]
 pub fn auth_failures(id: &str) -> &'static [&'static str] {
     ALL.iter()

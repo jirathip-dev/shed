@@ -1,5 +1,3 @@
-//! `screen.watch`: a terminal's screen as a full update, then the rows that changed, at most 20 a second.
-
 use std::time::Duration;
 
 use shed_core::{Color, Snapshot, Terminal, Wake};
@@ -7,7 +5,6 @@ use shed_proto::{self as proto, Line, Run, ScreenUpdate};
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::unix::OwnedWriteHalf;
 
-/// The least time between two updates to one watcher: 20 a second.
 const EVERY: Duration = Duration::from_millis(50);
 
 fn color(c: Option<Color>) -> Option<proto::Color> {
@@ -30,8 +27,6 @@ fn run(r: &shed_core::Run) -> Run {
     }
 }
 
-/// The update from `last` (`None`: the client has nothing) to `now`, at change count `seq`; `None` when
-/// nothing differs. A first update or a resize carries every row.
 fn diff(last: Option<&Snapshot>, now: &Snapshot, seq: u64) -> Option<ScreenUpdate> {
     if last == Some(now) {
         return None;
@@ -56,14 +51,12 @@ fn diff(last: Option<&Snapshot>, now: &Snapshot, seq: u64) -> Option<ScreenUpdat
     })
 }
 
-/// Writes the update lines for `term` to `out` until the program has exited or a write fails.
 pub(crate) async fn watch(term: &Terminal, since: Option<u64>, out: &mut OwnedWriteHalf) {
     let (mut seq, mut now) = term.snapshot();
     let mut last = (since == Some(seq)).then(|| now.clone());
     let mut exited = false;
     loop {
         if let Some(update) = diff(last.as_ref(), &now, seq) {
-            // An update (numbers, strings and flags) always serialises.
             let mut line = serde_json::to_vec(&update).unwrap_or_default();
             line.push(b'\n');
             if out.write_all(&line).await.is_err() {

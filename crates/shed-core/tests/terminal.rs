@@ -14,7 +14,6 @@ fn sh(script: &str, size: Size) -> Terminal {
     Terminal::spawn(&["sh", "-c", script], Path::new("/"), NO_ENV, size).expect("spawn")
 }
 
-/// Polls `check` for up to ten seconds.
 fn eventually(what: &str, mut check: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !check() {
@@ -70,7 +69,6 @@ fn scrollback_is_bounded() {
     eventually("all lines", || t.screen().ends_with("line5049"));
     let history = t.history(usize::MAX);
     let lines: Vec<&str> = history.lines().collect();
-    // 5,000 scrolled-off lines plus the 5 visible rows (the last one blank, under the cursor).
     assert_eq!(lines.len(), shed_core::history::LINES + 4);
     assert_eq!(lines.first(), Some(&"line46"));
     assert_eq!(t.history(2), "line5048\nline5049");

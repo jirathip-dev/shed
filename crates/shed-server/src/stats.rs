@@ -1,6 +1,3 @@
-//! Machine health for `machine.stats`: a sample of the system now, and one a minute kept for 24 h in
-//! `stats.json` beside the state file. Linux reads `/proc`; elsewhere (macOS) `sysctl`; both `df`.
-
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,12 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use shed_proto::Sample;
 
-/// Seconds between kept samples.
 const EVERY: u64 = 60;
-/// How long samples are kept, in seconds.
 const DAY: u64 = 86_400;
 
-/// Unix seconds now.
 pub(crate) fn unix_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -27,14 +21,11 @@ fn stdout(cmd: &mut Command) -> String {
         .unwrap_or_default()
 }
 
-/// The system now, without terminal counts; `dir` is on the volume whose free space counts. A value
-/// that cannot be read is 0.
 pub(crate) fn system(dir: &Path) -> Sample {
     let cpus =
         std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(1));
     let (load, mem_pressure_pct, swap_used_mb, uptime_s) = probe();
     let df = stdout(Command::new("df").arg("-Pk").arg(dir));
-    // `df -P`: a header, then filesystem, 1024-blocks, used, available, ….
     let free_kb = df.lines().nth(1).and_then(|l| l.split_whitespace().nth(3));
     Sample {
         at: unix_now(),
@@ -48,7 +39,6 @@ pub(crate) fn system(dir: &Path) -> Sample {
     }
 }
 
-/// Load, memory pressure (percent), swap used (MiB) and uptime (s) from `/proc`.
 #[cfg(target_os = "linux")]
 fn probe() -> (f64, u64, u64, u64) {
     let read = |p: &str| fs::read_to_string(p).unwrap_or_default();
@@ -78,7 +68,6 @@ fn probe() -> (f64, u64, u64, u64) {
     )
 }
 
-/// Load, memory pressure (percent), swap used (MiB) and uptime (s) from `sysctl`.
 #[cfg(not(target_os = "linux"))]
 fn probe() -> (f64, u64, u64, u64) {
     let keys = [
@@ -93,9 +82,6 @@ fn probe() -> (f64, u64, u64, u64) {
     )
 }
 
-/// `sysctl -n vm.loadavg kern.memorystatus_level vm.swapusage kern.boottime`, a value a line:
-/// `{ 1.50 1.20 1.00 }`, the percent of memory free, `total = 2048.00M  used = 1024.50M  free = …`
-/// and `{ sec = 1762000000, usec = 0 } …`.
 #[cfg(any(not(target_os = "linux"), test))]
 fn parse_sysctl(text: &str, now: u64) -> (f64, u64, u64, u64) {
     let mut lines = text.lines();
@@ -119,14 +105,12 @@ fn parse_sysctl(text: &str, now: u64) -> (f64, u64, u64, u64) {
     )
 }
 
-/// The kept samples, one a minute for 24 h, saved to `path` as each is added.
 pub(crate) struct Stats {
     samples: VecDeque<Sample>,
     path: PathBuf,
 }
 
 impl Stats {
-    /// The samples saved at `path`; none when it is missing or unreadable.
     pub(crate) fn load(path: &Path) -> Self {
         let saved = fs::read(path).ok();
         Self {
@@ -137,14 +121,12 @@ impl Stats {
         }
     }
 
-    /// The seconds from `now` until a sample is due (0: due now, none is kept or the last is a minute old).
     pub(crate) fn until_due(&self, now: u64) -> u64 {
         self.samples
             .back()
             .map_or(0, |s| (s.at + EVERY).saturating_sub(now))
     }
 
-    /// Keeps `sample`, drops those 24 h older and saves (best effort: a failed save loses history only).
     pub(crate) fn push(&mut self, sample: Sample) {
         let cutoff = sample.at.saturating_sub(DAY);
         self.samples.push_back(sample);
@@ -157,7 +139,6 @@ impl Stats {
         }
     }
 
-    /// The kept samples after `since`, oldest first.
     pub(crate) fn since(&self, since: u64) -> Vec<Sample> {
         self.samples
             .iter()
@@ -178,7 +159,6 @@ mod tests {
         let path = dir.join("stats.json");
         let _ = fs::remove_file(&path);
         let mut stats = Stats::load(&path);
-        // The server checks every 10 s; a fake clock runs 25 h from t0.
         let t0 = 1_762_000_000;
         for now in (t0..t0 + 25 * 3600).step_by(10) {
             if stats.until_due(now) == 0 {

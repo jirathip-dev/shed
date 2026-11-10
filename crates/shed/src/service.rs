@@ -1,6 +1,3 @@
-//! `shed install|uninstall|doctor`: the per-user job that runs `shed serve`, a launchd agent on macOS
-//! and a systemd user unit elsewhere. shed writes and checks the file; it prints the lines that load it.
-
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -9,8 +6,6 @@ use shed_server::{Client, Error, Paths};
 
 const LABEL: &str = "dev.shed.serve";
 
-/// The job file and its contents for this binary, the lines that start and stop it, its log, and the
-/// shell line that exits 0 when it is loaded.
 struct Job {
     path: PathBuf,
     text: String,
@@ -77,8 +72,6 @@ fn job() -> anyhow::Result<Job> {
     })
 }
 
-/// `shed install [--force]`: writes the job file (a file with other contents only with `force`) and
-/// prints the line that starts it.
 pub fn install(force: bool) -> anyhow::Result<()> {
     let job = job()?;
     let file = job.path.display();
@@ -99,7 +92,6 @@ pub fn install(force: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `shed uninstall`: prints the lines that stop the job and remove its file.
 pub fn uninstall() -> anyhow::Result<()> {
     let job = job()?;
     println!(
@@ -110,8 +102,6 @@ pub fn uninstall() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `shed doctor`: the job file, whether it is loaded, the socket, the server's version and the log,
-/// a line each with the fix for a failure. Returns whether all are ok.
 pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
     let job = job()?;
     let (file, log) = (job.path.display(), job.log.display());

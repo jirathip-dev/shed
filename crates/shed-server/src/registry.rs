@@ -1,5 +1,3 @@
-//! The terminals a server owns, and the state file that outlives it.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
@@ -26,26 +24,17 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::events::{Events, Subscriber};
 use crate::stats::Stats;
 
-/// The size new terminals start at.
 const SIZE: Size = Size { rows: 24, cols: 80 };
-/// How long `kill` waits after SIGTERM before SIGKILL.
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
-/// The state file's format version.
 const FILE_VERSION: u32 = 1;
 
-/// What `attach`, `events` and `screen.watch` stream after their response, until the source ends or a
-/// write fails.
 pub(crate) enum Stream {
-    /// `attach`: a redraw of the screen, then the raw output.
     Output(Vec<u8>, UnboundedReceiver<Vec<u8>>),
-    /// `events`: the replayed events, then the event lines.
     Events(Subscriber),
-    /// `screen.watch`: the terminal, and the change count the client has, if any.
     Screen(Arc<Terminal>, Option<u64>),
 }
 
 impl Stream {
-    /// Writes the stream to `out`.
     pub(crate) async fn run(self, mut out: OwnedWriteHalf) {
         match self {
             Self::Output(first, rx) => pump(&mut out, first, rx).await,
@@ -55,7 +44,6 @@ impl Stream {
     }
 }
 
-/// Writes `bytes`, then all that `rx` holds at each wake as one write.
 async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Vec<u8>>) {
     let mut batch = Vec::new();
     while out.write_all(&bytes).await.is_ok() && rx.recv_many(&mut batch, 1024).await > 0 {
@@ -64,7 +52,6 @@ async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedRec
     }
 }
 
-/// The state file: every terminal's last known info.
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     version: u32,
@@ -73,14 +60,10 @@ struct StateFile {
 
 struct Entry {
     info: TerminalInfo,
-    /// The live (or exited but still readable) terminal; `None` for one lost in a restart.
     term: Option<Arc<Terminal>>,
-    /// `kill` is ending it: its exit is a `killed` event, not `exited`.
     killing: bool,
-    /// The tree's use at the last sample, and the use the last `resources` event reported.
     resources: Option<Resources>,
     emitted: Option<Resources>,
-    /// When the tree was last sampled and its CPU time then.
     sampled: (Instant, Duration),
 }
 
@@ -96,7 +79,6 @@ impl Entry {
         }
     }
 
-    /// The info with the last sample, as `ls` and `get` show it.
     fn view(&self) -> TerminalInfo {
         TerminalInfo {
             resources: self.resources,
@@ -105,14 +87,11 @@ impl Entry {
     }
 }
 
-/// The server's terminals by name, saved to `path` after every change.
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
     path: PathBuf,
-    /// The server's socket, which ACP bridges report to.
     socket: PathBuf,
     pub(crate) events: Events,
-    /// The machine samples kept for `machine.stats`.
     pub(crate) stats: Stats,
 }
 
@@ -124,7 +103,6 @@ fn internal(e: impl std::fmt::Display) -> RpcError {
     RpcError::new(ErrorCode::Internal, e)
 }
 
-/// More than 10 % away from the last reported value.
 fn moved(old: u64, new: u64) -> bool {
     new.abs_diff(old) * 10 > old
 }
@@ -133,7 +111,6 @@ fn exit_code(status: ExitStatus) -> Option<i32> {
     status.code().or_else(|| status.signal().map(|s| 128 + s))
 }
 
-/// Terminal `name`'s history: the default caps, and its output log beside the state file at `state`.
 fn history(state: &Path, name: &str) -> History {
     History {
         log: Some(state.with_file_name("history").join(format!("{name}.log"))),
@@ -141,8 +118,6 @@ fn history(state: &Path, name: &str) -> History {
     }
 }
 
-/// Starts `cmd` with `$SHED` set to the terminal's name, so `shed state` inside needs no name. The
-/// screen starts from the tail of the terminal's log, if any.
 fn spawn(
     cmd: &[String],
     cwd: &Path,
@@ -165,9 +140,6 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Registry {
-    /// Loads the state file at `path` (none yet: no terminals) for the server on `socket`. Running kept
-    /// terminals come back as `$SHELL` (or `/bin/sh`) in their cwd; other running ones are listed as
-    /// exited. The result is saved at once.
     pub(crate) fn load(path: &Path, socket: &Path) -> io::Result<Self> {
         let file: StateFile = match fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
@@ -203,7 +175,6 @@ impl Registry {
             }
             entries.insert(info.name.clone(), Entry::new(info, term));
         }
-        // Logs and transcripts of terminals the file no longer names (removed, or lost before a save).
         for dir in ["history", "acp"] {
             for file in fs::read_dir(path.with_file_name(dir)).into_iter().flatten() {
                 let Ok(file) = file else { continue };
@@ -227,7 +198,6 @@ impl Registry {
         Ok(registry)
     }
 
-    /// Writes the state file atomically (temp file, fsync, rename), mode 0600.
     fn save(&self) -> io::Result<()> {
         if let Some(dir) = self.path.parent() {
             fs::DirBuilder::new()
@@ -257,8 +227,6 @@ impl Registry {
         Ok(value)
     }
 
-    /// Copies each terminal's reported state and marks those whose program has exited, emitting the
-    /// events and saving when any changed.
     pub(crate) fn refresh(&mut self) -> Result<(), RpcError> {
         let mut changed = false;
         for entry in self.entries.values_mut() {
@@ -289,7 +257,6 @@ impl Registry {
         Ok(())
     }
 
-    /// Marks a running entry exited and emits `killed` or `exited`.
     fn exited(events: &mut Events, entry: &mut Entry, status: ExitStatus) {
         let code = exit_code(status);
         (entry.info.state, entry.info.exit) = (State::Exited, code);
@@ -303,8 +270,6 @@ impl Registry {
         events.emit(&entry.info.name, &entry.info.labels, kind);
     }
 
-    /// Records each running tree's memory and CPU from `procs`, emitting `resources` when either moved
-    /// by more than 10 % since the last one.
     pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) {
         for entry in self.entries.values_mut() {
             let Some(pid) = entry.info.pid else { continue };
@@ -334,8 +299,6 @@ impl Registry {
         }
     }
 
-    /// `run --acp`'s command: this binary's ACP bridge to this server around the adapter `cmd`, else
-    /// the installed agent `id`'s (refused, with the installed ones, when there is none).
     fn bridge(
         &self,
         id: &str,
@@ -383,12 +346,10 @@ impl Registry {
         Ok([bridge.to_vec(), cmd].concat())
     }
 
-    /// The state file's directory.
     pub(crate) fn dir(&self) -> PathBuf {
         self.path.parent().unwrap_or(Path::new(".")).to_owned()
     }
 
-    /// Terminals by state: the reported state while running, else `running`; `exited`.
     fn counts(&self) -> BTreeMap<String, u64> {
         let mut counts = BTreeMap::new();
         for e in self.entries.values() {
@@ -402,25 +363,21 @@ impl Registry {
         counts
     }
 
-    /// Keeps `sample` with the terminal counts.
     pub(crate) fn record(&mut self, mut sample: Sample) {
         sample.terminals = self.counts();
         self.stats.push(sample);
     }
 
-    /// `machine.stats`: `now` with the terminal counts, and the kept samples after `since`.
     pub(crate) fn machine_stats(&self, mut now: Sample, since: Option<u64>) -> MachineStats {
         now.terminals = self.counts();
         let history = since.map(|t| self.stats.since(t)).unwrap_or_default();
         MachineStats { now, history }
     }
 
-    /// `events`: the replay and the stream.
     pub(crate) fn subscribe(&mut self, p: EventsParams) -> Stream {
         Stream::Events(self.events.subscribe(p))
     }
 
-    /// The live terminals, to watch.
     pub(crate) fn running(&self) -> Vec<Arc<Terminal>> {
         self.entries
             .values()
@@ -433,7 +390,6 @@ impl Registry {
         self.entries.get(name).ok_or_else(|| not_found(name))
     }
 
-    /// A running terminal.
     pub(crate) fn live(&self, name: &str) -> Result<&Arc<Terminal>, RpcError> {
         let entry = self.entry(name)?;
         match (&entry.term, entry.info.state) {
@@ -445,7 +401,6 @@ impl Registry {
         }
     }
 
-    /// `run`: starts a terminal.
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
         if let Some(id) = &p.acp {
@@ -467,18 +422,15 @@ impl Registry {
                 return Err(RpcError::new(ErrorCode::NameTaken, name));
             }
             Some(name) => name,
-            // len + 1 candidates for len names: one is always free, so `find` returns Some.
             None => (1..=self.entries.len() + 1)
                 .map(|n| format!("t{n}"))
                 .find(|n| !self.entries.contains_key(n))
                 .unwrap_or_default(),
         };
-        // A new terminal starts a fresh log.
         let history = history(&self.path, &name);
         if let Some(log) = &history.log {
             let _ = fs::remove_file(log);
         }
-        // The MCP servers (secrets and all) reach the bridge in its environment only.
         let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
         let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
         let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
@@ -507,7 +459,6 @@ impl Registry {
         self.saved(info)
     }
 
-    /// `ls`: terminals carrying every label in `p`, by name.
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
         self.entries
             .values()
@@ -520,13 +471,10 @@ impl Registry {
             .collect()
     }
 
-    /// `get`: one terminal.
     pub(crate) fn get(&self, name: &str) -> Result<TerminalInfo, RpcError> {
         Ok(self.entry(name)?.view())
     }
 
-    /// `read`: screen or history text, or an ACP terminal's transcript rendered; for a terminal lost in
-    /// a restart, from the tail of its log.
     pub(crate) fn read(&self, p: &ReadParams) -> Result<ReadResult, RpcError> {
         let entry = self.entry(&p.name)?;
         let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
@@ -563,14 +511,12 @@ impl Registry {
         Ok(ReadResult { text, events })
     }
 
-    /// `send`: types text.
     pub(crate) fn send(&self, p: &SendParams) -> Result<(), RpcError> {
         self.live(&p.name)?
             .write(p.text.as_bytes())
             .map_err(internal)
     }
 
-    /// `keys`: presses keys; sends nothing if any name is unknown.
     pub(crate) fn keys(&self, p: &KeysParams) -> Result<(), RpcError> {
         let term = self.live(&p.name)?;
         let bytes = p
@@ -582,7 +528,6 @@ impl Registry {
         term.write(&bytes.concat()).map_err(internal)
     }
 
-    /// `resize`: resizes a running terminal.
     pub(crate) fn resize(&self, p: &ResizeParams) -> Result<(), RpcError> {
         if p.rows == 0 || p.cols == 0 {
             return Err(RpcError::new(
@@ -597,7 +542,6 @@ impl Registry {
         self.live(&p.name)?.resize(size).map_err(internal)
     }
 
-    /// `attach`: a running terminal, a redraw of its screen, and its raw output from now on.
     pub(crate) fn attach(&self, name: &str) -> Result<(TerminalInfo, Stream), RpcError> {
         let term = self.live(name)?;
         let output = term.subscribe();
@@ -605,9 +549,7 @@ impl Registry {
         Ok((self.get(name)?, Stream::Output(redraw.into_bytes(), output)))
     }
 
-    /// `state`: records a running terminal's reported state.
     pub(crate) fn state(&mut self, p: StateParams) -> Result<TerminalInfo, RpcError> {
-        // An ACP bridge also reports its agent `hibernated`.
         let acp = self.entry(&p.name)?.info.acp.is_some() && p.report.state == "hibernated";
         if !acp && !STATES.contains(&p.report.state.as_str()) {
             return Err(RpcError::new(
@@ -624,7 +566,6 @@ impl Registry {
         self.get(&p.name)
     }
 
-    /// `emit`: an ACP terminal's structured event.
     pub(crate) fn emit(&mut self, p: EmitParams) -> Result<(), RpcError> {
         if !p.kind.is_acp() {
             return Err(RpcError::new(
@@ -641,14 +582,12 @@ impl Registry {
         };
         let labels = info.labels.clone();
         self.events.emit_as(&p.name, &labels, p.kind, p.replay);
-        // Saved, so a lost terminal's session id outlives a restart for `run --resume`.
         if session {
             self.save().map_err(internal)?;
         }
         Ok(())
     }
 
-    /// `acp.model`: asks an ACP terminal's bridge to switch the agent's model.
     pub(crate) fn model(&self, p: ModelParams) -> Result<(), RpcError> {
         let why = format!("{} is not an ACP terminal", p.name);
         let acp = self.entry(&p.name)?.info.acp.as_ref();
@@ -657,8 +596,6 @@ impl Registry {
         self.send(&SendParams { name: p.name, text })
     }
 
-    /// The terminal to wait on (`None` when lost in a restart) and its info; the caller waits without
-    /// holding the registry.
     pub(crate) fn to_wait(
         &self,
         name: &str,
@@ -667,8 +604,6 @@ impl Registry {
         Ok((entry.term.clone(), entry.info.clone()))
     }
 
-    /// The terminal to kill, if it still runs after a refresh, marked so its exit is `killed`; the
-    /// caller kills it without holding the registry.
     pub(crate) fn mark_kill(&mut self, name: &str) -> Result<Option<Arc<Terminal>>, RpcError> {
         self.refresh()?;
         let entry = self.entries.get_mut(name).ok_or_else(|| not_found(name))?;
@@ -676,7 +611,6 @@ impl Registry {
         Ok(entry.term.clone().filter(|_| entry.killing))
     }
 
-    /// Records the exit of a terminal `kill` ended; returns its info.
     pub(crate) fn killed(
         &mut self,
         name: &str,
@@ -693,7 +627,6 @@ impl Registry {
         self.saved(info)
     }
 
-    /// `rm`: removes an exited terminal.
     pub(crate) fn rm(&mut self, name: &str) -> Result<TerminalInfo, RpcError> {
         if self.entry(name)?.info.state == State::Running {
             return Err(RpcError::new(ErrorCode::StillRunning, name));
@@ -718,8 +651,6 @@ mod tests {
         dir
     }
 
-    /// R2: the state file each past release wrote (M1; M2's report and idle fallback; M2c's ACP agent;
-    /// #27's state source) loads, and so does one with keys this release does not know.
     #[test]
     fn state_files_of_every_past_release_load() {
         let terminal = |name: &str, extra: &str| {
@@ -765,8 +696,6 @@ mod tests {
         assert_eq!(osc.state_source.as_deref(), Some("jan-osc9999"));
     }
 
-    /// R13: a state file that is not JSON stops the load with the reason and is left as it was, never
-    /// replaced by an empty one.
     #[test]
     fn a_corrupt_state_file_is_refused_and_kept() {
         let path = dir("corrupt").join("state.json");
@@ -781,7 +710,6 @@ mod tests {
         );
     }
 
-    /// R24: the load removes logs and transcripts no terminal names, and `rm` removes the terminal's.
     #[test]
     fn leftovers_go_on_load_and_a_removed_terminal_leaves_nothing() {
         let root = dir("leftovers");

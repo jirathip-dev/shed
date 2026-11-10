@@ -23,7 +23,6 @@ fn shed(args: &[&str]) -> String {
     String::from_utf8(out.stdout).expect("utf-8 stdout")
 }
 
-/// `shed --dir <dir> args…`.
 fn shed_in(dir: &Path, args: &[&str]) -> Output {
     Command::new(SHED)
         .arg("--dir")
@@ -38,7 +37,6 @@ fn stdout(out: &Output) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// Replaces every number after `"pid":` or `"pid": ` with 0.
 fn zero_pids(s: &str) -> String {
     let mut out = String::new();
     let mut rest = s;
@@ -55,11 +53,9 @@ fn zero_pids(s: &str) -> String {
     out + rest
 }
 
-/// A CLI session whose commands and output are collected for the golden transcript.
 struct Transcript {
     dir: PathBuf,
     text: String,
-    /// The file under `tests/golden/`.
     golden: &'static str,
 }
 
@@ -192,7 +188,6 @@ fn a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each() {
         text: String::new(),
         golden: "state.txt",
     };
-    // The agent reports `working` by escape, then `done` with `shed state` and no name ($SHED).
     let agent = format!(
         "printf 'start\\033]7501;state=working;note=step 1\\007end\\n'; read x; \
          '{SHED}' --dir '{d}' state done --note 'all green'; read y"
@@ -452,7 +447,6 @@ fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
         &dir,
         &["run", "--name", "small", "--cwd", d, "--", "sleep", "100"],
     ));
-    // The shell child holds 50 MiB of `x`s; the tree's leader is the outer `sh`.
     let script = r#"sh -c 'x=$(head -c 52428800 /dev/zero | tr "\0" x); sleep 100'"#;
     let run = ["run", "--name", "mem", "--label", "test=mem", "--cwd", d];
     stdout(&shed_in(
@@ -486,7 +480,6 @@ fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
     assert_eq!(names, ["mem", "small"], "{top}");
 }
 
-/// Soft: prints how long non-waiting calls take; CI shows it (`just bench`).
 #[test]
 fn timing_report() {
     const CALLS: usize = 30;

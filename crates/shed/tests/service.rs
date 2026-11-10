@@ -9,7 +9,6 @@ use common::{Server, temp_dir};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
-/// `HOME=<home> shed args…`, with no `XDG_CONFIG_HOME` so the unit goes under `<home>/.config`.
 fn shed(home: &Path, args: &[&str]) -> Output {
     Command::new(SHED)
         .env("HOME", home)
@@ -67,7 +66,6 @@ fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
             "<key>StandardOutPath</key><string>{}</string>",
             log.display()
         )));
-        // `plutil` ships with macOS; skip the lint where it is missing.
         if let Ok(lint) = Command::new("plutil").arg("-lint").arg(&file).output() {
             assert!(lint.status.success(), "plutil -lint: {lint:?}");
         }
@@ -78,7 +76,6 @@ fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
         );
     }
 
-    // The same contents: nothing written.
     let before = std::fs::metadata(&file)
         .and_then(|m| m.modified())
         .expect("mtime");
@@ -93,7 +90,6 @@ fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
         before
     );
 
-    // Other contents: refused, then replaced with --force.
     std::fs::write(&file, "hand-made\n").expect("edit the job");
     let out = shed(&home, &["install"]);
     assert!(!out.status.success(), "{out:?}");
@@ -137,7 +133,6 @@ fn doctor_reports_a_missing_job_and_server_with_their_fix_lines() {
         "{report}"
     );
 
-    // With the job written and a server on the socket, those two are ok.
     assert!(shed(&home, &["install"]).status.success());
     let _server = Server::start(&home);
     let report = text(&shed(&home, &["--dir", d, "doctor"]));

@@ -15,8 +15,6 @@ use crate::proctree::{self, ProcessTable as _, Usage};
 use crate::screen::{Report, Screen, Size, Snapshot};
 use crate::{Error, keys};
 
-/// How soon [`Terminal::wait_until`] looks again for the exit after the PTY closed but before the
-/// program was reaped.
 const REAP: Duration = Duration::from_millis(20);
 
 /// Why [`Terminal::wait_until`] returned.
@@ -30,9 +28,7 @@ pub enum Wake {
     Timeout,
 }
 
-/// What waiters watch, shared with the reader thread.
 struct Status {
-    /// Bumped on every output chunk, report and PTY close.
     changes: u64,
     closed: bool,
     last_output: Instant,
@@ -41,7 +37,6 @@ struct Status {
 }
 
 impl Status {
-    /// When the silence fallback reports `idle`: only while nothing was reported.
     fn idle_at(&self) -> Option<Instant> {
         match self.report {
             Some(_) => None,
@@ -52,7 +47,6 @@ impl Status {
     }
 }
 
-/// Applies `change` and wakes every waiter.
 fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
     watch.send_modify(|status| {
         change(status);
@@ -72,7 +66,6 @@ pub struct Terminal {
     pid: i32,
 }
 
-/// The senders of [`Terminal::subscribe`]rs; `None` once the PTY has closed.
 type Outputs = Mutex<Option<Vec<mpsc::UnboundedSender<Vec<u8>>>>>;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -347,8 +340,6 @@ fn pty_size(size: Size) -> pty_process::Size {
     pty_process::Size::new(size.rows.max(1), size.cols.max(1))
 }
 
-/// Feeds PTY output into the screen, the subscribers and the log until the PTY closes (EOF, or EIO once
-/// every program left). A log that fails is dropped; the output goes on.
 fn read_loop(
     pty: &pty_process::blocking::Pty,
     screen: &Mutex<Screen>,
@@ -365,7 +356,6 @@ fn read_loop(
                     let mut screen = lock(screen);
                     screen.feed(&buf[..n]);
                     let report = screen.take_report();
-                    // Under the screen lock, so a snapshot and its change count agree.
                     bump(watch, |s| {
                         s.last_output = Instant::now();
                         s.report = report.or_else(|| s.report.take());

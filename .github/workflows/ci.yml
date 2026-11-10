@@ -44,6 +44,8 @@ jobs:
         run: just hygiene
       - name: neutral core (no agent or provider names outside providers/)
         run: just neutral
+      - name: comment rule (no //; /// on public API only)
+        run: just comments
 
   stable:
     strategy:

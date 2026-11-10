@@ -1,0 +1,1 @@
+- Don't write `//` or `/* */` comments (only `// SAFETY:` and `// TODO(#N)` on an open issue), and don't put `///` on anything but public API. Enforcer: `just comments` (scripts/comment-rule.py).

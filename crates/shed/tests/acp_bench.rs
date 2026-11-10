@@ -16,7 +16,6 @@ use shed_server::acp::{Input, frame};
 use shed_server::proto::{EventsParams, Method, SendParams};
 use shed_server::{Client, Paths};
 
-/// Updates per turn or replay.
 const UPDATES: usize = 1_000;
 
 fn shed(dir: &Path, args: &[&str]) {
@@ -29,8 +28,6 @@ fn shed(dir: &Path, args: &[&str]) {
     assert!(out.status.success(), "shed {args:?} failed: {out:?}");
 }
 
-/// Starts the fake agent as terminal `name`, labelled `run=<name>`, `extra` passed to `run` and `fake`
-/// to the agent.
 fn start(dir: &Path, name: &str, extra: &[&str], fake: &[&str]) {
     let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_acp.py");
     let label = format!("run={name}");
@@ -39,7 +36,6 @@ fn start(dir: &Path, name: &str, extra: &[&str], fake: &[&str]) {
     shed(dir, &[&run[..], extra, &cmd, fake].concat());
 }
 
-/// The events of terminals labelled `run=<name>` from now on.
 fn events(dir: &Path, name: &str) -> impl Iterator<Item = Value> + use<> {
     let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
     let params = EventsParams {
@@ -51,7 +47,6 @@ fn events(dir: &Path, name: &str) -> impl Iterator<Item = Value> + use<> {
     lines.map(|l| serde_json::from_str(&l.expect("an event line")).expect("event JSON"))
 }
 
-/// Reads `events` until one is `last`; returns how many were `text`.
 fn texts_until(events: &mut impl Iterator<Item = Value>, last: &str) -> usize {
     let mut texts = 0;
     for e in events {
@@ -63,9 +58,6 @@ fn texts_until(events: &mut impl Iterator<Item = Value>, last: &str) -> usize {
     panic!("the events ended before {last}");
 }
 
-/// The best of 3 turns of `updates` one-character chunks from fake agent `name` (started with `fake`),
-/// at a socket client, in ns to the reply. `count` reads the client's events until the reply and returns
-/// how many were text and when the time starts: the prompt's `sent`, or the first update.
 fn best_turn<E>(
     name: &str,
     fake: &[&str],
@@ -112,9 +104,6 @@ fn throughput() {
     println!("acp throughput: {} us", ns / 1_000);
 }
 
-/// Shed's own share: the agent writes 10,000 canned update lines at once and the client counts raw event
-/// lines without parsing them, so nearly all the time from the first update to the reply is the bridge
-/// and the server (the turn's start, before the agent's 0.2 s pause, is not timed).
 #[test]
 #[ignore = "a timing bench: scripts/bench-acp.sh"]
 fn shed_only() {
@@ -159,12 +148,10 @@ fn replay() {
     let began = Instant::now();
     let history = history.to_str().expect("utf-8");
     start(&dir, "r", &["--resume", "sess-1"], &["--history", history]);
-    // The session event follows the replay.
     assert_eq!(texts_until(&mut events, "session"), UPDATES);
     println!("acp replay: {} us", began.elapsed().as_micros());
 }
 
-/// The output of a `shed` call that must succeed.
 fn out(dir: &Path, args: &[&str]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_shed"))
         .arg("--dir")
@@ -176,7 +163,6 @@ fn out(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// The summed RSS (KiB) and process count of terminal `name`'s tree: its bridge and its agent's.
 fn rss(dir: &Path, name: &str) -> (u64, usize) {
     let info: Value = serde_json::from_str(&out(dir, &["get", name])).expect("JSON");
     let pid = i32::try_from(info["pid"].as_i64().expect("a pid")).expect("a pid");
@@ -189,8 +175,6 @@ fn rss(dir: &Path, name: &str) -> (u64, usize) {
     (usage.rss_bytes / 1024, usage.processes)
 }
 
-/// Sends `prompt` to `name` (asleep); returns the ms to its first update that is not a replay, then
-/// waits for the reply.
 fn wake(dir: &Path, name: &str, prompt: &str) -> u128 {
     let mut events = events(dir, name).filter(|e| e["replay"] != true);
     let began = Instant::now();
@@ -237,7 +221,6 @@ fn hibernate() {
             out(&dir, &["send", name, "hi"]);
             out(&dir, &["wait", name, "--until", "done", "--timeout", "10"]);
         }
-        // Idle for the same time either way: past the delay, then until every agent sleeps.
         std::thread::sleep(std::time::Duration::from_secs(2));
         if after != "0" {
             for name in &names {
@@ -264,8 +247,6 @@ fn hibernate() {
     );
 }
 
-/// `SHED_BENCH_LIVE` (an adapter command, e.g. `npx -y @agentclientprotocol/claude-agent-acp@0.100.0`,
-/// logged in): its RSS awake and hibernated, and its wake time; the conversation goes on after it.
 #[test]
 #[ignore = "a live bench: needs SHED_BENCH_LIVE and a logged-in agent"]
 fn hibernate_live() {

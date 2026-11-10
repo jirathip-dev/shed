@@ -41,7 +41,6 @@ fn session() -> AcpSession {
             ["opus".into(), "Opus".into()],
             ["haiku".into(), "Haiku".into()],
         ],
-        // Keys in order, so the line is the same with or without serde_json's `preserve_order`.
         mcp_servers: vec![
             serde_json::json!({"headers": [{"name": "Authorization", "value": "***"}],
             "name": "web", "type": "http", "url": "https://mcp.example/"}),
@@ -55,7 +54,6 @@ const RESOURCES: Resources = Resources {
     cpu_pct: 3,
 };
 
-/// One example of each event kind, in the order a terminal's life emits them.
 fn events() -> Vec<Event> {
     [
         EventKind::Started,
@@ -119,7 +117,6 @@ fn events() -> Vec<Event> {
     .collect()
 }
 
-/// A first update of a 2-row screen, then one row changed.
 fn screen_updates() -> [ScreenUpdate; 2] {
     let plain = |text: &str| Run {
         text: text.into(),
@@ -230,7 +227,6 @@ fn emit_params_round_trip() {
     assert!(p.kind.is_acp());
 }
 
-/// `read`'s example params and result.
 fn read_example() -> (Value, Value) {
     (
         to_value(ReadParams {
@@ -250,7 +246,6 @@ fn read_example() -> (Value, Value) {
     )
 }
 
-/// An example params and result for each method, built from the typed structs.
 fn example(method: Method) -> (Value, Value) {
     let running = || to_value(info(State::Running)).unwrap();
     let exited = || to_value(info(State::Exited)).unwrap();
@@ -383,7 +378,6 @@ fn sample(at: u64) -> Sample {
     }
 }
 
-/// The params of the methods that answer `{}`: `screen.watch` and `terminal.*`.
 fn terminal_params(method: Method) -> Value {
     match method {
         Method::ScreenWatch => to_value(WatchParams {
@@ -410,8 +404,6 @@ fn line(v: &impl serde::Serialize) -> String {
     serde_json::to_string(v).unwrap()
 }
 
-/// `v` with every object's keys sorted, as `serde_json` writes them without `preserve_order`: a
-/// workspace build turns that feature on (the ACP SDK needs it), a `-p shed-proto` build does not.
 fn sorted(v: Value) -> Value {
     match v {
         Value::Object(map) => {

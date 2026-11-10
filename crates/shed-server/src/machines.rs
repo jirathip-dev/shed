@@ -28,9 +28,7 @@ use serde::Serialize;
 use crate::proto::{ErrorCode, MachineStats, Method, StatsParams, VERSION};
 use crate::{Client, Error};
 
-/// How long `ssh` may take to connect, in seconds.
 const CONNECT_TIMEOUT: u32 = 10;
-/// Config writes so far, for their temp names.
 static WRITES: AtomicU64 = AtomicU64::new(0);
 
 /// A machine: a name and the `ssh` target it stands for.
@@ -112,13 +110,11 @@ pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
 pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     let mut text = String::from("# shed machines; edit with `shed machine add|rm`.\n[machines]\n");
     for m in machines {
-        // Writing to a String cannot fail.
         let _ = writeln!(text, "{} = \"{}\"", m.name, m.target);
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    // A temp name of its own per write, so parallel writers never share one.
     let n = WRITES.fetch_add(1, Ordering::Relaxed);
     let tmp = path.with_extension(format!("toml.{}.{n}.tmp", std::process::id()));
     fs::write(&tmp, text)?;
@@ -191,7 +187,6 @@ pub fn find(path: &Path, name: &str) -> Result<Machine, Error> {
 /// `ssh` or the shed there gives no answer; [`Error::Io`] when `ssh` cannot start.
 pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Client, Error> {
     let (ours, theirs) = UnixStream::pair()?;
-    // Best effort: without the directory ssh warns and runs without a shared connection.
     let _ = fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -214,13 +209,10 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
         .stdin(Stdio::from(OwnedFd::from(theirs.try_clone()?)))
         .stdout(Stdio::from(OwnedFd::from(theirs)))
         .spawn()?;
-    // Reaped when it ends (this side closing ends it), so a server's reconnects leave no zombies.
     std::thread::spawn(move || child.wait());
-    // `cmd` keeps its copies of `theirs`; closing them lets a dead ssh show here as EOF.
     drop(cmd);
     match Client::over(ours) {
         Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
-            // The message is `SHED_VERSION: client x, server y; …` (proto::RpcError::version).
             let there = e.message.split("server ").nth(1).unwrap_or_default();
             let there = there.split(';').next().unwrap_or_default().to_owned();
             Err(Error::MachineVersion {
@@ -271,7 +263,6 @@ pub fn stats(
     let seen = seen_dir.join(&machine.name);
     match rx.recv_timeout(STATS_TIMEOUT) {
         Ok(Ok(stats)) => {
-            // Best effort: without it a later offline answer says never seen.
             let _ = fs::create_dir_all(seen_dir);
             let _ = fs::write(&seen, crate::stats::unix_now().to_string());
             Ok(Ok(stats))
@@ -324,7 +315,6 @@ mod tests {
         assert_eq!(load(&path).unwrap().len(), 1);
     }
 
-    /// R18: parallel writers each get their own temp name; every write lands and none is left behind.
     #[test]
     fn parallel_writes_never_share_a_temp_file() {
         let path = dir("parallel").join("config.toml");
@@ -347,7 +337,6 @@ mod tests {
         assert_eq!(left.len(), 1, "{left:?}");
     }
 
-    /// R2: the config file the berth release wrote loads as it is.
     #[test]
     fn the_berth_release_config_loads() {
         let path = dir("berth").join("config.toml");

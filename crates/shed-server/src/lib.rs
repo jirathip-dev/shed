@@ -159,7 +159,6 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// `f` on the blocking pool.
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, RpcError> {
@@ -167,13 +166,10 @@ async fn blocking<T: Send + 'static>(
     joined.map_err(|e| RpcError::new(ErrorCode::Internal, e))
 }
 
-/// Refreshes the registry whenever `term`'s reported state changes and once it exits, so the events
-/// stream without anyone asking.
 fn watch(registry: &Shared, term: Arc<Terminal>) {
     let registry = Arc::clone(registry);
     tokio::spawn(async move {
         loop {
-            // Read before the refresh, so a change in between wakes the wait at once.
             let last = term.report();
             let _ = lock(&registry).refresh();
             if !matches!(
@@ -187,7 +183,6 @@ fn watch(registry: &Shared, term: Arc<Terminal>) {
     });
 }
 
-/// Samples every running tree's memory and CPU every `every`.
 async fn sample(registry: Shared, every: Duration) {
     loop {
         tokio::time::sleep(every).await;
@@ -197,7 +192,6 @@ async fn sample(registry: Shared, every: Duration) {
     }
 }
 
-/// Keeps a machine sample (with the terminal counts) when one is due; the wait until the next one is.
 async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     let (wait, dir) = {
         let reg = lock(registry);
@@ -212,7 +206,6 @@ async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     let mut reg = lock(registry);
     let _ = reg.refresh();
     reg.record(sample);
-    // At least a second, so a clock that jumps never makes this spin.
     Duration::from_secs(reg.stats.until_due(stats::unix_now()).max(1))
 }
 
@@ -226,7 +219,6 @@ pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     if UnixStream::connect(&paths.socket).is_ok() {
         return Err(Error::AlreadyRunning(paths.socket.clone()));
     }
-    // One server per state file, even with its socket gone; the lock ends with the process.
     if let Some(dir) = paths.state.parent() {
         fs::DirBuilder::new()
             .recursive(true)
@@ -248,14 +240,12 @@ pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     runtime.block_on(listen(paths, sample_every))
 }
 
-/// [`serve`] on its runtime, past the lock.
 async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     let registry = Arc::new(Mutex::new(Registry::load(&paths.state, &paths.socket)?));
     for term in lock(&registry).running() {
         watch(&registry, term);
     }
     tokio::spawn(sample(Arc::clone(&registry), sample_every));
-    // One machine sample now, then a timer to each next one.
     let first = record_stats(&registry).await;
     let recorder = Arc::clone(&registry);
     tokio::spawn(async move {
@@ -278,7 +268,6 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     }
     let listener = tokio::net::UnixListener::bind(&paths.socket)?;
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
-    // The one stdout line, `shed ready <version> <socket>`, that a client starting the server waits for.
     let _ = writeln!(
         io::stdout(),
         "shed ready {VERSION} {}",
@@ -294,23 +283,15 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     }
 }
 
-/// One connection's state.
 #[derive(Default)]
 struct Session {
-    /// The handshake passed.
     hello: bool,
-    /// An `attach` or `events` just answered: the redraw or replay, and the stream to write next.
     stream: Option<Stream>,
-    /// The terminal `screen.watch` streams.
     watching: Option<String>,
-    /// The terminals `terminal.readonly` marked: their input is refused.
     readonly: BTreeSet<String>,
-    /// The server's links to the machines.
     links: Arc<links::Links>,
 }
 
-/// The read-only terminal an input, resize or attach request names, if any. Every name it gives
-/// (`terminal` and `name`) is checked, else the one the connection watches.
 fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> Option<&'a str> {
     let input = matches!(
         method,
@@ -330,15 +311,12 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
     (named.into_iter().flatten()).find(|n| input && session.readonly.contains(*n))
 }
 
-/// Answers one connection's requests, line by line, until it closes. After an `attach`, `events` or
-/// `screen.watch` a task owns the write half and streams; it ends when the read half does.
 async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
     let mut session = Session {
         links: held,
         ..Session::default()
     };
     let (read, out) = stream.into_split();
-    // Aborted on drop: the stream ends with the read half.
     let (mut out, mut streaming) = (Some(out), tokio::task::JoinSet::new());
     let mut lines = tokio::io::BufReader::new(read).lines();
     while let Ok(Some(line)) = lines.next_line().await {
@@ -347,7 +325,6 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
         }
         let response = respond(&registry, &mut session, &line).await;
         if let (Some(response), Some(out)) = (response, &mut out) {
-            // A response (ids, values and strings) always serialises.
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
             bytes.push(b'\n');
             if out.write_all(&bytes).await.is_err() {
@@ -362,7 +339,6 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
     }
 }
 
-/// The response to one request line; `None` for a notification.
 async fn respond(registry: &Shared, session: &mut Session, line: &str) -> Option<Response> {
     let request = match serde_json::from_str::<Request>(line).or_else(|_| invalid(line)) {
         Ok(r) if r.jsonrpc == proto::JSONRPC => r,
@@ -380,8 +356,6 @@ async fn respond(registry: &Shared, session: &mut Session, line: &str) -> Option
     })
 }
 
-/// A line that does not parse straight into a request: the one its `Value` makes, else the error's id
-/// and reason.
 fn invalid(line: &str) -> Result<Request, (Value, RpcError)> {
     let parse = |e| (Value::Null, RpcError::new(ErrorCode::Parse, e));
     let value: Value = serde_json::from_str(line).map_err(parse)?;
@@ -399,8 +373,6 @@ fn json<T: Serialize>(value: &T) -> Result<Value, RpcError> {
     serde_json::to_value(value).map_err(|e| RpcError::new(ErrorCode::Internal, e))
 }
 
-/// The answer when `request` goes to the machines' links: it names `<machine>/<name>`, or it is
-/// `machine.links` or `ls` (this server's terminals, then each machine's; one that fails is left out).
 async fn linked(
     registry: &Shared,
     links: &links::Links,
@@ -537,7 +509,6 @@ async fn dispatch(
     }
 }
 
-/// `machine.stats`, sampled outside the lock: it runs `df` (and `sysctl` on macOS).
 async fn machine_stats(registry: &Shared, p: StatsParams) -> Result<Value, RpcError> {
     let dir = lock(registry).dir();
     let now = blocking(move || stats::system(&dir)).await?;
@@ -546,13 +517,10 @@ async fn machine_stats(registry: &Shared, p: StatsParams) -> Result<Value, RpcEr
     json(&reg.machine_stats(now, p.since))
 }
 
-/// The `{}` result.
 fn empty() -> Value {
     Value::Object(serde_json::Map::new())
 }
 
-/// `wait`: holds this connection, not the registry, until a state or output matches, the program
-/// exits or the timeout passes.
 async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, RpcError> {
     let bad = |e: &dyn std::fmt::Display| RpcError::new(ErrorCode::InvalidParams, e);
     if p.until.is_empty() && p.output.is_none() {
@@ -568,7 +536,6 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
     let pattern = p.output.as_deref().map(Pattern::new).transpose();
     let pattern = pattern.map_err(|e| bad(&e))?;
     let timeout = p.timeout.map(Duration::try_from_secs_f64).transpose();
-    // A timeout too far out to add to the clock waits for ever.
     let deadline = timeout
         .map_err(|e| bad(&e))?
         .and_then(|d| Instant::now().checked_add(d));
@@ -677,7 +644,6 @@ impl Client {
     /// carries the terminal's output and the writer takes [`notification`]s.
     #[must_use]
     pub fn split(self) -> (BufReader<UnixStream>, UnixStream) {
-        // Flushed after every call, so nothing is left in the buffer.
         (self.reader, self.writer.into_parts().0)
     }
 }

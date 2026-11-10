@@ -9,7 +9,6 @@ use crate::Error;
 enum Atom {
     Any,
     Char(char),
-    /// Ranges (inclusive), negated.
     Class(Vec<(char, char)>, bool),
 }
 
@@ -30,7 +29,6 @@ impl Atom {
 pub struct Pattern {
     start: bool,
     end: bool,
-    /// Atoms with their (min, max) repeat counts.
     atoms: Vec<(Atom, usize, usize)>,
 }
 
@@ -116,7 +114,6 @@ impl Pattern {
             .any(|i| self.at(&self.atoms, &chars[i..]))
     }
 
-    /// Whether `atoms` match at the start of `text` (backtracking, greedy).
     fn at(&self, atoms: &[(Atom, usize, usize)], text: &[char]) -> bool {
         let Some(((atom, min, max), rest)) = atoms.split_first() else {
             return !self.end || text.is_empty();

@@ -2,7 +2,6 @@
 
 use crate::Error;
 
-/// Named keys and the bytes they send (normal cursor mode, as xterm).
 const NAMED: &[(&str, &[u8])] = &[
     ("enter", b"\r"),
     ("tab", b"\t"),

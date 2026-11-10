@@ -56,7 +56,6 @@ impl ProcessTable for Procfs {
             {
                 continue;
             }
-            // The process may exit while we read; skip it.
             if let Ok(stat) = std::fs::read_to_string(entry.path().join("stat"))
                 && let Some(p) = parse_stat(&stat, page, ticks)
             {
@@ -67,12 +66,10 @@ impl ProcessTable for Procfs {
     }
 }
 
-/// Parses one `/proc/<pid>/stat` line (see proc(5)); the command name may hold spaces and parens.
 #[cfg(any(target_os = "linux", test))]
 fn parse_stat(stat: &str, page: u64, ticks: u64) -> Option<ProcessInfo> {
     let (pid, rest) = stat.split_once(" (")?;
     let fields: Vec<&str> = rest.rsplit_once(") ")?.1.split(' ').collect();
-    // fields[0] is field 3 (state) of proc(5).
     let num = |i: usize| fields.get(i).and_then(|f| f.parse::<u64>().ok());
     let cpu_ticks = num(11)? + num(12)?;
     Some(ProcessInfo {
@@ -106,7 +103,6 @@ impl ProcessTable for Ps {
     }
 }
 
-/// Parses one `ps -o pid=,ppid=,pgid=,rss=,time=,stat=` line; RSS is in KiB.
 #[cfg(any(not(target_os = "linux"), test))]
 fn parse_ps(line: &str) -> Option<ProcessInfo> {
     let f: Vec<&str> = line.split_whitespace().collect();
@@ -123,7 +119,6 @@ fn parse_ps(line: &str) -> Option<ProcessInfo> {
     })
 }
 
-/// Parses `ps` CPU time: `[[dd-]hh:]mm:ss[.cc]`.
 #[cfg(any(not(target_os = "linux"), test))]
 fn parse_cpu_time(s: &str) -> Option<Duration> {
     let (days, clock) = s
@@ -197,7 +192,6 @@ pub fn usage(procs: &[ProcessInfo]) -> Usage {
 }
 
 fn signal_tree(root: i32, pids: &BTreeSet<i32>, sig: Signal) {
-    // Errors mean the process or group is already gone.
     if let Some(group) = Pid::from_raw(root) {
         let _ = kill_process_group(group, sig);
     }
