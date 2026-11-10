@@ -384,7 +384,7 @@ impl Method {
                 "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`."
             }
             Self::MachineLinks => {
-                "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`; `run` with `machine`) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since."
+                "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since."
             }
         }
     }
@@ -422,6 +422,18 @@ impl Hello {
     }
 }
 
+/// How an ACP bridge answers the agent's permission requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Policy {
+    /// Pick the first `allow_once` (else `allow_always`) option.
+    Allow,
+    /// Pick the first `reject_once` (else `reject_always`) option.
+    Deny,
+    /// Report `blocked` and wait for `shed approve`.
+    Ask,
+}
+
 /// `run` params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunParams {
@@ -439,11 +451,15 @@ pub struct RunParams {
     /// Report `idle` after this many seconds without output, until the program reports a state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_after: Option<u64>,
-    /// The program and its arguments.
+    /// The program and its arguments; with `acp`, the agent's ACP adapter (empty: the installed
+    /// agent's), which the server wraps in its own bridge.
     pub cmd: Vec<String>,
     /// The ACP agent the program bridges (`shed run --acp`): `read` renders its transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acp: Option<String>,
+    /// ACP: how the bridge answers permission requests (default `ask`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy: Option<Policy>,
     /// ACP: load this agent session (`session/load`, `$SHED_ACP_RESUME` to the bridge) instead of a new one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<String>,

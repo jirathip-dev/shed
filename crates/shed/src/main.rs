@@ -185,8 +185,8 @@ enum Command {
         socket: PathBuf,
         #[arg(long)]
         state: PathBuf,
-        #[arg(long, value_parser = ["allow", "deny", "ask"])]
-        policy: String,
+        #[arg(long, value_parser = policy)]
+        policy: Policy,
         #[arg(long)]
         agent: String,
         #[arg(last = true, required = true)]
@@ -225,7 +225,8 @@ impl Command {
             | Self::Rm { name }
             | Self::Approve { name, .. }
             | Self::Cancel { name }
-            | Self::Model { name, .. } => Some(name),
+            | Self::Model { name, .. }
+            | Self::Wait(WaitArgs { name, .. }) => Some(name),
             _ => None,
         }
     }
@@ -328,6 +329,7 @@ impl Server<'_> {
                 | Command::Approve { .. }
                 | Command::Cancel { .. }
                 | Command::Events { .. }
+                | Command::Wait(_)
         );
         let up = |m: &Machine| links(paths).get(&m.name).map(|l| l.state) == Some(LinkState::Up);
         let linked = linkable && on.as_ref().is_some_and(up);
@@ -401,8 +403,8 @@ struct RunArgs {
     #[arg(long, value_name = "ID", conflicts_with_all = ["keep", "idle_after"])]
     acp: Option<String>,
     /// ACP: answer permission requests `allow`, `deny`, or `ask` (wait for `shed approve`).
-    #[arg(long, requires = "acp", value_parser = ["allow", "deny", "ask"], default_value = "ask")]
-    policy: String,
+    #[arg(long, requires = "acp", value_parser = policy, default_value = "ask")]
+    policy: Policy,
     /// ACP: resume the agent's session ID (`shed get`'s `session.id`) instead of starting one.
     #[arg(long, value_name = "ID", requires = "acp")]
     resume: Option<String>,
@@ -433,6 +435,11 @@ struct WaitArgs {
     /// Give up after S seconds.
     #[arg(long, value_name = "S")]
     timeout: Option<f64>,
+}
+
+fn policy(s: &str) -> Result<Policy, String> {
+    serde_json::from_value(Value::String(s.to_owned()))
+        .map_err(|_| format!("{s:?}: allow, deny or ask"))
 }
 
 fn label(s: &str) -> Result<(String, String), String> {
@@ -512,7 +519,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             policy,
             agent,
             cmd,
-        } => return bridge(&cmd, &socket, &state, &policy, &agent),
+        } => return bridge(&cmd, &socket, &state, policy, &agent),
         Command::Keys { name, keys } => {
             let done: Value = server
                 .connect(None)?
@@ -574,14 +581,6 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         (Some(_), Some(d)) if d.is_absolute() => d,
         (Some(m), _) => bail!("with --on, pass --cwd as an absolute path on {}", m.name),
     };
-    let cmd = match (&args.acp, &server.on) {
-        (Some(_), Some(m)) => bail!(
-            "run --acp works on this machine only, not with --on {}",
-            m.name
-        ),
-        (Some(id), None) => bridge_cmd(server.paths, id, &args.policy, args.cmd)?,
-        (None, _) => args.cmd,
-    };
     let mcp_servers = match &args.mcp {
         Some(file) => serde_json::from_slice(&std::fs::read(file)?)
             .with_context(|| format!("{}: not a JSON list", file.display()))?,
@@ -593,7 +592,8 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         cwd,
         keep: args.keep,
         idle_after: args.idle_after,
-        cmd,
+        cmd: args.cmd,
+        policy: args.acp.is_some().then_some(args.policy),
         acp: args.acp,
         resume: args.resume,
         mcp_servers,
@@ -667,52 +667,13 @@ fn bridge(
     cmd: &[String],
     socket: &Path,
     state: &Path,
-    policy: &str,
+    policy: Policy,
     agent: &str,
 ) -> anyhow::Result<ExitCode> {
-    let policy = match policy {
-        "allow" => Policy::Allow,
-        "deny" => Policy::Deny,
-        _ => Policy::Ask,
-    };
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
     let code = acp::bridge(cmd, &here, socket, state, policy, agent)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
-}
-
-/// `shed run --acp`: this binary's ACP bridge around the adapter `cmd`, else the installed agent's.
-fn bridge_cmd(
-    paths: &Paths,
-    id: &str,
-    policy: &str,
-    cmd: Vec<String>,
-) -> anyhow::Result<Vec<String>> {
-    let cmd = if cmd.is_empty() {
-        let installed = agents::list(&paths.state)?;
-        let Some(agent) = installed.into_iter().find(|a| a.id == id) else {
-            bail!("ACP agent {id} is not installed; `shed agents add {id}`");
-        };
-        agent.cmd
-    } else {
-        cmd
-    };
-    let exe = std::env::current_exe()?;
-    let path = |p: &Path| p.to_string_lossy().into_owned();
-    let bridge = [
-        path(&exe),
-        "acp-bridge".to_owned(),
-        "--socket".to_owned(),
-        path(&paths.socket),
-        "--state".to_owned(),
-        path(&paths.state),
-        "--policy".to_owned(),
-        policy.to_owned(),
-        "--agent".to_owned(),
-        id.to_owned(),
-        "--".to_owned(),
-    ];
-    Ok([bridge.to_vec(), cmd].concat())
 }
 
 /// Delivers `input` to an ACP terminal's bridge.
