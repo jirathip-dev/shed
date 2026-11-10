@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
-use shed_server::proto::{Response, RpcError};
+use shed_server::proto::{EventsParams, Method, Response, RpcError};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -199,69 +199,280 @@ fn on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_m
     assert_eq!(have, text, "machines.txt differs; SHED_BLESS=1 to update");
 }
 
-#[test]
-fn events_on_a_machine_stream_prefixed_and_reconnect_after_the_link_drops() {
-    let root = temp_dir("machine-events");
-    let bin = fake_hosts(&root);
-    let _server = Server::start(&root.join("remote"));
-    let added = shed_on(&root, &["machine", "add", "box", "user@box.example"]).output();
-    assert!(added.expect("machine add").status.success());
-    let mut events = shed_on(&root, &["--on", "box", "events", "--since", "0"])
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("events");
-    let mut lines = BufReader::new(events.stdout.take().expect("piped")).lines();
-    let mut next = || -> Value { serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap() };
-    let cwd = root.to_str().expect("utf-8 dir");
-    let run = |name: &str, script: &str| {
-        let args = [
-            "--on", "box", "run", "--name", name, "--cwd", cwd, "--", "sh", "-c", script,
-        ];
-        let ran = shed_on(&root, &args).output().expect("run");
-        assert!(ran.status.success(), "{ran:?}");
+/// A server in `root/remote`, machines `box` (its fake host) and `old` (another version) added, and a
+/// local server in `root/local` with the fake `ssh` on its `PATH`, once its link to `box` is up.
+fn linked(root: &Path) -> (Server, Server) {
+    fake_hosts(root);
+    let remote = Server::start(&root.join("remote"));
+    for (name, target) in [("box", "user@box.example"), ("old", "old.example")] {
+        let added = shed_on(root, &["machine", "add", name, target]).output();
+        assert!(added.expect("machine add").status.success());
+    }
+    let path = format!(
+        "{}:{}",
+        root.join("bin").display(),
+        std::env::var("PATH").unwrap()
+    );
+    let local = Server::with_env(&root.join("local"), "3600", &[("PATH", &path)]);
+    common::eventually("the link to box", || link(root, "box")["state"] == "up");
+    (remote, local)
+}
+
+/// `machine ls --json`'s link of machine `name`.
+fn link(root: &Path, name: &str) -> Value {
+    let out = shed_on(root, &["--json", "machine", "ls"])
+        .output()
+        .expect("ls");
+    let list: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let list = list.as_array().expect("a list").iter();
+    list.into_iter()
+        .find(|m| m["name"] == name)
+        .map_or(Value::Null, |m| m["link"].clone())
+}
+
+/// `shed args…` (local, fake `ssh` on `PATH`): its stdout, asserting success.
+fn ok(root: &Path, args: &[&str]) -> String {
+    let out = shed_on(root, args).output().expect("shed runs");
+    assert!(out.status.success(), "shed {args:?}: {out:?}");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// How many `ssh` the box link (or `--on box`) started so far.
+fn box_ssh(root: &Path) -> usize {
+    let log = std::fs::read_to_string(root.join("bin/ssh.log")).unwrap_or_default();
+    log.lines()
+        .filter(|l| l.contains("user@box.example"))
+        .count()
+}
+
+/// The local server's events after `since`, read with a timeout.
+fn local_events(root: &Path, since: u64) -> impl Iterator<Item = Value> {
+    let socket = shed_server::Paths::in_dir(&root.join("local")).socket;
+    let mut client = shed_server::Client::connect(&socket).expect("connect");
+    let params = EventsParams {
+        since: Some(since),
+        ..EventsParams::default()
     };
-    run(
-        "e1",
-        "printf '\\033]7501;state=working\\007'; exec sleep 100",
+    let _: Value = client.call(Method::Events, &params).expect("events");
+    let (reader, _writer) = client.split();
+    let timeout = Some(Duration::from_secs(20));
+    reader.get_ref().set_read_timeout(timeout).expect("timeout");
+    reader
+        .lines()
+        .map(|l| serde_json::from_str(&l.expect("an event line")).expect("event JSON"))
+}
+
+#[test]
+fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused() {
+    let root = temp_dir("link");
+    let (_remote, _local) = linked(&root);
+    let remote = root.join("remote");
+    let remote_arg = remote.to_str().expect("utf-8 dir");
+    let refused = link(&root, "old");
+    assert_eq!(refused["state"], "down", "{refused}");
+    let error = refused["error"].as_str().expect("why it is down");
+    assert!(
+        error.contains(&format!("shed {VERSION} here, 9.9.9 on old")),
+        "{error}"
     );
-    let (started, working) = (next(), next());
-    assert_eq!(
-        (&started["event"], &started["name"]),
-        (&json!("started"), &json!("box/e1"))
+    let ssh = box_ssh(&root);
+
+    let cmd = "echo hello from box; exec cat";
+    let ran = ok(
+        &root,
+        &[
+            "--on", "box", "run", "--name", "t1", "--cwd", remote_arg, "--", "sh", "-c", cmd,
+        ],
     );
+    assert_eq!(ran, "box/t1\n");
+    ok(&root, &["run", "--name", "here", "--", "sleep", "100"]);
+    let names = |args: &[&str]| -> Vec<String> {
+        let list: Value = serde_json::from_str(&ok(&root, args)).expect("JSON");
+        let list = list.as_array().expect("a list").iter();
+        list.map(|t| t["name"].as_str().expect("name").to_owned())
+            .collect()
+    };
+    assert_eq!(names(&["--json", "ls"]), ["here", "box/t1"]);
+    assert_eq!(names(&["--json", "--on", "box", "ls"]), ["box/t1"]);
+    common::eventually("t1's output", || {
+        ok(&root, &["read", "box/t1"]).contains("hello from box")
+    });
+    ok(&root, &["send", "box/t1", "typed over the link"]);
+    ok(&root, &["--on", "box", "keys", "t1", "enter"]);
+    common::eventually("the typed line", || {
+        ok(&root, &["--on", "box", "read", "t1"])
+            .matches("typed over the link")
+            .count()
+            == 2
+    });
+    let got: Value = serde_json::from_str(&ok(&root, &["get", "box/t1"])).expect("JSON");
     assert_eq!(
-        (&working["state"], &working["name"]),
-        (&json!("working"), &json!("box/e1"))
+        (&got["name"], &got["state"]),
+        (&json!("box/t1"), &json!("running"))
     );
 
-    // Drop the link: kill every `shed connect` the fake ssh became (the events one is still up).
-    let pids = std::fs::read_to_string(bin.join("ssh.pids")).expect("pids");
+    // The remote read's latency through the local socket and the held link.
+    let socket = shed_server::Paths::in_dir(&root.join("local")).socket;
+    let mut client = shed_server::Client::connect(&socket).expect("connect");
+    let read = json!({"name": "box/t1"});
+    let mut took: Vec<Duration> = (0..50)
+        .map(|_| {
+            let started = Instant::now();
+            let _: Value = client.call(Method::Read, &read).expect("read");
+            started.elapsed()
+        })
+        .collect();
+    took.sort();
+    eprintln!(
+        "remote read over the held link: p50 {:?}, p90 {:?}",
+        took[25], took[45]
+    );
+
+    assert_eq!(ok(&root, &["kill", "box/t1"]), "box/t1 exited 143\n");
+    assert_eq!(box_ssh(&root), ssh, "no ssh per call while the link is up");
+
+    let out = shed_on(&root, &["get", "old/t1"])
+        .output()
+        .expect("shed runs");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success());
+    assert!(
+        stderr.contains(&format!("SHED_VERSION: shed {VERSION} here, 9.9.9 on old")),
+        "{stderr}"
+    );
+    let out = shed_on(&root, &["get", "nope/t1"])
+        .output()
+        .expect("shed runs");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("NO_LINK: nope"));
+}
+
+#[test]
+fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
+    let root = temp_dir("link-drop");
+    let (_remote, _local) = linked(&root);
+    let remote = root.join("remote");
+    let on_remote = |args: &[&str]| {
+        let out = Command::new(SHED)
+            .arg("--dir")
+            .arg(&remote)
+            .args(args)
+            .output();
+        assert!(out.expect("shed runs").status.success(), "{args:?}");
+    };
+    let mut events = local_events(&root, 0);
+    ok(&root, &["run", "--name", "l1", "--", "sleep", "100"]);
+    on_remote(&["run", "--name", "r1", "--", "sleep", "100"]);
+    let mut seen = Vec::new();
+    let mut until = |name: &str, event: &str, seen: &mut Vec<Value>| loop {
+        let e = events.next().expect("an event");
+        seen.push(e.clone());
+        if e["name"] == name && e["event"] == event {
+            return e;
+        }
+    };
+    until("l1", "started", &mut seen);
+    let before = until("box/r1", "started", &mut seen)["seq"].clone();
+
+    // Drop the link: kill every `shed connect` the fake ssh became; act on box while it is down.
+    let pids = std::fs::read_to_string(root.join("bin/ssh.pids")).expect("pids");
     for pid in pids.lines() {
         let _ = Command::new("kill").arg(pid).stderr(Stdio::null()).status();
     }
+    common::eventually("reconnecting", || {
+        link(&root, "box")["state"] == "reconnecting"
+    });
     let dropped = Instant::now();
-    let reconnecting = next();
-    assert_eq!(reconnecting["name"], "box/e1");
-    assert_eq!(reconnecting["state"], "working");
-    assert_eq!(reconnecting["note"], "machine: reconnecting");
-    assert_eq!(reconnecting["seq"], working["seq"]);
-    let connected = next();
-    assert_eq!(connected["note"], "machine: connected");
+    on_remote(&["run", "--name", "r2", "--", "sleep", "100"]);
+    on_remote(&["state", "r1", "working"]);
+    on_remote(&["kill", "r2"]);
+    until("box/r2", "killed", &mut seen);
     let waited = dropped.elapsed();
-    assert!(
-        waited >= Duration::from_secs(4) && waited < Duration::from_secs(10),
-        "{waited:?}"
-    );
+    assert!(waited < Duration::from_secs(10), "{waited:?}");
+    assert_eq!(link(&root, "box")["state"], "up");
 
-    // The stream resumes after the last seq: no replay, the next terminal's start comes next.
-    run("e2", "exec sleep 100");
-    let started = next();
+    // Every remote event once, in order, under one seq that counts up by one.
+    let seqs: Vec<u64> = seen.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>());
+    let ours = |e: &Value| {
+        let name = e["name"].as_str().unwrap().strip_prefix("box/")?;
+        Some((name.to_owned(), e["event"].clone(), e["state"].clone()))
+    };
+    let merged: Vec<_> = seen.iter().filter_map(ours).collect();
+    let there: Vec<_> = {
+        let socket = shed_server::Paths::in_dir(&remote).socket;
+        let mut client = shed_server::Client::connect(&socket).expect("connect");
+        let params = EventsParams {
+            since: Some(0),
+            ..EventsParams::default()
+        };
+        let _: Value = client.call(Method::Events, &params).expect("events");
+        let (reader, _writer) = client.split();
+        let lines = reader.lines().take(merged.len());
+        lines
+            .map(|l| {
+                let e: Value = serde_json::from_str(&l.unwrap()).unwrap();
+                (
+                    e["name"].as_str().unwrap().to_owned(),
+                    e["event"].clone(),
+                    e["state"].clone(),
+                )
+            })
+            .collect()
+    };
+    assert_eq!(merged, there);
+    let kinds: Vec<_> = merged
+        .iter()
+        .map(|(n, e, _)| format!("{n} {}", e.as_str().unwrap()))
+        .collect();
+    assert_eq!(kinds, ["r1 started", "r2 started", "r1 state", "r2 killed"]);
+
+    // A subscriber resumes from a seq before the drop.
+    let mut resumed = local_events(&root, before.as_u64().unwrap());
+    let next = resumed.next().expect("an event");
     assert_eq!(
-        (&started["event"], &started["name"]),
-        (&json!("started"), &json!("box/e2"))
+        (&next["name"], &next["event"]),
+        (&json!("box/r2"), &json!("started"))
     );
-    let _ = events.kill();
-    let _ = events.wait();
+}
+
+#[test]
+fn an_acp_session_on_a_machine_is_approved_and_cancelled_over_the_held_link() {
+    let root = temp_dir("link-acp");
+    let (_remote, _local) = linked(&root);
+    let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_acp.py");
+    let run = Command::new(SHED)
+        .arg("--dir")
+        .arg(root.join("remote"))
+        .args(["run", "--name", "a", "--acp", "fake", "--", "python3"])
+        .arg(agent)
+        .output()
+        .expect("run --acp");
+    assert!(run.status.success(), "{run:?}");
+    let mut events = local_events(&root, 0);
+    let mut until = |what: &dyn Fn(&Value) -> bool| loop {
+        let e = events.next().expect("an event");
+        if e["name"] == "box/a" && what(&e) {
+            return e;
+        }
+    };
+    until(&|e| e["event"] == "session");
+    ok(&root, &["send", "box/a", "tool"]);
+    until(&|e| e["event"] == "approval_request");
+    ok(&root, &["approve", "box/a", "allow-once"]);
+    let approved = until(&|e| e["event"] == "approved");
+    assert_eq!(approved["option"], "allow-once", "{approved}");
+    until(&|e| e["state"] == "done");
+
+    ok(&root, &["--on", "box", "send", "a", "slow"]);
+    until(&|e| e["event"] == "text" && e["text"] == "thinking");
+    ok(&root, &["--on", "box", "cancel", "a"]);
+    let done = until(&|e| e["state"] == "done");
+    assert_eq!(done["note"], "cancelled", "{done}");
+    let got: Value = serde_json::from_str(&ok(&root, &["get", "box/a"])).expect("JSON");
+    assert_eq!(
+        got["reported"],
+        json!({"state": "done", "note": "cancelled"})
+    );
 }
 
 #[test]

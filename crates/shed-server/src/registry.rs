@@ -109,7 +109,7 @@ impl Entry {
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
     path: PathBuf,
-    events: Events,
+    pub(crate) events: Events,
     /// The machine samples kept for `machine.stats`.
     pub(crate) stats: Stats,
 }

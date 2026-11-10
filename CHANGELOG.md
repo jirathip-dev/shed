@@ -12,8 +12,18 @@ All notable changes to this project are documented here. The format follows
   as events, each with its `seq`; `tool_call` events carry ACP's tool `kind` when the agent sends one.
 - An ACP terminal's screen (`attach`, the `shed watch` preview) draws its events readably: the prompt bold, one
   line per tool call with a status glyph, approvals, the plan as a checklist and the reply's markdown styled.
+- One view of every machine: the server holds an SSH link to each configured machine (`shed connect` over
+  `ssh`, retried every 5 s, backing off to 60 s), and `ls`, `events`, `get`, `read`, `send`, `keys`,
+  `approve`, `cancel`, `kill`, `rm`, `state` and `model` work on `<machine>/<name>`; `run --on M` goes over
+  the link. Every machine's events merge into the one stream under its `seq`, so `--since` resumes across a
+  dropped link with none lost. `machine ls --json` and the `machine.links` method show each link (`up`,
+  `reconnecting`, `down`, since when, why). Another version there is refused naming both. With no link up,
+  `--on` uses one `ssh` per call as before.
 
 ### Changed
+
+- `shed events --on M` with no held link is one plain stream over `ssh`: the client-side reconnect and its
+  `machine: reconnecting` / `machine: connected` lines are gone; the server's held link does the reconnecting.
 
 - The ACP path is faster per update: the bridge reads a text chunk straight from the agent's JSON instead of
   the SDK's types, writes its notifications without a `Value` between, and the server parses each request line

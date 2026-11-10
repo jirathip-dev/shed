@@ -221,6 +221,15 @@ Switch an ACP terminal's model to one of its `session.models`: its bridge asks t
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
+### `machine.links`
+
+Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`; `run` with `machine`) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+```
+
 ## Events
 
 An event names its terminal, carries its labels and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
@@ -271,6 +280,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32004 | `STILL_RUNNING` |
 | -32005 | `SPAWN_FAILED` |
 | -32006 | `READONLY` |
+| -32007 | `NO_LINK` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 0.1.0, server 0.0.0; restart the server"}}
