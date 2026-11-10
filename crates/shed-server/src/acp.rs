@@ -44,16 +44,7 @@ use crate::{Client, Error};
 type AcpResult<T> = Result<T, agent_client_protocol::Error>;
 type Asked = Responder<RequestPermissionResponse>;
 
-/// How the bridge answers the agent's permission requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Policy {
-    /// Pick the first `allow_once` (else `allow_always`) option.
-    Allow,
-    /// Pick the first `reject_once` (else `reject_always`) option.
-    Deny,
-    /// Report `blocked` and wait for `shed approve`.
-    Ask,
-}
+pub use shed_proto::Policy;
 
 /// One framed input to the bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

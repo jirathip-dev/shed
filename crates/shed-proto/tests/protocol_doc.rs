@@ -202,6 +202,7 @@ fn run_params() -> Value {
         idle_after: None,
         cmd: vec!["make".into(), "test".into()],
         acp: None,
+        policy: None,
         resume: None,
         mcp_servers: Vec::new(),
         no_hibernate: false,

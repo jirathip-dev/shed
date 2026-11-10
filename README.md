@@ -50,7 +50,7 @@ around lanes:
 | `shed top` | The terminals by memory use, largest first. |
 | `shed watch [--label k=v]` | A live list of the terminals beside a read-only preview of the selected one; Enter attaches, `Ctrl+\` comes back, `/` filters, `q` quits. |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
-| `shed --on <machine> …` / `shed machine add\|ls\|rm` | The same commands on another host over SSH (key login only). The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `approve` and `cancel`; `machine ls --json` shows each link. |
+| `shed --on <machine> …` / `shed machine add\|ls\|rm` | The same commands on another host over SSH (key login only). The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `wait`, `approve` and `cancel`, and `--on <machine> run --acp` starts an agent installed there; `machine ls --json` shows each link. |
 | `shed machine stats [--on M] [--since T]` | Load per CPU, memory pressure, swap, free disk, uptime and terminals by state; one sample a minute kept 24 h. An unreachable machine answers offline (last seen) within 5 s. |
 
 **Persistence:** the server keeps PTYs alive while it runs. On server restart, kept terminals come back as shells in

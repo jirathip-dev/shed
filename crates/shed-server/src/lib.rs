@@ -249,7 +249,7 @@ pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
 
 /// [`serve`] on its runtime, past the lock.
 async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
-    let registry = Arc::new(Mutex::new(Registry::load(&paths.state)?));
+    let registry = Arc::new(Mutex::new(Registry::load(&paths.state, &paths.socket)?));
     for term in lock(&registry).running() {
         watch(&registry, term);
     }

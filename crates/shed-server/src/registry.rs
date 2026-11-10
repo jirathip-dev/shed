@@ -15,8 +15,8 @@ use shed_core::proctree::{self, ProcessInfo};
 use shed_core::{History, Report, STATES, Size, Terminal};
 use shed_proto::{
     EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams, MachineStats,
-    ModelParams, ReadParams, ReadResult, Reported, ResizeParams, Resources, RpcError, RunParams,
-    Sample, SendParams, State, StateParams, TerminalInfo,
+    ModelParams, Policy, ReadParams, ReadResult, Reported, ResizeParams, Resources, RpcError,
+    RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
 };
 
 use tokio::io::AsyncWriteExt as _;
@@ -109,6 +109,8 @@ impl Entry {
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
     path: PathBuf,
+    /// The server's socket, which ACP bridges report to.
+    socket: PathBuf,
     pub(crate) events: Events,
     /// The machine samples kept for `machine.stats`.
     pub(crate) stats: Stats,
@@ -163,9 +165,10 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Registry {
-    /// Loads the state file at `path` (none yet: no terminals). Running kept terminals come back as
-    /// `$SHELL` (or `/bin/sh`) in their cwd; other running ones are listed as exited. The result is saved at once.
-    pub(crate) fn load(path: &Path) -> io::Result<Self> {
+    /// Loads the state file at `path` (none yet: no terminals) for the server on `socket`. Running kept
+    /// terminals come back as `$SHELL` (or `/bin/sh`) in their cwd; other running ones are listed as
+    /// exited. The result is saved at once.
+    pub(crate) fn load(path: &Path, socket: &Path) -> io::Result<Self> {
         let file: StateFile = match fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => StateFile {
@@ -216,6 +219,7 @@ impl Registry {
         let registry = Self {
             entries,
             path: path.to_owned(),
+            socket: socket.to_owned(),
             events,
             stats: Stats::load(&path.with_file_name("stats.json")),
         };
@@ -330,6 +334,55 @@ impl Registry {
         }
     }
 
+    /// `run --acp`'s command: this binary's ACP bridge to this server around the adapter `cmd`, else
+    /// the installed agent `id`'s (refused, with the installed ones, when there is none).
+    fn bridge(
+        &self,
+        id: &str,
+        policy: Option<Policy>,
+        cmd: Vec<String>,
+    ) -> Result<Vec<String>, RpcError> {
+        let cmd = if cmd.is_empty() {
+            let installed = crate::agents::list(&self.path).map_err(internal)?;
+            let ids: Vec<_> = installed.iter().map(|a| a.id.as_str()).collect();
+            let Some(agent) = installed.iter().find(|a| a.id == id) else {
+                let ids = if ids.is_empty() {
+                    "none".to_owned()
+                } else {
+                    ids.join(", ")
+                };
+                let e = format!(
+                    "ACP agent {id} is not installed; installed: {ids}; `shed agents add {id}`"
+                );
+                return Err(RpcError::new(ErrorCode::InvalidParams, e));
+            };
+            agent.cmd.clone()
+        } else {
+            cmd
+        };
+        let exe = std::env::current_exe().map_err(internal)?;
+        let policy = match policy.unwrap_or(Policy::Ask) {
+            Policy::Allow => "allow",
+            Policy::Deny => "deny",
+            Policy::Ask => "ask",
+        };
+        let path = |p: &Path| p.to_string_lossy().into_owned();
+        let bridge = [
+            path(&exe),
+            "acp-bridge".to_owned(),
+            "--socket".to_owned(),
+            path(&self.socket),
+            "--state".to_owned(),
+            path(&self.path),
+            "--policy".to_owned(),
+            policy.to_owned(),
+            "--agent".to_owned(),
+            id.to_owned(),
+            "--".to_owned(),
+        ];
+        Ok([bridge.to_vec(), cmd].concat())
+    }
+
     /// The state file's directory.
     pub(crate) fn dir(&self) -> PathBuf {
         self.path.parent().unwrap_or(Path::new(".")).to_owned()
@@ -393,8 +446,11 @@ impl Registry {
     }
 
     /// `run`: starts a terminal.
-    pub(crate) fn run(&mut self, p: RunParams) -> Result<TerminalInfo, RpcError> {
+    pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
+        if let Some(id) = &p.acp {
+            p.cmd = self.bridge(id, p.policy, std::mem::take(&mut p.cmd))?;
+        }
         if p.cmd.is_empty() {
             return Err(bad("empty cmd"));
         }
@@ -693,7 +749,7 @@ mod tests {
             terminals.join(",")
         );
         fs::write(&path, file).unwrap();
-        let registry = Registry::load(&path).unwrap();
+        let registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
         let names: Vec<String> = registry
             .ls(&LsParams::default())
             .into_iter()
@@ -715,7 +771,9 @@ mod tests {
     fn a_corrupt_state_file_is_refused_and_kept() {
         let path = dir("corrupt").join("state.json");
         fs::write(&path, "{\"version\":1,\"terminals\":[").unwrap();
-        let e = Registry::load(&path).err().expect("refused");
+        let e = Registry::load(&path, Path::new("shed.sock"))
+            .err()
+            .expect("refused");
         assert!(e.to_string().contains("EOF"), "{e}");
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
@@ -742,7 +800,7 @@ mod tests {
             fs::write(root.join(f), "x").unwrap();
         }
         let exists = || files.map(|f| root.join(f).exists());
-        let mut registry = Registry::load(&path).unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
         assert_eq!(exists(), [true, true, false, false, false]);
         registry.rm("kept.1").unwrap();
         assert_eq!(exists(), [false; 5]);

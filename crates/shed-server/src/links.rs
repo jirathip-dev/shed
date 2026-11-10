@@ -21,8 +21,9 @@ pub(crate) struct Links {
     held: Mutex<BTreeMap<String, Arc<Held>>>,
 }
 
-/// One link: its calls stream while up, and its state.
+/// One link: its machine, its calls stream while up, and its state.
 struct Held {
+    machine: Machine,
     calls: Mutex<Option<Client>>,
     link: Mutex<Link>,
 }
@@ -51,7 +52,8 @@ pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value
         | Method::Kill
         | Method::Rm
         | Method::State
-        | Method::Model => "name",
+        | Method::Model
+        | Method::Wait => "name",
         _ => return None,
     };
     let value = request.params.get(field)?.as_str()?;
@@ -67,13 +69,16 @@ pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value
     Some((machine.to_owned(), params))
 }
 
-/// `name` (of a result, or each in a list) as `<machine>/<name>`.
+/// `name` (of a result, its `terminal`, or each in a list) as `<machine>/<name>`.
 fn prefix(value: &mut Value, machine: &str) {
     match value {
         Value::Array(list) => list.iter_mut().for_each(|v| prefix(v, machine)),
         Value::Object(o) => {
             if let Some(Value::String(name)) = o.get_mut("name") {
                 *name = format!("{machine}/{name}");
+            }
+            if let Some(terminal) = o.get_mut("terminal") {
+                prefix(terminal, machine);
             }
         }
         _ => {}
@@ -101,6 +106,7 @@ impl Links {
                 continue;
             }
             let link = Arc::new(Held {
+                machine: machine.clone(),
                 calls: Mutex::new(None),
                 link: Mutex::new(Link {
                     state: LinkState::Down,
@@ -128,7 +134,8 @@ impl Links {
         up.map(|(m, _)| m).collect()
     }
 
-    /// `method` with `params` on `machine`'s server, its names prefixed `<machine>/`.
+    /// `method` with `params` on `machine`'s server, its names prefixed `<machine>/`. A `wait` holds a
+    /// stream of its own over the link's shared ssh connection, leaving the calls stream free.
     pub(crate) async fn call(
         &self,
         machine: &str,
@@ -141,7 +148,16 @@ impl Links {
         let Some(held) = held else {
             return Err(no_link("no such machine; see `shed machine ls`"));
         };
+        let control = self.control.clone();
         let mut value = blocking(move || {
+            if method == Method::Wait && lock(&held.link).state == LinkState::Up {
+                let waiting = machines::connect(&held.machine, &control, false);
+                return match waiting.and_then(|mut c| c.call(method, &params)) {
+                    Err(Error::Rpc(e)) => Err(e),
+                    Err(e) => Err(no_link(&e.to_string())),
+                    Ok(value) => Ok(value),
+                };
+            }
             let mut calls = lock(&held.calls);
             let Some(client) = calls.as_mut() else {
                 let link = lock(&held.link).clone();
