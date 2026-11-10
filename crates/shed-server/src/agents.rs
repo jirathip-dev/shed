@@ -13,15 +13,6 @@ use crate::Error;
 /// The ACP registry `add` reads by default.
 pub const REGISTRY: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
 
-/// Agent `id`'s auth-failure patterns: a reply or error line with one ends the turn as `error`.
-#[must_use]
-pub fn auth_failures(id: &str) -> &'static [&'static str] {
-    match id {
-        "claude-acp" => &["Failed to authenticate", "OAuth session expired"],
-        _ => &[],
-    }
-}
-
 /// One installed agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

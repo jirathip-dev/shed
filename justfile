@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: fmt clippy test doc deny cap deps hygiene
+check: fmt clippy test doc deny cap deps hygiene neutral
 
 fmt:
     cargo fmt --all --check
@@ -26,6 +26,11 @@ deps:
 
 hygiene:
     scripts/hygiene.sh
+
+# No agent or provider name in core code (#64); the leaky fixture proves the check bites.
+neutral:
+    scripts/neutral-core.sh
+    ! scripts/neutral-core.sh ci/fixtures/leaky-core
 
 # The CLI timing report (soft target: a non-waiting call under 20 ms) and the history throughput report.
 bench:
