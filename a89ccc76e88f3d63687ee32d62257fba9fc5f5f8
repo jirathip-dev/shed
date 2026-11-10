@@ -1,0 +1,8 @@
+Decided: raise line_cap from 7500 to 7800 in ci/cap.toml with a cap-history note
+Because: q1082
+Because: "Raise shed's line cap (`ci/cap.toml` `line_cap`) from 7,500 to 7,800"
+Decided: scripts/line-cap.sh prints its summary as N / cap M
+Because: "If the script's summary line is the cause, make it print `N / cap M`"
+Rejected: keeping the "non-test lines:" prefix — herdsman cap rejected that line at origin/staging
+Check: sh scripts/line-cap.sh prints 7414 / cap 7800 and exits 0
+Owner: The size limit goes to 7,800 lines so #57 fits, and the cap view can read the check again.
