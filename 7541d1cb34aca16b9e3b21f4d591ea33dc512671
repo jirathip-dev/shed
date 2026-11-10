@@ -1,0 +1,13 @@
+Decided: one runner module, crates/shed-core/src/runner.rs, starts every process; arch.toml bans `Command::new` elsewhere
+Because: "Only one runner module spawns processes (as herdsman #713)."
+Decided: runner sits in shed-core (the bottom layer) and shed-server re-exports it so the cli keeps its single dependency
+Because: crates/shed-server/src/lib.rs:38
+Decided: arch-check, lesson-check and actionlint run in a new `rules` CI job that installs herdsman from staging on Rust 1.99.1
+Because: "CI runs the new checks and they pass on staging; each fails on a fixture that breaks it."
+Rejected: arch.toml `[comments]` — scripts/comment-rule.py already enforces the comment rule; two enforcers for one rule
+Decided: test temp dirs are recorded per thread and removed when the test thread ends, pass or fail (herdsman #535's design)
+Because: "Tests leave no temp folders (as herdsman #535)."
+Rejected: a size baseline file — no file is over 2000 lines nor function over 150 today, so it would be empty
+Check: on the base tree `herdsman arch-check --config .herdsman/arch.toml` reports 14 `Command::new`; at head 0
+Check: `cargo test -p shed --test cli a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail` fails with common/mod.rs reverted
+Owner: shed's CI now runs the same rule checks as herdsman, and .herdsman/rules.md lists each rule with its enforcer.
