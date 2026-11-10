@@ -1,6 +1,7 @@
 //! The ACP benches (`scripts/bench-acp.sh` runs them): `fake_acp.py` streams 1,000 `session/update`s
 //! through the bridge to a socket client, and 10,000 canned ones that time shed alone (both at a PR's
 //! base and head), and a 1,000-update `session/load` replay and the hibernation bench (at the head).
+#![cfg(test)]
 
 mod common;
 
@@ -132,7 +133,10 @@ fn shed_only() {
         panic!("the events ended before the reply");
     };
     let ns = best_turn("c", &["--canned"], CANNED, lines, count);
-    println!("acp shed-only: {} ns per update", ns / (CANNED as u128 - 1));
+    println!(
+        "acp shed-only: {} ns per update",
+        ns / (u128::try_from(CANNED).unwrap() - 1)
+    );
 }
 
 #[test]

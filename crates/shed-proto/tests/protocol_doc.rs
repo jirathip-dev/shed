@@ -1,5 +1,6 @@
 //! `docs/protocol.md` is generated from the types; this test fails when it drifts.
 //! Regenerate with `SHED_BLESS=1 cargo test -p shed-proto`.
+#![cfg(test)]
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;

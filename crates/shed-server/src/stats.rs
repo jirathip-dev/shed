@@ -1,18 +1,12 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use shed_core::clock::unix_now;
 use shed_proto::Sample;
 
 const EVERY: u64 = 60;
 const DAY: u64 = 86_400;
-
-pub(crate) fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
-}
 
 fn stdout<A: AsRef<std::ffi::OsStr>>(program: &str, args: impl IntoIterator<Item = A>) -> String {
     shed_core::runner::output(program, args, &[])
@@ -134,7 +128,7 @@ impl Stats {
         }
         let tmp = self.path.with_extension("json.tmp");
         if serde_json::to_vec(&self.samples).is_ok_and(|b| fs::write(&tmp, b).is_ok()) {
-            let _ = fs::rename(&tmp, &self.path);
+            fs::rename(&tmp, &self.path).ok();
         }
     }
 

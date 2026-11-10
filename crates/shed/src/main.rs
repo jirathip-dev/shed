@@ -2,16 +2,17 @@
 #![forbid(unsafe_code)]
 
 mod attach;
+mod out;
 mod service;
 mod watch;
 
+use shed_server::runner::ExitCode;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::process::ExitCode;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -346,7 +347,7 @@ fn main() -> ExitCode {
     match run(Cli::parse()) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("shed: {e:#}");
+            out::err(format_args!("shed: {e:#}"));
             ExitCode::FAILURE
         }
     }
@@ -360,7 +361,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     let json = cli.json;
     let server = Server::new(&paths, cli.dir.as_deref(), cli.on, &mut cli.command)?;
     match cli.command {
-        Command::Hello => println!("shed {}", env!("CARGO_PKG_VERSION")),
+        Command::Hello => out::line(format_args!("shed {}", env!("CARGO_PKG_VERSION"))),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
         Command::Run(args) => run_terminal(&server, json, args)?,
         Command::Ls { labels } => {
@@ -613,7 +614,7 @@ fn state(
     let state = args.pop().unwrap_or_default();
     let name = match args.pop() {
         Some(name) => name,
-        None => std::env::var("SHED")
+        None => shed_server::config::var("SHED")
             .context("no terminal given and $SHED is unset (it is set inside a terminal)")?,
     };
     let params = StateParams {
@@ -702,7 +703,7 @@ fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Resu
                     let link = link.as_ref().map_or_else(String::new, |l| {
                         format!("  {:?} since {}", l.state, l.since).to_lowercase()
                     });
-                    let _ = writeln!(out, "{:<width$}  {}{link}", m.name, m.target);
+                    writeln!(out, "{:<width$}  {}{link}", m.name, m.target).ok();
                 }
                 out
             })
@@ -768,9 +769,9 @@ fn machine_stats(server: &Server, json: bool, params: StatsParams) -> anyhow::Re
 
 fn print<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> anyhow::Result<()> {
     if json {
-        println!("{}", serde_json::to_string(value)?);
+        out::line(serde_json::to_string(value)?);
     } else {
-        print!("{}", text());
+        out::text(text());
     }
     Ok(())
 }
@@ -789,7 +790,7 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
                     if let Ok(client) = Client::connect(&paths.socket) {
                         return Ok(client);
                     }
-                    std::thread::sleep(Duration::from_millis(100));
+                    shed_server::clock::sleep(Duration::from_millis(100));
                 }
                 started?;
                 return Ok(Client::connect(&paths.socket)?);
@@ -825,12 +826,15 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut line = String::new();
-        let _ = io::BufReader::new(stdout).read_line(&mut line);
-        let _ = tx.send(line);
+        io::BufReader::new(stdout).read_line(&mut line).ok();
+        tx.send(line).ok();
     });
     match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(line) => match line.trim_end().strip_prefix("shed ready ") {
-            Some(ready) => eprintln!("shed: server {} started", ready.replacen(' ', " on ", 1)),
+            Some(ready) => out::err(format_args!(
+                "shed: server {} started",
+                ready.replacen(' ', " on ", 1)
+            )),
             None => bail!("shed serve exited ({}) before it was ready", child.wait()?),
         },
         Err(_) => bail!("shed serve was not ready within 10 s (still running, its stdout silent)"),
@@ -880,7 +884,7 @@ fn table(list: &[TerminalInfo]) -> String {
             .zip(widths)
             .map(|(c, w)| format!("{c:<w$}"))
             .collect();
-        let _ = writeln!(out, "{}", cells.join("  ").trim_end());
+        writeln!(out, "{}", cells.join("  ").trim_end()).ok();
     }
     out
 }

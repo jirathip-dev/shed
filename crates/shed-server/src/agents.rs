@@ -140,7 +140,7 @@ fn install_binary(entry: &Value, dir: &Path) -> Result<Vec<String>, Error> {
             .or_else(|_| run("sha256sum", &[&archive]))?;
         let have = String::from_utf8_lossy(&sum);
         if have.split_whitespace().next() != Some(want) {
-            let _ = fs::remove_file(&archive);
+            fs::remove_file(&archive).ok();
             return Err(fail(format!("{url}: sha256 mismatch")));
         }
     }
@@ -179,8 +179,9 @@ pub fn add(state: &Path, id: &str, source: &str) -> Result<Agent, Error> {
         )));
     }
     let registry: Value = serde_json::from_slice(&fetch(source)?)?;
-    let entry = registry["agents"]
-        .as_array()
+    let entry = registry
+        .get("agents")
+        .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .find(|a| a["id"] == id)
@@ -190,18 +191,22 @@ pub fn add(state: &Path, id: &str, source: &str) -> Result<Agent, Error> {
         return Err(fail(format!("{id}: bad version {version:?}")));
     }
     let dist = &entry["distribution"];
-    let binary = &dist["binary"][platform()];
-    let (distribution, cmd) = if binary.is_object() {
+    let binary = dist.get("binary").and_then(|b| b.get(platform()));
+    let (distribution, cmd) = if let Some(binary) = binary.filter(|b| b.is_object()) {
         let dir = state.with_file_name("agents").join(id).join(&version);
         ("binary", with_env(binary, install_binary(binary, &dir)?))
-    } else if let Some(package) = dist["npx"]["package"].as_str() {
+    } else if let Some(package) = dist.pointer("/npx/package").and_then(Value::as_str) {
         let cmd = ["npx", "-y", package].map(str::to_owned).to_vec();
-        let cmd = [cmd, strings(&dist["npx"]["args"])].concat();
+        let cmd = [
+            cmd,
+            strings(dist.pointer("/npx/args").unwrap_or(&Value::Null)),
+        ]
+        .concat();
         ("npx", with_env(&dist["npx"], cmd))
-    } else if let Some(package) = dist["uvx"]["package"].as_str() {
+    } else if let Some(package) = dist.pointer("/uvx/package").and_then(Value::as_str) {
         let cmd = [
             vec!["uvx".to_owned(), package.to_owned()],
-            strings(&dist["uvx"]["args"]),
+            strings(dist.pointer("/uvx/args").unwrap_or(&Value::Null)),
         ];
         ("uvx", with_env(&dist["uvx"], cmd.concat()))
     } else {

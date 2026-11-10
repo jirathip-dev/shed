@@ -109,13 +109,13 @@ pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
 pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     let mut text = String::from("# shed machines; edit with `shed machine add|rm`.\n[machines]\n");
     for m in machines {
-        let _ = writeln!(text, "{} = \"{}\"", m.name, m.target);
+        writeln!(text, "{} = \"{}\"", m.name, m.target).ok();
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
     let n = WRITES.fetch_add(1, Ordering::Relaxed);
-    let tmp = path.with_extension(format!("toml.{}.{n}.tmp", std::process::id()));
+    let tmp = path.with_extension(format!("toml.{}.{n}.tmp", shed_core::runner::pid()));
     fs::write(&tmp, text)?;
     fs::rename(&tmp, path)?;
     Ok(())
@@ -186,10 +186,11 @@ pub fn find(path: &Path, name: &str) -> Result<Machine, Error> {
 /// `ssh` or the shed there gives no answer; [`Error::Io`] when `ssh` cannot start.
 pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Client, Error> {
     let (ours, theirs) = UnixStream::pair()?;
-    let _ = fs::DirBuilder::new()
+    fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
-        .create(control_dir);
+        .create(control_dir)
+        .ok();
     let mut args = vec![];
     for option in [
         "BatchMode=yes".to_owned(),
@@ -252,14 +253,14 @@ pub fn stats(
     let (tx, rx) = mpsc::channel();
     let (m, dir) = (machine.clone(), control_dir.to_owned());
     std::thread::spawn(move || {
-        let _ = tx
-            .send(connect(&m, &dir, false).and_then(|mut c| c.call(Method::MachineStats, &params)));
+        tx.send(connect(&m, &dir, false).and_then(|mut c| c.call(Method::MachineStats, &params)))
+            .ok();
     });
     let seen = seen_dir.join(&machine.name);
     match rx.recv_timeout(STATS_TIMEOUT) {
         Ok(Ok(stats)) => {
-            let _ = fs::create_dir_all(seen_dir);
-            let _ = fs::write(&seen, crate::stats::unix_now().to_string());
+            fs::create_dir_all(seen_dir).ok();
+            fs::write(&seen, shed_core::clock::unix_now().to_string()).ok();
             Ok(Ok(stats))
         }
         Ok(Err(e @ Error::MachineVersion { .. })) => Err(e),

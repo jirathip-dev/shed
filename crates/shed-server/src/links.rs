@@ -26,7 +26,7 @@ impl Held {
     fn set(&self, state: LinkState, error: Option<String>) {
         let mut link = lock(&self.link);
         if link.state != state {
-            link.since = crate::stats::unix_now();
+            link.since = shed_core::clock::unix_now();
         }
         (link.state, link.error) = (state, error);
     }
@@ -53,7 +53,7 @@ pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value
     };
     let mut params = request.params.clone();
     match name {
-        Some(name) => params["name"] = name.into(),
+        Some(name) => _ = params.as_object_mut()?.insert("name".into(), name.into()),
         None => _ = params.as_object_mut()?.remove(field),
     }
     Some((machine.to_owned(), params))
@@ -96,7 +96,7 @@ impl Links {
                 calls: Mutex::new(None),
                 link: Mutex::new(Link {
                     state: LinkState::Down,
-                    since: crate::stats::unix_now(),
+                    since: shed_core::clock::unix_now(),
                     error: None,
                 }),
             });
@@ -203,7 +203,7 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
                 }
             }
         }
-        std::thread::sleep(machines::backoff(failures));
+        shed_core::clock::sleep(machines::backoff(failures));
         failures += 1;
     }
 }

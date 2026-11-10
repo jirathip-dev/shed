@@ -3,6 +3,7 @@
 //! No sockets, and no dependency on any other shed crate (CI checks this).
 #![forbid(unsafe_code)]
 
+pub mod clock;
 pub mod history;
 pub mod keys;
 pub mod pattern;

@@ -54,7 +54,7 @@ impl Events {
         let bytes = line(&event);
         let mut log = lock(&self.log);
         log.events.push_back((event, bytes));
-        if log.events.len() as u64 > 2 * RING {
+        if u64::try_from(log.events.len()).unwrap_or(u64::MAX) > 2 * RING {
             let slowest = log.cursors.values().min().copied();
             let floor = slowest.unwrap_or(u64::MAX).min(self.seq - RING);
             while log.events.front().is_some_and(|(e, _)| e.seq <= floor) {

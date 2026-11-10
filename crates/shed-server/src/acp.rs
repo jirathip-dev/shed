@@ -97,8 +97,8 @@ pub fn render(transcript: &str) -> String {
                 id, title, status, ..
             } => {
                 let line = format!("[tool] {title} ({status})");
-                if let Some(&at) = tools.get(&id) {
-                    lines[at] = line;
+                if let Some(slot) = tools.get(&id).and_then(|&at| lines.get_mut(at)) {
+                    *slot = line;
                 } else {
                     tools.insert(id, lines.len());
                     lines.push(line);
@@ -124,8 +124,10 @@ impl Preview {
     pub fn push(&mut self, kind: EventKind) -> bool {
         match &kind {
             EventKind::ToolCall { id, .. } if self.tools.contains_key(id) => {
-                let at = self.tools[id];
-                self.blocks[at] = Ok(kind);
+                let at = self.tools.get(id).copied();
+                if let Some(block) = at.and_then(|at| self.blocks.get_mut(at)) {
+                    *block = Ok(kind);
+                }
                 return true;
             }
             EventKind::ToolCall { id, .. } => _ = self.tools.insert(id.clone(), self.blocks.len()),
@@ -203,15 +205,15 @@ impl Preview {
 }
 
 fn mark(status: &str) -> (&'static str, &'static str) {
-    let at = ["pending", "in_progress", "completed", "failed"]
-        .iter()
-        .position(|s| *s == status);
-    at.map_or(("", "[ ] "), |i| {
-        (
-            ["… ", "… ", "✓ ", "✗ "][i],
-            ["[ ] ", "[~] ", "[x] ", "[!] "][i],
-        )
-    })
+    [
+        ("pending", "… ", "[ ] "),
+        ("in_progress", "… ", "[~] "),
+        ("completed", "✓ ", "[x] "),
+        ("failed", "✗ ", "[!] "),
+    ]
+    .into_iter()
+    .find(|(s, ..)| *s == status)
+    .map_or(("", "[ ] "), |(_, glyph, text)| (glyph, text))
 }
 
 fn markdown(text: &str, put: &mut impl FnMut(&str, &str, &str, &str)) {
@@ -253,9 +255,11 @@ fn code(line: &str) -> String {
 fn wrap(line: &str, width: usize) -> Vec<String> {
     let mut lines = vec![String::new()];
     for (i, word) in line.split(' ').enumerate() {
-        let last = lines.len() - 1;
-        if i > 0 && lines[last].chars().count() + 1 + word.chars().count() <= width {
-            lines[last].push(' ');
+        if i > 0
+            && let Some(last) = lines.last_mut()
+            && last.chars().count() + 1 + word.chars().count() <= width
+        {
+            last.push(' ');
         } else if i > 0 {
             lines.push(String::new());
         }
@@ -263,8 +267,9 @@ fn wrap(line: &str, width: usize) -> Vec<String> {
             if j > 0 {
                 lines.push(String::new());
             }
-            let last = lines.len() - 1;
-            lines[last].extend(chunk);
+            if let Some(last) = lines.last_mut() {
+                last.extend(chunk);
+            }
         }
     }
     lines
@@ -280,7 +285,7 @@ pub fn stdout_style() -> (usize, usize, bool) {
     (
         size.0.into(),
         size.1.into(),
-        tty && std::env::var_os("NO_COLOR").is_none(),
+        tty && crate::config::var_os("NO_COLOR").is_none(),
     )
 }
 
@@ -326,9 +331,14 @@ enum FromAgent {
 }
 
 fn update(params: &Value) -> Result<Box<SessionUpdate>, String> {
-    let u = &params["update"];
-    let chunk = u["sessionUpdate"] == "agent_message_chunk" && u["content"]["type"] == "text";
-    if let Some(text) = u["content"]["text"].as_str().filter(|_| chunk) {
+    fn at<'a>(v: Option<&'a Value>, key: &str) -> Option<&'a str> {
+        v.and_then(|v| v.get(key)).and_then(Value::as_str)
+    }
+    let u = params.get("update");
+    let content = u.and_then(|u| u.get("content"));
+    let chunk = at(u, "sessionUpdate") == Some("agent_message_chunk")
+        && at(content, "type") == Some("text");
+    if let Some(text) = at(content, "text").filter(|_| chunk) {
         let chunk = ContentChunk::new(text.into());
         return Ok(Box::new(SessionUpdate::AgentMessageChunk(chunk)));
     }
@@ -381,7 +391,7 @@ impl Session {
     }
 
     fn emit(&self, kind: EventKind) {
-        let _ = self.send(Out::Emit(kind, self.replay, !self.waking));
+        self.send(Out::Emit(kind, self.replay, !self.waking)).ok();
     }
 
     fn state(&mut self, state: &str, note: Option<String>) {
@@ -389,11 +399,12 @@ impl Session {
             self.last = (state.to_owned(), note.clone());
         }
         let (state, state_source) = (state.to_owned(), None);
-        let _ = self.send(Out::State(Reported {
+        self.send(Out::State(Reported {
             state,
             note,
             state_source,
-        }));
+        }))
+        .ok();
     }
 
     fn say(&self, line: String) -> AcpResult<()> {
@@ -426,7 +437,7 @@ impl Session {
     }
 
     fn input(&mut self, input: Input) -> AcpResult<()> {
-        self.heard = Instant::now();
+        self.heard = shed_core::clock::now();
         let back = self.back.clone();
         match input {
             Input::Prompt(text) => {
@@ -441,7 +452,7 @@ impl Session {
                 self.cx
                     .send_request(PromptRequest::new(self.id.clone(), blocks))
                     .on_receiving_result(async move |r| {
-                        let _ = back.send(FromAgent::Prompt(n, r));
+                        back.send(FromAgent::Prompt(n, r)).ok();
                         Ok(())
                     })?;
                 self.prompts.insert(n);
@@ -488,7 +499,8 @@ impl Session {
                 self.cx
                     .send_request(set)
                     .on_receiving_result(async move |r| {
-                        let _ = back.send(FromAgent::Config(r.map(|r| r.config_options)));
+                        back.send(FromAgent::Config(r.map(|r| r.config_options)))
+                            .ok();
                         Ok(())
                     })?;
             }
@@ -497,7 +509,7 @@ impl Session {
     }
 
     fn message(&mut self, m: FromAgent) -> AcpResult<()> {
-        self.heard = Instant::now();
+        self.heard = shed_core::clock::now();
         match m {
             FromAgent::Update(Ok(u)) => self.update(*u),
             FromAgent::Update(Err(why)) => {
@@ -660,7 +672,8 @@ impl Session {
 }
 
 fn hibernate_after() -> Option<Duration> {
-    let secs = std::env::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
+    let secs =
+        crate::config::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
     (secs > 0).then(|| Duration::from_secs(secs))
 }
 
@@ -728,7 +741,8 @@ async fn drive(
         }
         s.input(input)?;
     }
-    let idle = std::env::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
+    let idle =
+        crate::config::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
     let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
     let mut typing = true;
     loop {
@@ -774,7 +788,7 @@ impl Writer {
                     Out::Emit(kind, replay, keep) => {
                         if keep {
                             let line = serde_json::to_string(&kind).unwrap_or_default();
-                            let _ = writeln!(self.transcript, "{line}");
+                            writeln!(self.transcript, "{line}").ok();
                             redraw |= self.preview.push(kind.clone());
                         }
                         let params = EmitParams { name, kind, replay };
@@ -792,13 +806,15 @@ impl Writer {
                 };
                 calls.extend(call.unwrap_or_default());
             }
-            let _ = self.transcript.flush();
+            self.transcript.flush().ok();
             self.send(&calls).await;
             if redraw {
                 let (cols, rows, color) = stdout_style();
                 let lines = self.preview.draw(cols, color, rows - 1).join("\r\n");
                 let mut stdout = io::stdout().lock();
-                let _ = write!(stdout, "\x1b[H\x1b[2J{lines}\r\n").and_then(|()| stdout.flush());
+                write!(stdout, "\x1b[H\x1b[2J{lines}\r\n")
+                    .and_then(|()| stdout.flush())
+                    .ok();
             }
         }
     }
@@ -826,7 +842,7 @@ async fn read_input(inputs: UnboundedSender<Input>) {
     let mut line = Vec::new();
     let mut buf = [0u8; 4096];
     while let Ok(n @ 1..) = stdin.read(&mut buf).await {
-        for &b in &buf[..n] {
+        for &b in buf.iter().take(n) {
             let input = match b {
                 0x1b | 0x03 => {
                     line.clear();
@@ -882,7 +898,7 @@ pub fn bridge(
     policy: Policy,
     agent_id: &str,
 ) -> Result<i32, Error> {
-    let name = std::env::var("SHED").map_err(|_| Error::Acp("$SHED is unset".to_owned()))?;
+    let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
     let result = run(cmd, cwd, socket, state, policy, agent_id, &name);
     if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
         let report = Reported {
@@ -890,8 +906,9 @@ pub fn bridge(
             note: Some(e.to_string()),
             state_source: None,
         };
-        let _: Result<serde_json::Value, _> =
-            server.call(Method::State, &StateParams { name, report });
+        let _: Option<serde_json::Value> = server
+            .call(Method::State, &StateParams { name, report })
+            .ok();
     }
     result
 }
@@ -939,7 +956,7 @@ async fn connect(
         .on_receive_notification(
             async move |n: UntypedMessage, _| {
                 if SessionNotification::matches_method(n.method()) {
-                    let _ = updates.send(FromAgent::Update(update(n.params())));
+                    updates.send(FromAgent::Update(update(n.params()))).ok();
                 }
                 Ok(())
             },
@@ -947,7 +964,7 @@ async fn connect(
         )
         .on_receive_request(
             async move |r: RequestPermissionRequest, asked, _| {
-                let _ = asks.send(FromAgent::Permission(Box::new(r), asked));
+                asks.send(FromAgent::Permission(Box::new(r), asked)).ok();
                 Ok(())
             },
             agent_client_protocol::on_receive_request!(),
@@ -969,7 +986,7 @@ fn run(
     agent_id: &str,
     name: &str,
 ) -> Result<i32, Error> {
-    let mcp = std::env::var("SHED_ACP_MCP").unwrap_or_default();
+    let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
     let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
     let mcp = mcp_servers(&mcp).map_err(Error::Acp)?;
     let (out, outs) = unbounded_channel();
@@ -995,7 +1012,7 @@ fn run(
             titles: BTreeMap::new(),
             reply: String::new(),
             auth: crate::providers::auth_failures(agent_id),
-            heard: Instant::now(),
+            heard: shed_core::clock::now(),
             replay: false,
             waking: false,
             last: ("idle".to_owned(), None),
@@ -1004,7 +1021,7 @@ fn run(
             mcp: mcp.clone(),
         },
     };
-    let mut resume = std::env::var("SHED_ACP_RESUME").ok();
+    let mut resume = crate::config::var("SHED_ACP_RESUME");
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(1)
         .enable_all()
@@ -1041,7 +1058,7 @@ fn run(
             kept = Some(s);
         }
     });
-    let _ = runtime.block_on(writer);
+    runtime.block_on(writer).ok();
     runtime.shutdown_background();
     result
 }

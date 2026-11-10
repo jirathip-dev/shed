@@ -23,7 +23,7 @@ fn throughput_report_with_full_scrollback() {
     }
     let secs = start.elapsed().as_secs_f64();
     let history = screen.history(usize::MAX);
-    assert_eq!(history.lines().count(), LINES + size.rows as usize - 1);
+    assert_eq!(history.lines().count(), LINES + usize::from(size.rows) - 1);
     assert!(history.len() <= BYTES + 24 * 81);
     println!(
         "history throughput: {} MiB in {:.0} ms = {:.1} MiB/s (scrollback full: {LINES} lines)",

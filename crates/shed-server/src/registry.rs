@@ -1,10 +1,10 @@
+use shed_core::runner::ExitStatus;
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
-use std::process::ExitStatus;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -75,7 +75,7 @@ impl Entry {
             killing: false,
             resources: None,
             emitted: None,
-            sampled: (Instant::now(), Duration::ZERO),
+            sampled: (shed_core::clock::now(), Duration::ZERO),
         }
     }
 
@@ -149,7 +149,7 @@ impl Registry {
             },
             Err(e) => return Err(e),
         };
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned());
+        let shell = crate::config::var("SHELL").unwrap_or_else(|| "/bin/sh".to_owned());
         let mut entries = BTreeMap::new();
         let mut events = Events::default();
         for mut info in file.terminals {
@@ -183,7 +183,7 @@ impl Registry {
                     .file_stem()
                     .map(|s| s.to_string_lossy().into_owned());
                 if stem.is_some_and(|s| !entries.contains_key(&s)) {
-                    let _ = fs::remove_file(file.path());
+                    fs::remove_file(file.path()).ok();
                 }
             }
         }
@@ -429,7 +429,7 @@ impl Registry {
         };
         let history = history(&self.path, &name);
         if let Some(log) = &history.log {
-            let _ = fs::remove_file(log);
+            fs::remove_file(log).ok();
         }
         let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
         let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
@@ -506,7 +506,10 @@ impl Registry {
         };
         if acp || !p.history {
             let lines: Vec<&str> = text.lines().collect();
-            text = lines[lines.len().saturating_sub(n)..].join("\n");
+            text = lines
+                .get(lines.len().saturating_sub(n)..)
+                .unwrap_or_default()
+                .join("\n");
         }
         Ok(ReadResult { text, events })
     }
@@ -633,9 +636,9 @@ impl Registry {
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
         if let Some(log) = history(&self.path, name).log {
-            let _ = fs::remove_file(log);
+            fs::remove_file(log).ok();
         }
-        let _ = fs::remove_file(crate::acp::transcript(&self.path, name));
+        fs::remove_file(crate::acp::transcript(&self.path, name)).ok();
         self.saved(entry.info)
     }
 }

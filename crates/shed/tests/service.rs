@@ -1,4 +1,5 @@
 //! `shed install|uninstall|doctor` with `HOME` in a temp dir: the job file they write and check.
+#![cfg(test)]
 
 mod common;
 

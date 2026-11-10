@@ -6,6 +6,7 @@
 
 pub mod acp;
 pub mod agents;
+pub mod config;
 mod events;
 mod links;
 pub mod machines;
@@ -23,7 +24,7 @@ use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use proto::{
     ErrorCode, Hello, Method, Request, ResizeParams, Response, RpcError, StatsParams, Target,
@@ -35,8 +36,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessTable as _};
-pub use shed_core::runner;
 use shed_core::{Pattern, STATES, Terminal, Wake};
+pub use shed_core::{clock, runner};
 pub use shed_proto as proto;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
@@ -133,7 +134,7 @@ impl Paths {
     /// # Errors
     /// [`Error::NoHome`] or [`Error::NoRuntimeDir`] when the variables they need are unset.
     pub fn user() -> Result<Self, Error> {
-        let var = |k| std::env::var_os(k).filter(|v: &OsString| !v.is_empty());
+        let var = |k| config::var_os(k).filter(|v: &OsString| !v.is_empty());
         let home = var("HOME").map(PathBuf::from).ok_or(Error::NoHome);
         if cfg!(target_os = "macos") {
             let lib = home?.join("Library");
@@ -172,12 +173,12 @@ fn watch(registry: &Shared, term: Arc<Terminal>) {
     tokio::spawn(async move {
         loop {
             let last = term.report();
-            let _ = lock(&registry).refresh();
+            lock(&registry).refresh().ok();
             if !matches!(
                 term.wait_until(|t| t.report() != last, None).await,
                 Ok(Wake::Matched)
             ) {
-                let _ = lock(&registry).refresh();
+                lock(&registry).refresh().ok();
                 return;
             }
         }
@@ -188,7 +189,7 @@ async fn sample(registry: Shared, every: Duration) {
     loop {
         tokio::time::sleep(every).await;
         if let Ok(Ok(procs)) = blocking(|| proctree::system().list()).await {
-            lock(&registry).sample(&procs, Instant::now());
+            lock(&registry).sample(&procs, shed_core::clock::now());
         }
     }
 }
@@ -196,7 +197,7 @@ async fn sample(registry: Shared, every: Duration) {
 async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     let (wait, dir) = {
         let reg = lock(registry);
-        (reg.stats.until_due(stats::unix_now()), reg.dir())
+        (reg.stats.until_due(shed_core::clock::unix_now()), reg.dir())
     };
     if wait > 0 {
         return Duration::from_secs(wait);
@@ -205,9 +206,9 @@ async fn record_stats(registry: &Mutex<Registry>) -> Duration {
         return Duration::from_secs(1);
     };
     let mut reg = lock(registry);
-    let _ = reg.refresh();
+    reg.refresh().ok();
     reg.record(sample);
-    Duration::from_secs(reg.stats.until_due(stats::unix_now()).max(1))
+    Duration::from_secs(reg.stats.until_due(shed_core::clock::unix_now()).max(1))
 }
 
 /// Loads the state, binds the socket (mode 0600, its directory 0700), prints `shed ready <version>
@@ -269,11 +270,12 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     }
     let listener = tokio::net::UnixListener::bind(&paths.socket)?;
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
-    let _ = writeln!(
+    writeln!(
         io::stdout(),
         "shed ready {VERSION} {}",
         paths.socket.display()
-    );
+    )
+    .ok();
     loop {
         let (stream, _) = listener.accept().await?;
         tokio::spawn(connection(
@@ -539,7 +541,7 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
     let timeout = p.timeout.map(Duration::try_from_secs_f64).transpose();
     let deadline = timeout
         .map_err(|e| bad(&e))?
-        .and_then(|d| Instant::now().checked_add(d));
+        .and_then(|d| shed_core::clock::now().checked_add(d));
     let (term, info) = {
         let mut reg = lock(registry);
         reg.refresh()?;
@@ -670,8 +672,8 @@ pub fn relay(socket: &Path) -> Result<(), Error> {
     let mut stream = UnixStream::connect(socket)?;
     let mut up = stream.try_clone()?;
     std::thread::spawn(move || {
-        let _ = io::copy(&mut io::stdin().lock(), &mut up);
-        let _ = up.shutdown(Shutdown::Write);
+        io::copy(&mut io::stdin().lock(), &mut up).ok();
+        up.shutdown(Shutdown::Write).ok();
     });
     let mut out = io::stdout().lock();
     let mut buf = [0u8; 8192];
@@ -680,7 +682,7 @@ pub fn relay(socket: &Path) -> Result<(), Error> {
         if n == 0 {
             return Ok(());
         }
-        out.write_all(&buf[..n])?;
+        out.write_all(buf.get(..n).unwrap_or_default())?;
         out.flush()?;
     }
 }
@@ -691,13 +693,13 @@ fn temp_dir(name: &str) -> PathBuf {
     impl Drop for Made {
         fn drop(&mut self) {
             for dir in self.0.borrow().iter() {
-                let _ = fs::remove_dir_all(dir);
+                fs::remove_dir_all(dir).ok();
             }
         }
     }
     thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
-    let dir = std::env::temp_dir().join(format!("shed-{name}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
+    let dir = std::env::temp_dir().join(format!("shed-{name}-{}", runner::pid()));
+    fs::remove_dir_all(&dir).ok();
     fs::create_dir_all(&dir).expect("temp dir");
     MADE.with(|m| m.0.borrow_mut().push(dir.clone()));
     dir
