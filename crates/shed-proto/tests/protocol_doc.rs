@@ -8,11 +8,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind, EventsParams,
-    Hello, KeysParams, Line, LsParams, MachineStats, Method, ModelParams, ReadParams, ReadResult,
-    Reported, Request, ResizeParams, Resources, Response, RpcError, Run, RunParams, Sample,
-    ScreenUpdate, SendParams, State, StateParams, StatsParams, Target, TerminalInfo,
-    TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams, WaitResult,
-    WatchParams,
+    Hello, KeysParams, Line, Link, LinkState, LsParams, MachineStats, Method, ModelParams,
+    ReadParams, ReadResult, Reported, Request, ResizeParams, Resources, Response, RpcError, Run,
+    RunParams, Sample, ScreenUpdate, SendParams, State, StateParams, StatsParams, Target,
+    TerminalInfo, TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams,
+    WaitResult, WatchParams,
 };
 
 fn info(state: State) -> TerminalInfo {
@@ -205,6 +205,7 @@ fn run_params() -> Value {
         resume: None,
         mcp_servers: Vec::new(),
         no_hibernate: false,
+        machine: None,
     })
     .unwrap()
 }
@@ -338,7 +339,22 @@ fn example(method: Method) -> (Value, Value) {
             .unwrap(),
             json!({}),
         ),
+        Method::MachineLinks => links_example(),
     }
+}
+
+fn links_example() -> (Value, Value) {
+    let link = |state, error: Option<&str>| Link {
+        state,
+        since: 1_762_416_000,
+        error: error.map(str::to_owned),
+    };
+    let refused = "SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both";
+    let links = BTreeMap::from([
+        ("box", link(LinkState::Up, None)),
+        ("old", link(LinkState::Down, Some(refused))),
+    ]);
+    (json!({}), to_value(links).unwrap())
 }
 
 fn stats_example() -> (Value, Value) {

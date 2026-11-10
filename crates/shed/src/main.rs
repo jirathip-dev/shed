@@ -5,7 +5,6 @@ mod attach;
 mod service;
 mod watch;
 
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Write as _};
@@ -24,7 +23,7 @@ use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
 use shed_server::proto::{
-    Event, EventKind, EventsParams, KeysParams, LsParams, MachineStats, Method, ModelParams,
+    Event, EventsParams, KeysParams, Link, LinkState, LsParams, MachineStats, Method, ModelParams,
     ReadParams, ReadResult, Reported, RunParams, SendParams, State, StateParams, StatsParams,
     Target, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
 };
@@ -214,6 +213,24 @@ enum Command {
     Doctor,
 }
 
+impl Command {
+    /// The terminal the command names, if it names one.
+    fn terminal(&mut self) -> Option<&mut String> {
+        match self {
+            Self::Get { name }
+            | Self::Read { name, .. }
+            | Self::Send { name, .. }
+            | Self::Keys { name, .. }
+            | Self::Kill { name }
+            | Self::Rm { name }
+            | Self::Approve { name, .. }
+            | Self::Cancel { name }
+            | Self::Model { name, .. } => Some(name),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum AgentsCommand {
     /// Install an agent from the ACP registry, pinned to the version it lists now.
@@ -256,20 +273,23 @@ enum MachineCommand {
     },
 }
 
-/// Where the commands go: the local server, or the one on `--on`'s machine.
+/// Where the commands go: the local server, or the one on `--on`'s machine (over the local server's
+/// held link when it is up, else one `ssh`).
 struct Server<'a> {
     paths: &'a Paths,
     dir: Option<&'a Path>,
     on: Option<Machine>,
+    linked: bool,
 }
 
 impl Server<'_> {
-    /// The server `command` goes to: `--on`'s machine (refused for the local-only commands), else this one.
+    /// The server `command` goes to: `--on`'s machine (refused for the local-only commands), else this
+    /// one; over a held link the terminal it names becomes `<machine>/<name>`.
     fn new<'a>(
         paths: &'a Paths,
         dir: Option<&'a Path>,
         on: Option<String>,
-        command: &Command,
+        command: &mut Command,
     ) -> anyhow::Result<Server<'a>> {
         let local = matches!(
             command,
@@ -290,19 +310,51 @@ impl Server<'_> {
                 "--on takes the terminal commands (run, ls, read, …), not hello, serve, connect, machine, agents, install or doctor"
             );
         }
-        Ok(Server {
+        let on = on
+            .map(|name| machines::find(&paths.config, &name))
+            .transpose()?;
+        let linkable = matches!(
+            command,
+            Command::Run(_)
+                | Command::Ls { .. }
+                | Command::Get { .. }
+                | Command::Read { .. }
+                | Command::Send { .. }
+                | Command::Keys { .. }
+                | Command::Kill { .. }
+                | Command::Rm { .. }
+                | Command::State { .. }
+                | Command::Model { .. }
+                | Command::Approve { .. }
+                | Command::Cancel { .. }
+                | Command::Events { .. }
+        );
+        let up = |m: &Machine| links(paths).get(&m.name).map(|l| l.state) == Some(LinkState::Up);
+        let linked = linkable && on.as_ref().is_some_and(up);
+        let server = Server {
             paths,
             dir,
-            on: on
-                .map(|name| machines::find(&paths.config, &name))
-                .transpose()?,
-        })
+            on,
+            linked,
+        };
+        if let Some(name) = command.terminal() {
+            *name = server.name(std::mem::take(name));
+        }
+        Ok(server)
+    }
+
+    /// `name` as the local server knows it: `<machine>/<name>` over a held link.
+    fn name(&self, name: String) -> String {
+        match &self.on {
+            Some(m) if self.linked => format!("{}/{name}", m.name),
+            _ => name,
+        }
     }
 
     /// A client: over SSH with `--on` (`autostart` passed on), else the local one ([`connect`]).
     fn connect(&self, autostart: Option<bool>) -> anyhow::Result<Client> {
         match &self.on {
-            Some(machine) => {
+            Some(machine) if !self.linked => {
                 let control = self.paths.socket.parent().unwrap_or(Path::new("."));
                 Ok(machines::connect(
                     machine,
@@ -310,9 +362,17 @@ impl Server<'_> {
                     autostart == Some(true),
                 )?)
             }
-            None => connect(self.paths, self.dir, autostart),
+            _ => connect(self.paths, self.dir, autostart),
         }
     }
+}
+
+/// The local server's held links (`machine.links`, which also links machines added since it
+/// started); none when no server answers.
+fn links(paths: &Paths) -> BTreeMap<String, Link> {
+    let links = Client::connect(&paths.socket)
+        .and_then(|mut c| c.call(Method::MachineLinks, &serde_json::json!({})));
+    links.unwrap_or_default()
 }
 
 /// `shed run`'s arguments.
@@ -391,13 +451,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(cli: Cli) -> anyhow::Result<ExitCode> {
+fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     let paths = match &cli.dir {
         Some(dir) => Paths::in_dir(dir),
         None => Paths::user()?,
     };
     let json = cli.json;
-    let server = Server::new(&paths, cli.dir.as_deref(), cli.on, &cli.command)?;
+    let server = Server::new(&paths, cli.dir.as_deref(), cli.on, &mut cli.command)?;
     match cli.command {
         Command::Hello => println!("shed {}", env!("CARGO_PKG_VERSION")),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
@@ -406,7 +466,11 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
             let params = LsParams {
                 labels: labels.into_iter().collect(),
             };
-            let list: Vec<TerminalInfo> = server.connect(None)?.call(Method::Ls, &params)?;
+            let mut list: Vec<TerminalInfo> = server.connect(None)?.call(Method::Ls, &params)?;
+            if server.linked {
+                let prefix = server.name(String::new());
+                list.retain(|t| t.name.starts_with(&prefix));
+            }
             print(json, &list, || table(&list))?;
         }
         Command::Get { name } => {
@@ -474,10 +538,7 @@ fn run(cli: Cli) -> anyhow::Result<ExitCode> {
                 labels: labels.into_iter().collect(),
                 since,
             };
-            match &server.on {
-                Some(machine) => events_on(&server, machine, params)?,
-                None => events(server.connect(None)?, &params)?,
-            }
+            events(&server, &params)?;
         }
         Command::Top => top(&server, json)?,
         Command::Watch { labels } => watch::watch(&server, labels.into_iter().collect())?,
@@ -537,6 +598,11 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         resume: args.resume,
         mcp_servers,
         no_hibernate: args.no_hibernate,
+        machine: server
+            .on
+            .as_ref()
+            .filter(|_| server.linked)
+            .map(|m| m.name.clone()),
     };
     let mut client = server.connect(Some(args.autostart))?;
     let info: TerminalInfo = client.call(Method::Run, &params)?;
@@ -707,7 +773,7 @@ fn state(
             .context("no terminal given and $SHED is unset (it is set inside a terminal)")?,
     };
     let params = StateParams {
-        name,
+        name: server.name(name),
         report: Reported {
             state,
             note,
@@ -745,81 +811,29 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     }))
 }
 
-/// `shed events`: copies the event lines to stdout until the server closes the connection.
-fn events(mut client: Client, params: &EventsParams) -> anyhow::Result<()> {
+/// `shed events`: copies the event lines to stdout until the server closes the connection. With
+/// `--on`, only that machine's, named `<machine>/<name>`.
+fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
+    let mut client = server.connect(None)?;
     let _: Value = client.call(Method::Events, params)?;
-    let (reader, _writer) = client.split();
     let mut out = io::stdout().lock();
-    for line in reader.lines() {
-        writeln!(out, "{}", line?)?;
+    for line in client.split().0.lines() {
+        let mut line = line?;
+        if let Some(m) = &server.on {
+            let mut event: Event = serde_json::from_str(&line)?;
+            let prefix = format!("{}/", m.name);
+            if server.linked && !event.name.starts_with(&prefix) {
+                continue;
+            }
+            if !server.linked {
+                event.name.insert_str(0, &prefix);
+                line = serde_json::to_string(&event)?;
+            }
+        }
+        writeln!(out, "{line}")?;
         out.flush()?;
     }
     Ok(())
-}
-
-/// `shed events --on <machine>`: names become `<machine>/<name>`. While a dropped link is retried
-/// ([`machines::keep_up`]), each terminal seen gets a state line noted `machine: reconnecting`, then
-/// `machine: connected` once it is back, and the stream resumes after the last `seq`.
-fn events_on(server: &Server, machine: &Machine, params: EventsParams) -> anyhow::Result<()> {
-    let control = server.paths.socket.parent().unwrap_or(Path::new("."));
-    let print = |event: &Event| -> io::Result<()> {
-        let mut out = io::stdout().lock();
-        writeln!(out, "{}", serde_json::to_string(event)?)?;
-        out.flush()
-    };
-    // The params (`since` follows the stream) and each live terminal's last state (or first) event.
-    let seen = RefCell::new((params, BTreeMap::<String, Event>::new()));
-    let mut broken = None;
-    let session = |mut client: Client| {
-        let _: Value = client.call(Method::Events, &seen.borrow().0)?;
-        for line in client.split().0.lines() {
-            let mut event: Event = serde_json::from_str(&line?)?;
-            event.name = format!("{}/{}", machine.name, event.name);
-            if let Err(e) = print(&event) {
-                broken = Some(e);
-                return Ok(());
-            }
-            let (params, terms) = &mut *seen.borrow_mut();
-            params.since = Some(event.seq);
-            match event.kind {
-                EventKind::Exited { .. } | EventKind::Killed => drop(terms.remove(&event.name)),
-                EventKind::State(_) => drop(terms.insert(event.name.clone(), event)),
-                _ => drop(terms.entry(event.name.clone()).or_insert(event)),
-            }
-        }
-        Err(shed_server::Error::BadResponse(
-            "the link dropped".to_owned(),
-        ))
-    };
-    let status = |reconnecting: bool| {
-        let (params, terms) = &*seen.borrow();
-        let note = if reconnecting {
-            "reconnecting"
-        } else {
-            "connected"
-        };
-        for event in terms.values() {
-            let state = match &event.kind {
-                EventKind::State(r) => r.state.clone(),
-                _ => "idle".to_owned(),
-            };
-            let note = Some(format!("machine: {note}"));
-            let kind = EventKind::State(Reported {
-                state,
-                note,
-                state_source: None,
-            });
-            let seq = params.since.unwrap_or(event.seq);
-            let _ = print(&Event {
-                seq,
-                kind,
-                ..event.clone()
-            });
-        }
-    };
-    let connect = || machines::connect(machine, control, false);
-    machines::keep_up(connect, session, std::thread::sleep, status)?;
-    broken.map_or(Ok(()), |e| Err(e.into()))
 }
 
 /// `shed machine add|ls|rm|stats`.
@@ -828,16 +842,29 @@ fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Resu
     match command {
         MachineCommand::Add { name, target } => {
             let m = machines::add(&paths.config, &name, &target)?;
+            // A running server links it now.
+            links(paths);
             print(json, &m, || format!("{} added\n", m.name))
         }
         MachineCommand::Ls => {
-            let list = machines::load(&paths.config)?;
+            let links = links(paths);
+            let list: Vec<Listed> = machines::load(&paths.config)?
+                .into_iter()
+                .map(|machine| Listed {
+                    link: links.get(&machine.name).cloned(),
+                    machine,
+                })
+                .collect();
             print(json, &list, || {
-                let width = list.iter().map(|m| m.name.len()).max().unwrap_or(0).max(4);
+                let width = list.iter().map(|l| l.machine.name.len()).max();
+                let width = width.unwrap_or(0).max(4);
                 let mut out = format!("{:<width$}  TARGET\n", "NAME");
-                for m in &list {
+                for Listed { machine: m, link } in &list {
+                    let link = link.as_ref().map_or_else(String::new, |l| {
+                        format!("  {:?} since {}", l.state, l.since).to_lowercase()
+                    });
                     // Writing to a String cannot fail.
-                    let _ = writeln!(out, "{:<width$}  {}", m.name, m.target);
+                    let _ = writeln!(out, "{:<width$}  {}{link}", m.name, m.target);
                 }
                 out
             })
@@ -851,6 +878,15 @@ fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Resu
         }
     }?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// A configured machine, with its link when the local server holds one.
+#[derive(Serialize)]
+struct Listed {
+    #[serde(flatten)]
+    machine: Machine,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    link: Option<Link>,
 }
 
 /// `shed machine stats [--since T] [--on M]`: exit 1 when the machine is offline.

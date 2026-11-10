@@ -147,11 +147,13 @@ pub enum ErrorCode {
     SpawnFailed,
     /// The client marked the terminal read-only (`terminal.readonly`): no input, keys, resize or attach.
     ReadOnly,
+    /// The machine a `<machine>/<name>` names has no link up (`machine.links` says why).
+    NoLink,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -164,6 +166,7 @@ impl ErrorCode {
         Self::StillRunning,
         Self::SpawnFailed,
         Self::ReadOnly,
+        Self::NoLink,
     ];
 
     /// The numeric JSON-RPC code.
@@ -182,6 +185,7 @@ impl ErrorCode {
             Self::StillRunning => -32004,
             Self::SpawnFailed => -32005,
             Self::ReadOnly => -32006,
+            Self::NoLink => -32007,
         }
     }
 
@@ -201,6 +205,7 @@ impl ErrorCode {
             Self::StillRunning => "STILL_RUNNING",
             Self::SpawnFailed => "SPAWN_FAILED",
             Self::ReadOnly => "READONLY",
+            Self::NoLink => "NO_LINK",
         }
     }
 }
@@ -252,11 +257,13 @@ pub enum Method {
     MachineStats,
     /// Switch an ACP terminal's model: [`ModelParams`] → `{}`.
     Model,
+    /// The held links to the machines: `{}` → `{machine: Link}`.
+    MachineLinks,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -279,6 +286,7 @@ impl Method {
         Self::ReadOnly,
         Self::MachineStats,
         Self::Model,
+        Self::MachineLinks,
     ];
 
     /// The wire name.
@@ -307,6 +315,7 @@ impl Method {
             Self::ReadOnly => "terminal.readonly",
             Self::MachineStats => "machine.stats",
             Self::Model => "acp.model",
+            Self::MachineLinks => "machine.links",
         }
     }
 
@@ -373,6 +382,9 @@ impl Method {
             }
             Self::Model => {
                 "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`."
+            }
+            Self::MachineLinks => {
+                "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`; `run` with `machine`) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since."
             }
         }
     }
@@ -442,6 +454,9 @@ pub struct RunParams {
     /// ACP: never hibernate the agent when idle.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_hibernate: bool,
+    /// Start it on this machine, over its held link (`machine.links`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// `ls` params.
@@ -787,6 +802,30 @@ pub struct Sample {
     pub uptime_s: u64,
     /// Terminals by state: the reported state while running, else `running`; `exited`.
     pub terminals: BTreeMap<String, u64>,
+}
+
+/// A held link's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkState {
+    /// Connected.
+    Up,
+    /// Dropped, retried with backoff.
+    Reconnecting,
+    /// Never connected, or refused (another version); retried with backoff.
+    Down,
+}
+
+/// One machine's held link, as `machine.links` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Link {
+    /// Up, reconnecting or down.
+    pub state: LinkState,
+    /// Since when, unix seconds.
+    pub since: u64,
+    /// Why it is down: the last connect's error.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// `machine.stats` result: a sample taken now, and the kept ones after `since`.

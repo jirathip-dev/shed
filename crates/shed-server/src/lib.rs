@@ -7,6 +7,7 @@
 pub mod acp;
 pub mod agents;
 mod events;
+mod links;
 pub mod machines;
 mod registry;
 mod screen;
@@ -263,12 +264,13 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
             wait = record_stats(&recorder).await;
         }
     });
-    if let Some(dir) = paths.socket.parent() {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)?;
-    }
+    let control = paths.socket.parent().unwrap_or(Path::new("."));
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(control)?;
+    let links = Arc::new(links::Links::new(paths.config.clone(), control.to_owned()));
+    links.sync(&registry);
     match fs::remove_file(&paths.socket) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
         _ => {}
@@ -283,7 +285,11 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     );
     loop {
         let (stream, _) = listener.accept().await?;
-        tokio::spawn(connection(Arc::clone(&registry), stream));
+        tokio::spawn(connection(
+            Arc::clone(&registry),
+            Arc::clone(&links),
+            stream,
+        ));
     }
 }
 
@@ -298,6 +304,8 @@ struct Session {
     watching: Option<String>,
     /// The terminals `terminal.readonly` marked: their input is refused.
     readonly: BTreeSet<String>,
+    /// The server's links to the machines.
+    links: Arc<links::Links>,
 }
 
 /// The read-only terminal an input, resize or attach request names, if any. Every name it gives
@@ -323,8 +331,11 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
 
 /// Answers one connection's requests, line by line, until it closes. After an `attach`, `events` or
 /// `screen.watch` a task owns the write half and streams; it ends when the read half does.
-async fn connection(registry: Shared, stream: tokio::net::UnixStream) {
-    let mut session = Session::default();
+async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
+    let mut session = Session {
+        links: held,
+        ..Session::default()
+    };
     let (read, out) = stream.into_split();
     // Aborted on drop: the stream ends with the read half.
     let (mut out, mut streaming) = (Some(out), tokio::task::JoinSet::new());
@@ -387,6 +398,40 @@ fn json<T: Serialize>(value: &T) -> Result<Value, RpcError> {
     serde_json::to_value(value).map_err(|e| RpcError::new(ErrorCode::Internal, e))
 }
 
+/// The answer when `request` goes to the machines' links: it names `<machine>/<name>`, or it is
+/// `machine.links` or `ls` (this server's terminals, then each machine's; one that fails is left out).
+async fn linked(
+    registry: &Shared,
+    links: &links::Links,
+    method: Method,
+    request: &Request,
+) -> Option<Result<Value, RpcError>> {
+    if let Some((machine, params)) = links::remote(method, request) {
+        return Some(links.call(&machine, method, params).await);
+    }
+    if method == Method::MachineLinks {
+        links.sync(registry);
+        return Some(json(&links.report()));
+    }
+    if method != Method::Ls {
+        return None;
+    }
+    let list = params(request).and_then(|p| {
+        let mut reg = lock(registry);
+        reg.refresh()?;
+        json(&reg.ls(&p))
+    });
+    let Ok(Value::Array(mut list)) = list else {
+        return Some(list);
+    };
+    for machine in links.up() {
+        if let Ok(Value::Array(more)) = links.call(&machine, method, request.params.clone()).await {
+            list.extend(more);
+        }
+    }
+    Some(Ok(Value::Array(list)))
+}
+
 async fn dispatch(
     registry: &Shared,
     session: &mut Session,
@@ -411,6 +456,9 @@ async fn dispatch(
     if let Some(name) = readonly(method, request, session) {
         return Err(RpcError::new(ErrorCode::ReadOnly, name));
     }
+    if let Some(answer) = linked(registry, &session.links, method, request).await {
+        return answer;
+    }
     if method == Method::Kill {
         let Target { name } = params(request)?;
         let term = lock(registry).mark_kill(&name)?;
@@ -426,13 +474,7 @@ async fn dispatch(
         return json(&wait(registry, &params(request)?).await?);
     }
     if method == Method::MachineStats {
-        let p: StatsParams = params(request)?;
-        let dir = lock(registry).dir();
-        // Sampled outside the lock: it runs `df` (and `sysctl` on macOS).
-        let now = blocking(move || stats::system(&dir)).await?;
-        let mut reg = lock(registry);
-        reg.refresh()?;
-        return json(&reg.machine_stats(now, p.since));
+        return machine_stats(registry, params(request)?).await;
     }
     let mut reg = lock(registry);
     reg.refresh()?;
@@ -444,7 +486,6 @@ async fn dispatch(
             }
             json(&info)
         }
-        Method::Ls => json(&reg.ls(&params(request)?)),
         Method::Get => json(&reg.get(&params::<Target>(request)?.name)?),
         Method::Read => json(&reg.read(&params(request)?)?),
         Method::Send | Method::Input => reg.send(&params(request)?).map(|()| empty()),
@@ -486,10 +527,22 @@ async fn dispatch(
         Method::State => json(&reg.state(params(request)?)?),
         Method::Emit => reg.emit(params(request)?).map(|()| empty()),
         Method::Model => reg.model(params(request)?).map(|()| empty()),
-        Method::Hello | Method::Kill | Method::Wait | Method::MachineStats => {
-            Err(RpcError::new(ErrorCode::Internal, "handled above"))
-        }
+        Method::Hello
+        | Method::Kill
+        | Method::Wait
+        | Method::MachineStats
+        | Method::Ls
+        | Method::MachineLinks => Err(RpcError::new(ErrorCode::Internal, "handled above")),
     }
+}
+
+/// `machine.stats`, sampled outside the lock: it runs `df` (and `sysctl` on macOS).
+async fn machine_stats(registry: &Shared, p: StatsParams) -> Result<Value, RpcError> {
+    let dir = lock(registry).dir();
+    let now = blocking(move || stats::system(&dir)).await?;
+    let mut reg = lock(registry);
+    reg.refresh()?;
+    json(&reg.machine_stats(now, p.since))
 }
 
 /// The `{}` result.
