@@ -1,0 +1,11 @@
+Decided: the server holds a calls and an events stream per machine; remote events join the local log under local seqs
+Because: "Events from every machine merge into one stream with `seq` resume"
+Decided: requests naming <machine>/<name> are forwarded over the held link; run takes a machine field
+Because: crates/shed-server/src/links.rs:43
+Rejected: forwarding wait and attach — wait would hold the one calls stream; attach and screen.watch are streams
+Decided: deleted the client-side events --on reconnect loop (events_on, machines::keep_up)
+Because: "With no link up, `--on` falls back to one-shot ssh as today."
+Rejected: keeping both reconnect paths — two ways to do one thing
+Check: a_dropped_link_reconnects_and_the_merged_stream_loses_no_events compares the merged stream with the remote's own list
+Check: line cap 7707/7800 after #59 (q1082)
+Owner: remote terminals show as machine/name over one standing SSH link per machine
