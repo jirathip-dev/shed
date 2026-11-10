@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -5,10 +6,23 @@ use std::time::{Duration, Instant};
 
 use shed_server::Paths;
 
+struct Made(RefCell<Vec<PathBuf>>);
+
+impl Drop for Made {
+    fn drop(&mut self) {
+        for dir in self.0.borrow().iter() {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+}
+
+thread_local!(static MADE: Made = const { Made(RefCell::new(Vec::new())) });
+
 pub fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("shed-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("temp dir");
+    MADE.with(|m| m.0.borrow_mut().push(dir.clone()));
     dir.canonicalize().expect("canonical temp dir")
 }
 

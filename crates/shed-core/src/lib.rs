@@ -7,6 +7,7 @@ pub mod history;
 pub mod keys;
 pub mod pattern;
 pub mod proctree;
+pub mod runner;
 pub mod screen;
 pub mod terminal;
 

@@ -1,0 +1,34 @@
+# `herdsman arch-check` (just arch): the layers, the banned calls and the size limits.
+[[layer]]
+name = "core"
+paths = ["crates/shed-core/src/**"]
+mods = ["shed_core"]
+may_use = []
+
+[[layer]]
+name = "proto"
+paths = ["crates/shed-proto/src/**"]
+mods = ["shed_proto"]
+may_use = []
+
+[[layer]]
+name = "server"
+paths = ["crates/shed-server/src/**"]
+mods = ["shed_server"]
+may_use = ["core", "proto"]
+
+[[layer]]
+name = "cli"
+paths = ["crates/shed/src/**"]
+may_use = ["server"]
+
+[[ban]]
+pattern = "Command::new"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-core/src/runner.rs"]
+reason = "start processes through shed_core::runner"
+
+[[size]]
+paths = ["crates/*/src/**/*.rs"]
+max_file_lines = 2000
+max_fn_lines = 150

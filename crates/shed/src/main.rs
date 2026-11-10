@@ -6,12 +6,12 @@ mod service;
 mod watch;
 
 use std::collections::BTreeMap;
+use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Write as _};
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{ExitCode, Stdio};
+use std::process::ExitCode;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -812,20 +812,14 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     if UnixStream::connect(&paths.socket).is_ok() {
         bail!("a shed server already runs on {}", paths.socket.display());
     }
-    let mut cmd = std::process::Command::new(std::env::current_exe()?);
-    cmd.arg("serve");
+    let mut args = vec![OsString::from("serve")];
     if let Some(dir) = dir {
-        cmd.arg("--dir").arg(dir);
+        args.extend(["--dir".into(), dir.into()]);
     }
     if let Some(sample) = sample {
-        cmd.arg("--sample").arg(sample.to_string());
+        args.extend(["--sample".into(), sample.to_string().into()]);
     }
-    let mut child = cmd
-        .process_group(0)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let mut child = shed_server::runner::detached(&std::env::current_exe()?, args)
         .context("starting shed serve")?;
     let stdout = child.stdout.take().context("shed serve stdout")?;
     let (tx, rx) = mpsc::channel();

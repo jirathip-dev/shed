@@ -29,4 +29,5 @@ fn a_server_of_another_version_is_refused_by_the_client() {
             env!("CARGO_PKG_VERSION")
         )
     );
+    std::fs::remove_dir_all(dir).expect("clean");
 }

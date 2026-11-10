@@ -35,6 +35,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessTable as _};
+pub use shed_core::runner;
 use shed_core::{Pattern, STATES, Terminal, Wake};
 pub use shed_proto as proto;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
@@ -682,4 +683,22 @@ pub fn relay(socket: &Path) -> Result<(), Error> {
         out.write_all(&buf[..n])?;
         out.flush()?;
     }
+}
+
+#[cfg(test)]
+fn temp_dir(name: &str) -> PathBuf {
+    struct Made(std::cell::RefCell<Vec<PathBuf>>);
+    impl Drop for Made {
+        fn drop(&mut self) {
+            for dir in self.0.borrow().iter() {
+                let _ = fs::remove_dir_all(dir);
+            }
+        }
+    }
+    thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
+    let dir = std::env::temp_dir().join(format!("shed-{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(&dir).expect("temp dir");
+    MADE.with(|m| m.0.borrow_mut().push(dir.clone()));
+    dir
 }

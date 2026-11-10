@@ -3,7 +3,6 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -75,18 +74,23 @@ fn save(state: &Path, mut agents: Vec<Agent>) -> Result<(), Error> {
     Ok(fs::rename(&tmp, &path)?)
 }
 
-fn run(cmd: &mut Command) -> Result<Vec<u8>, Error> {
-    let out = cmd.output().map_err(|e| fail(format!("{cmd:?}: {e}")))?;
+fn run(program: &str, args: &[&Path]) -> Result<Vec<u8>, Error> {
+    let cmd = format!("{program} {args:?}");
+    let out =
+        shed_core::runner::output(program, args, &[]).map_err(|e| fail(format!("{cmd}: {e}")))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        return Err(fail(format!("{cmd:?} failed: {}", err.trim())));
+        return Err(fail(format!("{cmd} failed: {}", err.trim())));
     }
     Ok(out.stdout)
 }
 
 fn fetch(source: &str) -> Result<Vec<u8>, Error> {
     if source.starts_with("http://") || source.starts_with("https://") {
-        run(Command::new("curl").args(["-fsSL", "--max-time", "60", source]))
+        run(
+            "curl",
+            &["-fsSL", "--max-time", "60", source].map(Path::new),
+        )
     } else {
         Ok(fs::read(source)?)
     }
@@ -127,13 +131,13 @@ fn install_binary(entry: &Value, dir: &Path) -> Result<Vec<String>, Error> {
         .ok_or_else(|| fail("no archive"))?;
     let archive = dir.join(url.rsplit('/').next().unwrap_or("archive"));
     fs::create_dir_all(dir)?;
-    run(Command::new("curl")
-        .args(["-fsSL", "-o"])
-        .arg(&archive)
-        .arg(url))?;
+    run(
+        "curl",
+        &["-fsSL".as_ref(), "-o".as_ref(), &archive, url.as_ref()],
+    )?;
     if let Some(want) = entry["sha256"].as_str() {
-        let sum = run(Command::new("shasum").args(["-a", "256"]).arg(&archive))
-            .or_else(|_| run(Command::new("sha256sum").arg(&archive)))?;
+        let sum = run("shasum", &["-a".as_ref(), "256".as_ref(), &archive])
+            .or_else(|_| run("sha256sum", &[&archive]))?;
         let have = String::from_utf8_lossy(&sum);
         if have.split_whitespace().next() != Some(want) {
             let _ = fs::remove_file(&archive);
@@ -144,17 +148,9 @@ fn install_binary(entry: &Value, dir: &Path) -> Result<Vec<String>, Error> {
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("zip"))
     {
-        run(Command::new("unzip")
-            .args(["-oq"])
-            .arg(&archive)
-            .arg("-d")
-            .arg(dir))?;
+        run("unzip", &["-oq".as_ref(), &archive, "-d".as_ref(), dir])?;
     } else {
-        run(Command::new("tar")
-            .arg("-xf")
-            .arg(&archive)
-            .arg("-C")
-            .arg(dir))?;
+        run("tar", &["-xf".as_ref(), &archive, "-C".as_ref(), dir])?;
     }
     fs::remove_file(&archive)?;
     let cmd = entry["cmd"].as_str().ok_or_else(|| fail("no cmd"))?;

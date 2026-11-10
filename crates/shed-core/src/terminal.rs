@@ -117,12 +117,7 @@ impl Terminal {
         let log = Log::open(history)?;
         let (pty, pts) = pty_process::blocking::open()?;
         pty.resize(pty_size(size))?;
-        let child = pty_process::blocking::Command::new(program)
-            .args(args)
-            .current_dir(cwd)
-            .env("TERM", "xterm-256color")
-            .envs(env)
-            .spawn(pts)?;
+        let child = crate::runner::pty(program, args, cwd, env, pts)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
         let pty = Arc::new(pty);

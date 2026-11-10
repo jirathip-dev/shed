@@ -1,5 +1,4 @@
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
 
 use anyhow::{Context as _, bail};
 use shed_server::{Client, Error, Paths};
@@ -107,12 +106,8 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
     let (file, log) = (job.path.display(), job.log.display());
     let socket = paths.socket.display();
     let fix = format!("fix: {}", job.start);
-    let loaded = Command::new("sh")
-        .args(["-c", job.loaded])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success());
+    let loaded = shed_server::runner::output("sh", ["-c", job.loaded], &[])
+        .is_ok_and(|o| o.status.success());
     let server = Client::connect(&paths.socket);
     let checks = [
         (

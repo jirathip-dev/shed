@@ -15,7 +15,6 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -1018,13 +1017,7 @@ fn run(
             .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
         let (mut kept, mut wake) = (None, None);
         loop {
-            let mut child = tokio::process::Command::new(program)
-                .args(args)
-                .current_dir(cwd)
-                .env_remove("SHED_ACP_MCP")
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .spawn()
+            let mut child = shed_core::runner::piped(program, args, cwd, "SHED_ACP_MCP")
                 .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
             let slept = connect(&mut child, async |cx, back, from_agent| {
