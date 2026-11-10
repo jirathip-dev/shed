@@ -59,8 +59,6 @@ fn platform() -> String {
     format!("{os}-{}", std::env::consts::ARCH)
 }
 
-/// A registry file in `dir`: `fake` as this platform's binary (a tar.gz of the fake agent, built here),
-/// `npx-agent` with variables and `uvx-agent`; `bad-sum` has a wrong checksum.
 fn registry(dir: &Path) -> PathBuf {
     let pkg = dir.join("pkg");
     std::fs::create_dir_all(&pkg).expect("pkg dir");
@@ -92,7 +90,6 @@ fn registry(dir: &Path) -> PathBuf {
     path
 }
 
-/// The event lines of terminals labelled `run=<run>` from seq 0 until one matches `last`.
 fn events_until(dir: &Path, run: &str, last: impl Fn(&Value) -> bool) -> Vec<String> {
     let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
     let params = EventsParams {
@@ -361,8 +358,6 @@ fn an_agent_that_fails_the_handshake_reports_error() {
     assert!(err.contains("ACP agent nope is not installed"), "{err}");
 }
 
-/// Starts the fake agent as terminal `name` (labelled `run=<name>`) under registry id `id`, ready for a
-/// prompt.
 fn start_fake(dir: &Path, name: &str, id: &str) {
     let agent = fake_agent();
     let agent = agent.to_str().expect("utf-8");
@@ -408,7 +403,6 @@ fn an_expired_login_ends_the_turn_as_an_auth_error() {
     let reply: Value = serde_json::from_str(events.last().expect("a reply")).expect("JSON");
     assert_eq!(reply["text"], line);
     assert_eq!(reply["stop_reason"], "auth_error");
-    // The same text from an agent with no auth patterns is an ordinary chunk; the turn goes on.
     start_fake(&dir, "y", "fake");
     ok(&dir, &["send", "y", "auth"]);
     let out = shed(
@@ -452,7 +446,6 @@ fn the_watchdog_ends_a_silent_turn_but_not_a_busy_one() {
     );
 }
 
-/// Starts the fake agent as terminal `name` keeping its history in `history`, `extra` passed to `run`.
 fn start_with_history(dir: &Path, name: &str, history: &Path, extra: &[&str]) {
     let agent = fake_agent();
     let label = format!("run={name}");
@@ -483,7 +476,6 @@ fn resume_replays_the_history_once_marked_replay() {
         ok(&dir, &["send", "r1", prompt]);
         ok(&dir, &["wait", "r1", "--until", "done", "--timeout", "10"]);
     }
-    // A server restart loses the terminal but keeps its session id.
     drop(server);
     let _server = Server::start(&dir);
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "r1"])).expect("JSON");
@@ -602,15 +594,12 @@ fn an_unknown_update_kind_is_skipped() {
     );
 }
 
-/// The `--mcp` file for `servers`, in a dir of its own (not shed's).
 fn mcp_file(name: &str, servers: &Value) -> PathBuf {
     let path = temp_dir(name).join("mcp.json");
     std::fs::write(&path, servers.to_string()).expect("write the MCP servers");
     path
 }
 
-/// Starts the fake agent as terminal `name` (labelled `run=mcp`) with `run`'s `--mcp file` and
-/// `extra`, the fake checking it gets exactly `file`'s servers.
 fn start_with_mcp(dir: &Path, name: &str, file: &Path, extra: &[&str], fake: &[&str]) {
     let (agent, file) = (fake_agent(), file.to_str().expect("utf-8"));
     let run = ["run", "--name", name, "--label", "run=mcp", "--acp", "fake"];
@@ -676,7 +665,6 @@ fn mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden() {
     assert_hidden(&dir, shown);
 }
 
-/// `SECRET` is in neither `shown` (which has the redacted servers) nor `ls`, nor any file under `dir`.
 fn assert_hidden(dir: &Path, mut shown: String) {
     shown.push_str(&ok(dir, &["ls", "--json"]));
     assert!(shown.contains("TOKEN") && shown.contains("***"), "{shown}");
@@ -775,12 +763,10 @@ fn each_change_of_the_slash_commands_is_one_session_event() {
     assert_eq!(ok(&dir, &["read", "k"]), "> commands\ncommands sent\n");
 }
 
-/// A server whose idle ACP agents hibernate after 2 s (long enough for a `wait` to see the state before).
 fn sleepy_server(dir: &Path) -> Server {
     Server::with_env(dir, "3600", &[("SHED_ACP_HIBERNATE_AFTER", "2")])
 }
 
-/// The live processes of terminal `name`: its bridge, plus the agent's while it is awake.
 fn processes(dir: &Path, name: &str) -> usize {
     let info: Value = serde_json::from_str(&ok(dir, &["get", name])).expect("JSON");
     let pid = i32::try_from(info["pid"].as_i64().expect("a pid")).expect("a pid");
@@ -788,19 +774,16 @@ fn processes(dir: &Path, name: &str) -> usize {
     proctree::tree(&procs, pid, &std::collections::BTreeSet::new()).len()
 }
 
-/// Waits for `state` of terminal `name`.
 fn until(dir: &Path, name: &str, state: &str) {
     let wait = ["wait", name, "--until", state, "--timeout", "10"];
     assert_eq!(ok(dir, &wait), format!("{name} {state}\n"));
 }
 
-/// Sends `name` its first prompt and waits for the reply: a session hibernates only once it has a turn.
 fn first_turn(dir: &Path, name: &str) {
     ok(dir, &["send", name, "hi"]);
     until(dir, name, "done");
 }
 
-/// Twice the hibernation delay, to show an agent that stays awake.
 fn past_the_delay() {
     std::thread::sleep(std::time::Duration::from_millis(4500));
 }
@@ -820,7 +803,6 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
         (&info["state"], &info["session"]["id"]),
         (&json!("running"), &json!("sess-1"))
     );
-    // A turn that hears nothing for longer than the delay, and a permission request, keep it awake.
     ok(&dir, &["send", "h", "slow"]);
     past_the_delay();
     assert_eq!(reported(&dir, "h")["state"], "working");
@@ -890,14 +872,12 @@ fn sends_during_a_wake_are_delivered_in_order() {
     start_with_history(&dir, "h", &history, &[]);
     first_turn(&dir, "h");
     until(&dir, "h", "hibernated");
-    // The model switch wakes the agent; both prompts queue behind it.
     ok(&dir, &["model", "h", "smart"]);
     ok(&dir, &["send", "h", "one"]);
     ok(&dir, &["send", "h", "two"]);
     events_until(&dir, "h", |e| {
         e["event"] == "reply" && e["text"] == "[smart] you said: two"
     });
-    // The second prompt may reach the agent before or after the first reply; the order holds either way.
     let read = ok(&dir, &["read", "h"]);
     let (prompts, replies): (Vec<&str>, Vec<&str>) =
         read.lines().partition(|l| l.starts_with("> "));
@@ -928,7 +908,6 @@ fn no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn() {
         assert_eq!(reported(&dir, name)["state"], "done", "{name}");
         assert_eq!(processes(&dir, name), 2, "{name}");
     }
-    // A session with no turn yet stays awake: an agent may have nothing to load for it.
     assert_ne!(reported(&dir, "c")["state"], "hibernated");
     assert_eq!(processes(&dir, "c"), 2);
 }
@@ -945,7 +924,6 @@ fn mcp_secrets_stay_in_memory_through_a_hibernation() {
     start_with_mcp(&dir, "m", &file, &[], &["--history", history]);
     first_turn(&dir, "m");
     until(&dir, "m", "hibernated");
-    // The fake agent exits unless session/load brings the same servers, secret and all.
     ok(&dir, &["send", "m", "again"]);
     until(&dir, "m", "done");
     let read = ok(&dir, &["read", "m"]);
@@ -956,7 +934,6 @@ fn mcp_secrets_stay_in_memory_through_a_hibernation() {
     assert_hidden(&dir, events.join("\n") + &ok(&dir, &["get", "m"]));
 }
 
-/// Checks `have` against `tests/golden/<name>`; `SHED_BLESS=1` writes it.
 fn golden(name: &str, have: &str) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
@@ -1036,7 +1013,6 @@ fn recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks() {
         assert!(plain.lines().all(|l| l.chars().count() <= 80), "{plain}");
         golden(&format!("acp-{agent}.no-color.txt"), &plain);
 
-        // The multi-line command: whole in the events, its first line alone on one preview line.
         let title = (read.events.iter())
             .find_map(|e| match &e.kind {
                 EventKind::ToolCall { title, kind, .. } if kind.as_deref() == Some("execute") => {
@@ -1050,7 +1026,6 @@ fn recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks() {
         let line: String = line.chars().take(80).collect();
         assert_eq!(plain.lines().filter(|l| *l == line).count(), 1, "{plain}");
         assert!(!plain.contains(second.trim()), "{plain}");
-        // The terminal itself (what attach and watch show) draws the same line.
         let escape = |c: char| {
             let slash = if c.is_ascii_punctuation() { "\\" } else { "" };
             format!("{slash}{c}")
@@ -1068,7 +1043,6 @@ fn recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks() {
     assert_eq!(shapes[0].len(), 8, "{:?}", shapes[0]);
 }
 
-/// A transcript's block structure: each tool call once (kind and last status), in order.
 fn shape(events: &[Logged]) -> Vec<String> {
     let mut shape: Vec<String> = Vec::new();
     let mut seen = std::collections::BTreeMap::new();

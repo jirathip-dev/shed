@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: fmt clippy test doc deny cap deps hygiene neutral
+check: fmt clippy test doc deny cap deps hygiene neutral comments
 
 fmt:
     cargo fmt --all --check
@@ -31,6 +31,13 @@ hygiene:
 neutral:
     scripts/neutral-core.sh
     ! scripts/neutral-core.sh ci/fixtures/leaky-core
+
+# The comment rule (#65); the two breaking fixtures prove the check bites, the allowed one that it passes.
+comments:
+    scripts/comment-rule.py
+    ! scripts/comment-rule.py ci/fixtures/comment-plain
+    ! scripts/comment-rule.py ci/fixtures/comment-private-doc
+    scripts/comment-rule.py ci/fixtures/comment-allowed
 
 # The CLI timing report (soft target: a non-waiting call under 20 ms) and the history throughput report.
 bench:

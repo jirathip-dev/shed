@@ -20,11 +20,8 @@ pub struct Size {
 /// The states a program can report (`shed state`, or the OSC 7501 escape).
 pub const STATES: [&str; 4] = ["working", "blocked", "done", "error"];
 
-/// Another agent's states, each with shed's state it stands for.
 type Mapping = &'static [(&'static str, &'static str)];
 
-/// Other agents' state escapes, one row per agent: the OSC number, the source it is noted as, and its
-/// states mapped to shed's. The payload is JSON with a `state` field.
 const FOREIGN: [(&[u8], &str, Mapping); 1] = [(
     b"9999",
     "jan-osc9999",
@@ -197,7 +194,6 @@ fn line_text(row: &[Cell]) -> String {
     s.trim_end().to_owned()
 }
 
-/// One row's runs, without the trailing blank cells in the default pen.
 fn runs(row: &[Cell]) -> Vec<Run> {
     let end = row.iter().rposition(|c| *c != space()).map_or(0, |i| i + 1);
     let mut runs: Vec<Run> = Vec::new();
@@ -214,7 +210,6 @@ fn runs(row: &[Cell]) -> Vec<Run> {
 }
 
 type Cell = (char, Pen);
-/// A blank cell in the default pen.
 fn space() -> Cell {
     (' ', Pen::default())
 }
@@ -231,15 +226,11 @@ struct Grid {
     bottom: usize,
     saved: (usize, usize),
     history: VecDeque<String>,
-    /// The bytes of text in `history`.
     history_bytes: usize,
-    /// At most this many lines and bytes of history.
     limit: (usize, usize),
-    /// The primary screen and cursor while the alternate screen is up.
     primary: Option<(Cells, (usize, usize))>,
     replies: Vec<u8>,
     report: Option<Report>,
-    /// The pen new characters are printed with.
     pen: Pen,
 }
 
@@ -419,7 +410,6 @@ impl Grid {
         };
         fit(&mut self.cells);
         self.cols = cols;
-        // Shrinking: drop blank rows below the cursor first, then move top rows into scrollback.
         while self.cells.len() > rows
             && self.cells.len() - 1 > self.row
             && line_text(&self.cells[self.cells.len() - 1]).is_empty()
@@ -442,8 +432,6 @@ impl Grid {
         self.goto(self.row, self.col);
     }
 
-    /// SGR: sets the pen from `ESC [ … m` (attributes, the 8/16 colours, `38;5;n` and `38;2;r;g;b`, with
-    /// `;` or `:`).
     fn sgr(&mut self, params: &Params) {
         let mut it = params.iter().peekable();
         while let Some(p) = it.next() {
@@ -466,7 +454,6 @@ impl Grid {
                 n @ 100..=107 => pen.bg = index(n - 92),
                 49 => pen.bg = None,
                 n @ (38 | 48) => {
-                    // The colon form carries its values as subparameters (`38:2::r:g:b` has a colour space id).
                     let mut rest: Vec<u16> = if p.len() > 1 {
                         p[1..].to_vec()
                     } else {
@@ -494,7 +481,6 @@ impl Grid {
     }
 }
 
-/// The first value of parameter `i`, or `default` when missing or zero.
 fn param(params: &Params, i: usize, default: u16) -> usize {
     let v = params
         .iter()
@@ -693,7 +679,6 @@ mod tests {
 
     #[test]
     fn scrollback_bytes_are_bounded_by_whole_lines() {
-        // "é" is 2 bytes: each history line is 3 bytes, so 7 bytes keep the last 2 lines.
         let mut s = Screen::bounded(Size { rows: 1, cols: 10 }, 100, 7);
         s.feed("é1\r\né2\r\né3\r\né4".as_bytes());
         assert_eq!(s.history(100), "é2\né3\né4");

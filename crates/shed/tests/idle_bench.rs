@@ -11,16 +11,13 @@ use serde_json::{Value, json};
 use shed_server::proto::{EventsParams, Method};
 use shed_server::{Client, Paths};
 
-/// Idle `events` clients.
 const CLIENTS: usize = 500;
 
-/// The threads of process `pid`.
 fn threads(pid: u32) -> usize {
     let status = std::fs::read_to_string(format!("/proc/{pid}/status")).unwrap_or_default();
     if let Some(n) = status.lines().find_map(|l| l.strip_prefix("Threads:")) {
         return n.trim().parse().expect("a thread count");
     }
-    // macOS: a header, then a line per thread.
     let ps = Command::new("ps")
         .args(["-M", "-p", &pid.to_string()])
         .output();

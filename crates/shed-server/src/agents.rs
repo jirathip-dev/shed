@@ -37,7 +37,6 @@ fn fail(e: impl std::fmt::Display) -> Error {
     Error::Agents(e.to_string())
 }
 
-/// Fit for a path part: `[A-Za-z0-9._-]+`, not starting with a dot.
 fn safe(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('.')
@@ -76,7 +75,6 @@ fn save(state: &Path, mut agents: Vec<Agent>) -> Result<(), Error> {
     Ok(fs::rename(&tmp, &path)?)
 }
 
-/// Runs `cmd`; its stdout on success.
 fn run(cmd: &mut Command) -> Result<Vec<u8>, Error> {
     let out = cmd.output().map_err(|e| fail(format!("{cmd:?}: {e}")))?;
     if !out.status.success() {
@@ -86,7 +84,6 @@ fn run(cmd: &mut Command) -> Result<Vec<u8>, Error> {
     Ok(out.stdout)
 }
 
-/// The registry's bytes: `curl` for an `http(s)://` source, else a file.
 fn fetch(source: &str) -> Result<Vec<u8>, Error> {
     if source.starts_with("http://") || source.starts_with("https://") {
         run(Command::new("curl").args(["-fsSL", "--max-time", "60", source]))
@@ -95,7 +92,6 @@ fn fetch(source: &str) -> Result<Vec<u8>, Error> {
     }
 }
 
-/// This machine as the registry names platforms (`darwin-aarch64`, `linux-x86_64`, …).
 fn platform() -> String {
     let os = match std::env::consts::OS {
         "macos" => "darwin",
@@ -112,7 +108,6 @@ fn strings(v: &Value) -> Vec<String> {
         .collect()
 }
 
-/// `env K=V …` for the entry's variables, then `cmd`.
 fn with_env(entry: &Value, cmd: Vec<String>) -> Vec<String> {
     let Some(env) = entry["env"].as_object().filter(|e| !e.is_empty()) else {
         return cmd;
@@ -126,8 +121,6 @@ fn with_env(entry: &Value, cmd: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-/// Downloads and unpacks a binary distribution into `dir`, checking its `sha256` when given; returns
-/// its command line.
 fn install_binary(entry: &Value, dir: &Path) -> Result<Vec<String>, Error> {
     let url = entry["archive"]
         .as_str()

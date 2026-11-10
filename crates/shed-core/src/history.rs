@@ -50,7 +50,6 @@ impl History {
         match file {
             Some(Ok(file)) => {
                 screen.feed(&tail(file, self.max())?);
-                // Leave a full-screen program's screen and start the next output on a fresh line.
                 screen.feed(b"\x1b[?1049l\r\n");
             }
             Some(Err(e)) if e.kind() != io::ErrorKind::NotFound => return Err(e),
@@ -80,7 +79,6 @@ pub fn tail(mut r: impl Read + Seek, max: u64) -> io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-/// An append-only output log, cut back to its tail once it passes twice the cap.
 pub(crate) struct Log {
     file: File,
     path: PathBuf,
@@ -97,7 +95,6 @@ fn create(path: &Path) -> io::Result<File> {
 }
 
 impl Log {
-    /// Opens (or creates, mode 0600, in a 0700 folder) the log of `history`, if it has one.
     pub(crate) fn open(history: &History) -> io::Result<Option<Self>> {
         let Some(path) = &history.log else {
             return Ok(None);
@@ -117,7 +114,6 @@ impl Log {
         }))
     }
 
-    /// Appends one output chunk.
     pub(crate) fn append(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.file.write_all(bytes)?;
         self.len += u64::try_from(bytes.len()).unwrap_or(u64::MAX);
@@ -138,7 +134,6 @@ impl Log {
 mod tests {
     use super::*;
 
-    /// Counts the bytes read through it.
     struct Counting<R>(R, u64);
 
     impl<R: Read> Read for Counting<R> {
@@ -166,7 +161,6 @@ mod tests {
     fn tail_reads_only_the_tail_and_skips_a_cut_character() {
         let dir = temp("tail");
         let path = dir.join("t.log");
-        // 64 MiB of old output, then "é" cut in half by the 8 MiB boundary.
         let mut old = vec![b'x'; 64 << 20];
         old.extend("é".as_bytes());
         old.extend(vec![b'y'; BYTES - 1]);

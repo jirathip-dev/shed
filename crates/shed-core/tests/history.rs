@@ -5,8 +5,6 @@ use std::time::Instant;
 use shed_core::history::{BYTES, LINES};
 use shed_core::{History, Screen, Size, Terminal};
 
-/// Feeds 16 MiB of output into a screen whose scrollback is already full and reports the throughput
-/// (`just bench` prints it). The scrollback stays within both caps throughout.
 #[test]
 fn throughput_report_with_full_scrollback() {
     let size = Size { rows: 24, cols: 80 };
@@ -35,7 +33,6 @@ fn throughput_report_with_full_scrollback() {
     );
 }
 
-/// A terminal spawned on an existing log starts from its tail, then appends its own output.
 #[test]
 fn a_terminal_starts_from_its_log() {
     let dir = std::env::temp_dir().join(format!("shed-history-term-{}", std::process::id()));

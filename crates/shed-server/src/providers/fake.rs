@@ -1,8 +1,5 @@
-//! A test-only agent: a provider is this file plus its line in [`super::ALL`].
-
 use super::Provider;
 
-/// `fake-acp`.
 pub struct Fake;
 
 impl Provider for Fake {

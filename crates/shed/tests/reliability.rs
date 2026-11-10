@@ -14,7 +14,6 @@ use shed_server::Paths;
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
-/// `shed --dir <dir> args…`.
 fn shed_in(dir: &Path, args: &[&str]) -> Output {
     Command::new(SHED)
         .arg("--dir")
@@ -30,7 +29,6 @@ fn ok(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// `shed run --name <name> --cwd <dir> -- sh -c <script>`.
 fn run_sh(dir: &Path, name: &str, script: &str) {
     let d = dir.to_str().expect("utf-8 dir");
     ok(
@@ -48,7 +46,6 @@ fn alive(pid: &str) -> bool {
         .success()
 }
 
-/// A terminal's program and the child it printed as `child=<pid>`.
 fn pids(dir: &Path, name: &str) -> (String, String) {
     let mut child = String::new();
     eventually("the child's pid", || {
@@ -64,8 +61,6 @@ fn pids(dir: &Path, name: &str) -> (String, String) {
     (info["pid"].to_string(), child)
 }
 
-/// R8, R26: `kill` signals only the terminal's own tree, the whole of it; the other terminals and
-/// their children keep running.
 #[test]
 fn kill_ends_only_its_own_tree_and_the_other_terminals_survive() {
     let dir = temp_dir("rel-kill");
@@ -83,8 +78,6 @@ fn kill_ends_only_its_own_tree_and_the_other_terminals_survive() {
     }
 }
 
-/// R9: a terminal killed and replaced under the same name logs its end before the new start, and what
-/// is sent next reaches the new program.
 #[test]
 fn a_terminal_replaced_under_the_same_name_gets_the_messages() {
     let dir = temp_dir("rel-replace");
@@ -123,9 +116,6 @@ fn a_terminal_replaced_under_the_same_name_gets_the_messages() {
     );
 }
 
-/// R11, R19: a second server on the same state is refused even when the first one's socket is gone (no
-/// second copy of the kept terminals, no stolen socket); the lock and socket a killed server leaves
-/// behind are taken over by the next one.
 #[test]
 fn a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over() {
     let dir = temp_dir("rel-lock");
@@ -165,7 +155,6 @@ fn a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over() {
     assert!(UnixStream::connect(&paths.socket).is_ok());
 }
 
-/// R11: two `run --autostart` at once start one server between them, and both terminals land on it.
 #[test]
 fn two_autostarts_at_once_share_one_server() {
     let dir = temp_dir("rel-autostart");
@@ -199,8 +188,6 @@ fn two_autostarts_at_once_share_one_server() {
     assert!(killed.expect("kill").success());
 }
 
-/// R12: a first-start menu (a trust prompt) is seen with `wait --output`, shown by `read`, and answered
-/// with `keys`.
 #[test]
 fn a_first_start_menu_is_seen_read_and_answered() {
     let dir = temp_dir("rel-trust");
@@ -228,7 +215,6 @@ fn a_first_start_menu_is_seen_read_and_answered() {
     });
 }
 
-/// R13: malformed requests are denied with a reason, and none of them opens the handshake.
 #[test]
 fn malformed_requests_are_denied_with_a_reason_and_never_pass_the_handshake() {
     let dir = temp_dir("rel-malformed");
@@ -272,8 +258,6 @@ fn malformed_requests_are_denied_with_a_reason_and_never_pass_the_handshake() {
     assert_eq!(ask(state)["error"]["code"], -32001, "still no handshake");
 }
 
-/// R15: a terminal that goes quiet without reporting is surfaced on the events stream as `idle`, with
-/// nobody waiting on it.
 #[test]
 fn a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream() {
     let dir = temp_dir("rel-idle");

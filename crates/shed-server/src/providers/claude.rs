@@ -1,8 +1,5 @@
-//! The Claude Code ACP adapter.
-
 use super::Provider;
 
-/// `claude-acp`.
 pub struct Claude;
 
 impl Provider for Claude {

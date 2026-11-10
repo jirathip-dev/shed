@@ -61,17 +61,12 @@ fn connect_carries_the_protocol_over_a_socketpair() {
     assert!(child.wait().expect("shed connect ends").success());
 }
 
-/// Writes an executable shell script.
 fn script(path: &Path, body: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
     std::fs::write(path, format!("#!/bin/sh\n{body}")).expect("write script");
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 }
 
-/// Two fake hosts under `root`: `user@box.example`, whose `shed` uses the server in `root/remote`,
-/// and `old.example`, whose `shed` answers `hello` as another version would. Returns the `bin`
-/// directory holding the fake `ssh`, which logs its arguments to `bin/ssh.log` and its pids (the
-/// `shed connect` it becomes) to `bin/ssh.pids`.
 fn fake_hosts(root: &Path) -> PathBuf {
     let bin = root.join("bin");
     script(
@@ -98,7 +93,6 @@ fn fake_hosts(root: &Path) -> PathBuf {
     bin
 }
 
-/// `shed --dir <root>/local args…` with the fake `ssh` first on `PATH`.
 fn shed_on(root: &Path, args: &[&str]) -> Command {
     let path = std::env::var("PATH").unwrap_or_default();
     let mut cmd = Command::new(SHED);
@@ -109,7 +103,6 @@ fn shed_on(root: &Path, args: &[&str]) -> Command {
     cmd
 }
 
-/// Runs `shed args…` and appends the command and its output to `text`.
 fn record(root: &Path, text: &mut String, args: &[&str]) -> Output {
     let out = shed_on(root, args).output().expect("shed runs");
     let _ = write!(
@@ -199,8 +192,6 @@ fn on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_m
     assert_eq!(have, text, "machines.txt differs; SHED_BLESS=1 to update");
 }
 
-/// A server in `root/remote`, machines `box` (its fake host) and `old` (another version) added, and a
-/// local server in `root/local` with the fake `ssh` on its `PATH`, once its link to `box` is up.
 fn linked(root: &Path) -> (Server, Server) {
     fake_hosts(root);
     let remote = Server::start(&root.join("remote"));
@@ -218,7 +209,6 @@ fn linked(root: &Path) -> (Server, Server) {
     (remote, local)
 }
 
-/// `machine ls --json`'s link of machine `name`.
 fn link(root: &Path, name: &str) -> Value {
     let out = shed_on(root, &["--json", "machine", "ls"])
         .output()
@@ -230,14 +220,12 @@ fn link(root: &Path, name: &str) -> Value {
         .map_or(Value::Null, |m| m["link"].clone())
 }
 
-/// `shed args…` (local, fake `ssh` on `PATH`): its stdout, asserting success.
 fn ok(root: &Path, args: &[&str]) -> String {
     let out = shed_on(root, args).output().expect("shed runs");
     assert!(out.status.success(), "shed {args:?}: {out:?}");
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-/// How many `ssh` the box link (or `--on box`) started so far.
 fn box_ssh(root: &Path) -> usize {
     let log = std::fs::read_to_string(root.join("bin/ssh.log")).unwrap_or_default();
     log.lines()
@@ -245,7 +233,6 @@ fn box_ssh(root: &Path) -> usize {
         .count()
 }
 
-/// The local server's events after `since`, read with a timeout.
 fn local_events(root: &Path, since: u64) -> impl Iterator<Item = Value> {
     let socket = shed_server::Paths::in_dir(&root.join("local")).socket;
     let mut client = shed_server::Client::connect(&socket).expect("connect");
@@ -311,7 +298,6 @@ fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_versi
         (&json!("box/t1"), &json!("running"))
     );
 
-    // The remote read's latency through the local socket and the held link.
     let socket = shed_server::Paths::in_dir(&root.join("local")).socket;
     let mut client = shed_server::Client::connect(&socket).expect("connect");
     let read = json!({"name": "box/t1"});
@@ -373,7 +359,6 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     until("l1", "started", &mut seen);
     let before = until("box/r1", "started", &mut seen)["seq"].clone();
 
-    // Drop the link: kill every `shed connect` the fake ssh became; act on box while it is down.
     let pids = std::fs::read_to_string(root.join("bin/ssh.pids")).expect("pids");
     for pid in pids.lines() {
         let _ = Command::new("kill").arg(pid).stderr(Stdio::null()).status();
@@ -390,7 +375,6 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     assert!(waited < Duration::from_secs(10), "{waited:?}");
     assert_eq!(link(&root, "box")["state"], "up");
 
-    // Every remote event once, in order, under one seq that counts up by one.
     let seqs: Vec<u64> = seen.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
     assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>());
     let ours = |e: &Value| {
@@ -426,7 +410,6 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
         .collect();
     assert_eq!(kinds, ["r1 started", "r2 started", "r1 state", "r2 killed"]);
 
-    // A subscriber resumes from a seq before the drop.
     let mut resumed = local_events(&root, before.as_u64().unwrap());
     let next = resumed.next().expect("an event");
     assert_eq!(
@@ -435,7 +418,6 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     );
 }
 
-/// Installs the fake ACP agent as `fake` on the server in `remote` (its `agents.json`); its script.
 fn install_fake(remote: &Path) -> PathBuf {
     let agent = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_acp.py");
     let installed = json!({"agents": [{"id": "fake", "version": "0.1.0", "distribution": "binary",
@@ -598,7 +580,6 @@ fn on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint() {
 fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
     let root = temp_dir("machine-stats");
     let bin = fake_hosts(&root);
-    // With a `down` file beside it, the fake ssh hangs as a dead link would.
     let ssh = std::fs::read_to_string(bin.join("ssh")).expect("ssh");
     let hang = "[ -e \"$(dirname \"$0\")/down\" ] && exec sleep 30\n";
     script(&bin.join("ssh"), &ssh.replacen("#!/bin/sh\n", hang, 1));
@@ -637,7 +618,6 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
     assert_eq!(code, Some(0));
     check(&here);
     assert_eq!(here["terminals"], json!({"working": 1, "exited": 1}));
-    // The server took a sample as it started, with the terminal counts of then (none).
     let history = here["history"].as_array().expect("history");
     assert_eq!(history.len(), 1, "{here}");
     check(&history[0]);

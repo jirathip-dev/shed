@@ -29,18 +29,13 @@ use shed_server::proto::{
 };
 use shed_server::{Client, Paths};
 
-/// Keeps coding-agent terminals alive, reads their screens and reports their state.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
-    /// Use the socket (shed.sock) and state (state.json) in this directory instead of the per-user
-    /// defaults.
     #[arg(long, global = true)]
     dir: Option<PathBuf>,
-    /// Print JSON instead of text.
     #[arg(long, global = true)]
     json: bool,
-    /// Run the command on this machine (`shed machine add`) over SSH.
     #[arg(long, global = true, value_name = "MACHINE")]
     on: Option<String>,
     #[command(subcommand)]
@@ -49,136 +44,85 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Print the version.
     Hello,
-    /// Run the per-user server: it owns the terminals, the state file and the socket.
     Serve {
-        /// Start the server in the background and return once it answers.
         #[arg(long)]
         detach: bool,
-        /// Sample each terminal's memory and CPU every S seconds.
         #[arg(long, value_name = "S", default_value_t = 2.0)]
         sample: f64,
     },
-    /// Start a terminal; prints its name.
     Run(RunArgs),
-    /// List terminals.
     Ls {
-        /// Only terminals carrying this label, `k=v`; repeatable.
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
     },
-    /// One terminal as JSON.
     Get {
-        /// The terminal.
         name: String,
     },
-    /// The current screen, or the scrollback, as plain text.
     Read {
-        /// The terminal.
         name: String,
-        /// Only the last N lines (with `--events`, events).
         #[arg(long)]
         lines: Option<usize>,
-        /// The visible screen (the default).
         #[arg(long, conflicts_with = "history")]
         screen: bool,
-        /// The scrollback and the screen.
         #[arg(long)]
         history: bool,
-        /// ACP: the transcript's events, drawn (`--json`: as they are, each with its `seq`).
         #[arg(long, conflicts_with_all = ["history", "screen"])]
         events: bool,
-        /// With `--events`: only those before this `seq`.
         #[arg(long, requires = "events")]
         before: Option<u64>,
     },
-    /// Type text; to an ACP terminal, send it as a prompt.
     Send {
-        /// The terminal.
         name: String,
-        /// The text, sent as is (add a newline, or `shed keys <t> enter`, to submit it).
         text: String,
     },
-    /// Press keys: `enter`, `esc`, `ctrl+c`, `up`, …
     Keys {
-        /// The terminal.
         name: String,
-        /// Key names, pressed in order.
         #[arg(required = true)]
         keys: Vec<String>,
     },
-    /// End the terminal's process tree.
     Kill {
-        /// The terminal.
         name: String,
     },
-    /// Remove an exited terminal.
     Rm {
-        /// The terminal.
         name: String,
     },
-    /// Take over the terminal interactively; `Ctrl+\` detaches.
     Attach {
-        /// The terminal.
         name: String,
     },
-    /// Report a terminal's state: `shed state [<t>] working|blocked|done|error` (default `$SHED`).
     State {
-        /// The terminal, then the state; the terminal defaults to `$SHED`, set inside every terminal.
         #[arg(required = true, num_args = 1..=2, value_name = "[T] STATE")]
         args: Vec<String>,
-        /// A free-text note.
         #[arg(long)]
         note: Option<String>,
     },
-    /// Block until the reported state or the screen matches; exits 0 on a match, 1 when the program
-    /// exits, 124 on timeout.
     Wait(WaitArgs),
-    /// Stream events as JSON lines: started, state, exited, killed, resources, and ACP terminals' turn,
-    /// text, `tool_call`, plan, mode, `approval_request`, approved and reply.
     Events {
-        /// Only terminals carrying this label, `k=v`; repeatable.
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
-        /// First replay the kept events (the last 1,000) after this `seq`.
         #[arg(long, value_name = "N")]
         since: Option<u64>,
     },
-    /// List terminals by memory use, largest first.
     Top,
-    /// A live list of the terminals beside a read-only preview of the selected one; Enter attaches,
-    /// `Ctrl+\` comes back, `/` filters, `q` quits.
     Watch {
-        /// Only terminals carrying this label, `k=v`; repeatable.
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
     },
-    /// ACP: answer the oldest permission request with an option id (or kind, e.g. `allow_once`).
     Approve {
-        /// The terminal.
         name: String,
-        /// The option.
         option: String,
     },
-    /// ACP: cancel the running turn (as `shed keys <t> esc`).
     Cancel {
-        /// The terminal.
         name: String,
     },
-    /// ACP: switch the session's model to one of `shed get`'s `session.models`.
     Model {
-        /// The terminal.
         name: String,
-        /// The model id.
         model: String,
     },
-    /// List the installed ACP agents, or add or remove one.
     Agents {
         #[command(subcommand)]
         action: Option<AgentsCommand>,
     },
-    /// The ACP bridge `run --acp` starts inside the terminal.
     #[command(hide = true)]
     AcpBridge {
         #[arg(long)]
@@ -192,29 +136,21 @@ enum Command {
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
-    /// Speak the protocol over stdin/stdout, for `ssh host shed connect`.
     Connect {
-        /// Start `shed serve --detach` first when no server runs.
         #[arg(long)]
         autostart: bool,
     },
-    /// Machines that `--on` reaches over SSH (key login only).
     #[command(subcommand)]
     Machine(MachineCommand),
-    /// Write the launchd agent (macOS) or systemd user unit that runs `shed serve`; prints how to start it.
     Install {
-        /// Replace a job file that has other contents.
         #[arg(long)]
         force: bool,
     },
-    /// Print the lines that stop the job and remove its file.
     Uninstall,
-    /// Check the job file, that it is loaded, the socket, the server's version and the log.
     Doctor,
 }
 
 impl Command {
-    /// The terminal the command names, if it names one.
     fn terminal(&mut self) -> Option<&mut String> {
         match self {
             Self::Get { name }
@@ -234,48 +170,32 @@ impl Command {
 
 #[derive(Subcommand)]
 enum AgentsCommand {
-    /// Install an agent from the ACP registry, pinned to the version it lists now.
     Add {
-        /// The agent's id in the registry.
         id: String,
-        /// The registry: a URL or a file.
         #[arg(long, value_name = "SRC", default_value = agents::REGISTRY)]
         registry: String,
     },
-    /// Remove an installed agent.
     Rm {
-        /// The agent id.
         id: String,
     },
 }
 
-/// `shed machine …`.
 #[derive(Subcommand)]
 enum MachineCommand {
-    /// Add a machine: a name for an ssh target, `[user@]host`.
     Add {
-        /// The name `--on` takes.
         name: String,
-        /// The ssh target.
         target: String,
     },
-    /// List the machines.
     Ls,
-    /// Remove a machine.
     Rm {
-        /// The machine.
         name: String,
     },
-    /// This machine's health, or with `--on` another's (offline after 5 s without an answer, exit 1).
     Stats {
-        /// Add the samples kept (one a minute, 24 h) after this time, unix seconds.
         #[arg(long, value_name = "T")]
         since: Option<u64>,
     },
 }
 
-/// Where the commands go: the local server, or the one on `--on`'s machine (over the local server's
-/// held link when it is up, else one `ssh`).
 struct Server<'a> {
     paths: &'a Paths,
     dir: Option<&'a Path>,
@@ -284,8 +204,6 @@ struct Server<'a> {
 }
 
 impl Server<'_> {
-    /// The server `command` goes to: `--on`'s machine (refused for the local-only commands), else this
-    /// one; over a held link the terminal it names becomes `<machine>/<name>`.
     fn new<'a>(
         paths: &'a Paths,
         dir: Option<&'a Path>,
@@ -345,7 +263,6 @@ impl Server<'_> {
         Ok(server)
     }
 
-    /// `name` as the local server knows it: `<machine>/<name>` over a held link.
     fn name(&self, name: String) -> String {
         match &self.on {
             Some(m) if self.linked => format!("{}/{name}", m.name),
@@ -353,7 +270,6 @@ impl Server<'_> {
         }
     }
 
-    /// A client: over SSH with `--on` (`autostart` passed on), else the local one ([`connect`]).
     fn connect(&self, autostart: Option<bool>) -> anyhow::Result<Client> {
         match &self.on {
             Some(machine) if !self.linked => {
@@ -369,70 +285,48 @@ impl Server<'_> {
     }
 }
 
-/// The local server's held links (`machine.links`, which also links machines added since it
-/// started); none when no server answers.
 fn links(paths: &Paths) -> BTreeMap<String, Link> {
     let links = Client::connect(&paths.socket)
         .and_then(|mut c| c.call(Method::MachineLinks, &serde_json::json!({})));
     links.unwrap_or_default()
 }
 
-/// `shed run`'s arguments.
 #[derive(Args)]
 struct RunArgs {
-    /// The terminal's name (default: the first free `tN`).
     #[arg(long)]
     name: Option<String>,
-    /// A label, `k=v`; repeatable.
     #[arg(long = "label", value_name = "K=V", value_parser = label)]
     labels: Vec<(String, String)>,
-    /// The working directory (default: the current one).
     #[arg(long)]
     cwd: Option<PathBuf>,
-    /// Come back as a shell in the same cwd after a server restart.
     #[arg(long)]
     keep: bool,
-    /// Start `shed serve --detach` first when no server runs.
     #[arg(long)]
     autostart: bool,
-    /// Report `idle` after S seconds without output, until the program reports a state.
     #[arg(long, value_name = "S")]
     idle_after: Option<u64>,
-    /// Run the installed ACP agent ID (`shed agents`) as a structured session; with a command
-    /// after `--`, that command is its ACP adapter instead.
     #[arg(long, value_name = "ID", conflicts_with_all = ["keep", "idle_after"])]
     acp: Option<String>,
-    /// ACP: answer permission requests `allow`, `deny`, or `ask` (wait for `shed approve`).
     #[arg(long, requires = "acp", value_parser = policy, default_value = "ask")]
     policy: Policy,
-    /// ACP: resume the agent's session ID (`shed get`'s `session.id`) instead of starting one.
     #[arg(long, value_name = "ID", requires = "acp")]
     resume: Option<String>,
-    /// ACP: MCP servers for the agent, a JSON list in ACP's shapes (`docs/acp.md`); send it again
-    /// with `--resume`.
     #[arg(long, value_name = "FILE", requires = "acp")]
     mcp: Option<PathBuf>,
-    /// ACP: keep the agent running when idle instead of hibernating it.
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
-    /// The program and its arguments.
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
 }
 
-/// `shed wait`'s arguments.
 #[derive(Args)]
 struct WaitArgs {
-    /// The terminal.
     name: String,
-    /// States that end the wait.
     #[arg(long, num_args = 1.., value_name = "STATE",
           value_parser = ["working", "blocked", "done", "error", "idle", "hibernated"])]
     until: Vec<String>,
-    /// A pattern (`.`, `[…]`, `\d \w \s`, `* + ?`, `^ $`) that ends the wait when a screen line matches.
     #[arg(long, value_name = "RE")]
     output: Option<String>,
-    /// Give up after S seconds.
     #[arg(long, value_name = "S")]
     timeout: Option<f64>,
 }
@@ -559,7 +453,6 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// `shed serve [--detach] [--sample S]`.
 fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow::Result<()> {
     if detach {
         return serve_detached(paths, dir, Some(sample));
@@ -571,7 +464,6 @@ fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow
     shed_server::serve(paths, every).context("shed serve")
 }
 
-/// `shed run`; with `--on` the cwd must be given, as an absolute path on the machine.
 fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()> {
     let cwd = match (&server.on, args.cwd) {
         (None, cwd) => {
@@ -609,7 +501,6 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
     print(json, &info, || format!("{}\n", info.name))
 }
 
-/// `shed connect [--autostart]`: the protocol over stdin/stdout.
 fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<()> {
     if UnixStream::connect(&paths.socket).is_err() {
         if !autostart {
@@ -623,9 +514,6 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
     shed_server::relay(&paths.socket).context("shed connect")
 }
 
-/// `shed send`: an ACP terminal gets a framed prompt, reported `working` first so `send; wait --until
-/// done` never sees the last turn.
-/// `shed read`; with `--events` (but not `--json`) the events drawn as the preview.
 fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> {
     let mut read: ReadResult = server.connect(None)?.call(Method::Read, params)?;
     if params.events && !json {
@@ -662,7 +550,6 @@ fn send(server: &Server, json: bool, name: String, text: String) -> anyhow::Resu
     print(json, &done, String::new)
 }
 
-/// `shed acp-bridge`: the bridge on this terminal, in raw mode; exits with the agent's code.
 fn bridge(
     cmd: &[String],
     socket: &Path,
@@ -676,7 +563,6 @@ fn bridge(
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
-/// Delivers `input` to an ACP terminal's bridge.
 fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::Result<()> {
     let mut client = server.connect(None)?;
     let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
@@ -688,7 +574,6 @@ fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::R
     print(json, &done, String::new)
 }
 
-/// `shed agents [add|rm]`.
 fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyhow::Result<()> {
     let line = |a: &agents::Agent| format!("{} {} ({})\n", a.id, a.version, a.distribution);
     match action {
@@ -711,7 +596,6 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
     }
 }
 
-/// `shed top`: the terminals by memory, largest first.
 fn top(server: &Server, json: bool) -> anyhow::Result<()> {
     let mut list: Vec<TerminalInfo> = server
         .connect(None)?
@@ -720,7 +604,6 @@ fn top(server: &Server, json: bool) -> anyhow::Result<()> {
     print(json, &list, || table(&list))
 }
 
-/// `shed state [<t>] <state>`: the terminal defaults to `$SHED`.
 fn state(
     server: &Server,
     json: bool,
@@ -745,7 +628,6 @@ fn state(
     print(json, &info, String::new)
 }
 
-/// `shed wait`: exit 0 on a match, 1 when the program exits, 124 on timeout.
 fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode> {
     let params = WaitParams {
         name: args.name,
@@ -772,8 +654,6 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     }))
 }
 
-/// `shed events`: copies the event lines to stdout until the server closes the connection. With
-/// `--on`, only that machine's, named `<machine>/<name>`.
 fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
     let mut client = server.connect(None)?;
     let _: Value = client.call(Method::Events, params)?;
@@ -797,13 +677,11 @@ fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `shed machine add|ls|rm|stats`.
 fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Result<ExitCode> {
     let paths = server.paths;
     match command {
         MachineCommand::Add { name, target } => {
             let m = machines::add(&paths.config, &name, &target)?;
-            // A running server links it now.
             links(paths);
             print(json, &m, || format!("{} added\n", m.name))
         }
@@ -824,7 +702,6 @@ fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Resu
                     let link = link.as_ref().map_or_else(String::new, |l| {
                         format!("  {:?} since {}", l.state, l.since).to_lowercase()
                     });
-                    // Writing to a String cannot fail.
                     let _ = writeln!(out, "{:<width$}  {}{link}", m.name, m.target);
                 }
                 out
@@ -841,7 +718,6 @@ fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Resu
     Ok(ExitCode::SUCCESS)
 }
 
-/// A configured machine, with its link when the local server holds one.
 #[derive(Serialize)]
 struct Listed {
     #[serde(flatten)]
@@ -850,7 +726,6 @@ struct Listed {
     link: Option<Link>,
 }
 
-/// `shed machine stats [--since T] [--on M]`: exit 1 when the machine is offline.
 fn machine_stats(server: &Server, json: bool, params: StatsParams) -> anyhow::Result<ExitCode> {
     let stats: MachineStats = match &server.on {
         None => server.connect(None)?.call(Method::MachineStats, &params)?,
@@ -891,7 +766,6 @@ fn machine_stats(server: &Server, json: bool, params: StatsParams) -> anyhow::Re
     Ok(ExitCode::SUCCESS)
 }
 
-/// Prints `value` as one JSON line with `--json`, else `text()`.
 fn print<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> anyhow::Result<()> {
     if json {
         println!("{}", serde_json::to_string(value)?);
@@ -901,8 +775,6 @@ fn print<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> 
     Ok(())
 }
 
-/// Connects to the server. `autostart` is `Some` for `run`: with `true` a missing server is started
-/// (`dir` passed on), with `false` the error offers `--autostart`.
 fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow::Result<Client> {
     match Client::connect(&paths.socket) {
         Err(shed_server::Error::Io(e))
@@ -913,7 +785,6 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
         {
             if autostart == Some(true) {
                 let started = serve_detached(paths, dir, None);
-                // A start running at the same time may have won: its server answers within 5 s.
                 for _ in 0..50 {
                     if let Ok(client) = Client::connect(&paths.socket) {
                         return Ok(client);
@@ -937,8 +808,6 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
     }
 }
 
-/// Starts `shed serve` in its own process group, detached from this terminal, and waits for its ready
-/// line, racing it against the server exiting and a 10 s timeout.
 fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> anyhow::Result<()> {
     if UnixStream::connect(&paths.socket).is_ok() {
         bail!("a shed server already runs on {}", paths.socket.display());
@@ -960,7 +829,6 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
         .context("starting shed serve")?;
     let stdout = child.stdout.take().context("shed serve stdout")?;
     let (tx, rx) = mpsc::channel();
-    // The line, or an empty one at EOF: the server closed its stdout by exiting.
     std::thread::spawn(move || {
         let mut line = String::new();
         let _ = io::BufReader::new(stdout).read_line(&mut line);
@@ -976,7 +844,6 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     Ok(())
 }
 
-/// `ls` and `top` as an aligned table: name, state, exit, pid, tree memory and CPU, labels, command.
 fn table(list: &[TerminalInfo]) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
     let mut rows = vec![
@@ -1019,7 +886,6 @@ fn table(list: &[TerminalInfo]) -> String {
             .zip(widths)
             .map(|(c, w)| format!("{c:<w$}"))
             .collect();
-        // Writing to a String cannot fail.
         let _ = writeln!(out, "{}", cells.join("  ").trim_end());
     }
     out

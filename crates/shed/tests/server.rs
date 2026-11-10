@@ -17,7 +17,6 @@ use shed_server::{Client, Paths};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// A raw connection: exact request and response lines.
 struct Conn {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
@@ -41,7 +40,6 @@ impl Conn {
         reply.trim_end().to_owned()
     }
 
-    /// Sends one request; returns the request line, the response line and the parsed response.
     fn call(&mut self, id: u64, method: &str, params: &Value) -> (String, String, Value) {
         let request = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         let request = request.to_string();
@@ -50,7 +48,6 @@ impl Conn {
         (request, response, value)
     }
 
-    /// The next streamed line; at most ten seconds.
     fn next(&mut self) -> String {
         self.reader
             .get_ref()
@@ -61,12 +58,10 @@ impl Conn {
         line.trim_end().to_owned()
     }
 
-    /// The next streamed event, parsed.
     fn event(&mut self) -> Value {
         serde_json::from_str(&self.next()).expect("event is JSON")
     }
 
-    /// A connection past `hello` streaming `events` with `params`.
     fn events(dir: &Path, params: &Value) -> Self {
         let mut c = Self::open(dir);
         c.result("hello", &json!({"product": "shed", "version": VERSION}));
@@ -83,7 +78,6 @@ impl Conn {
     }
 }
 
-/// Collects normalised exchanges per golden file and checks them at the end.
 struct Goldens {
     dir: PathBuf,
     files: Vec<(String, String)>,
@@ -135,7 +129,6 @@ impl Goldens {
     }
 }
 
-/// Records `events` from seq 0 and its four-event replay: two starts, a state and a kill.
 fn record_events(dir: &Path, goldens: &mut Goldens) {
     let mut events = Conn::open(dir);
     events.result("hello", &json!({"product": "shed", "version": VERSION}));
@@ -386,7 +379,6 @@ fn a_version_mismatch_is_refused() {
         "a refused client stays refused"
     );
 
-    // A client of the old name sends the same version but no product.
     let mut old = Conn::open(&dir);
     let (_, line, _) = old.call(1, "hello", &json!({"version": VERSION}));
     assert_eq!(
@@ -442,7 +434,6 @@ fn events_stream_in_seq_order_filter_by_label_and_replay_since() {
         (&json!("killed"), &json!("b"))
     );
 
-    // `other` started first (seq 1) but is filtered out; the rest count up by one.
     assert_eq!(started["seq"], 2);
     assert_eq!(state["seq"], 3);
     assert_eq!(exited["seq"], 4);
@@ -497,7 +488,6 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
     let working = (json!("working"), json!("jan-osc9999"), json!("state"));
     assert_eq!(state(live.event()), working);
     c.result("send", &json!({"name": "jan", "text": "\n"}));
-    // The garbled and unknown payloads change nothing: the next state event is `done`.
     let done = (json!("done"), json!("jan-osc9999"), json!("state"));
     assert_eq!(state(live.event()), done);
     let info = c.result("get", &json!({"name": "jan"}));
@@ -509,14 +499,12 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
     assert_eq!(read["text"], "ab\nc", "no escape reaches the screen");
 }
 
-/// A connection past `hello`.
 fn hello(dir: &Path) -> Conn {
     let mut c = Conn::open(dir);
     c.result("hello", &json!({"product": "shed", "version": VERSION}));
     c
 }
 
-/// `sh` as terminal `name`, once its prompt shows.
 fn shell(c: &mut Conn, dir: &Path, name: &str) {
     c.result("run", &json!({"name": name, "cwd": dir, "cmd": ["sh"]}));
     eventually("the prompt", || {
@@ -524,7 +512,6 @@ fn shell(c: &mut Conn, dir: &Path, name: &str) {
     });
 }
 
-/// A screen update's rows by number, as text.
 fn rows(update: &Value) -> Vec<(u64, String)> {
     let lines = update["lines"].as_array().expect("lines");
     lines
@@ -537,7 +524,6 @@ fn rows(update: &Value) -> Vec<(u64, String)> {
         .collect()
 }
 
-/// The next streamed updates up to the one with a row reading `text`; panics after ten seconds.
 fn until_row(watch: &mut Conn, text: &str) -> Vec<Value> {
     let mut updates = Vec::new();
     loop {
@@ -589,7 +575,6 @@ fn screen_watch_sends_the_full_screen_then_diffs_and_since_skips_the_full_one() 
         &json!({"text": "red", "fg": 1, "bg": null, "bold": true, "italic": false, "underline": false, "inverse": false})
     );
 
-    // Once the screen is still, watching again from the last seq sends no full screen first.
     eventually("the prompt after the output", || {
         c.result("read", &json!({"name": "w"}))["text"]
             .as_str()
@@ -616,13 +601,11 @@ fn screen_watch_sends_at_most_20_updates_a_second() {
     watch.result("screen.watch", &json!({"terminal": "w"}));
     watch.event();
 
-    // 3,000 separate writes, as fast as the shell goes.
     let start = std::time::Instant::now();
     let flood = "i=0; while [ $i -lt 3000 ]; do echo l$i; i=$((i+1)); done; echo end\n";
     c.result("terminal.input", &json!({"terminal": "w", "text": flood}));
     let n = until_row(&mut watch, "end").len();
     let elapsed = start.elapsed().as_millis();
-    // Updates are at least 50 ms apart, so n of them span (n - 1) × 50 ms.
     assert!(
         (n as u128 - 1) * 50 <= elapsed,
         "{n} updates in {elapsed} ms"
@@ -696,7 +679,6 @@ fn terminal_input_and_keys_arrive_and_a_readonly_client_is_refused() {
     let (_, _, missing) = viewer.call(1, "terminal.readonly", &json!({"terminal": "nope"}));
     assert_eq!(missing["error"]["code"], -32002);
 
-    // Read-only is per connection: the owner still types, and nothing of the viewer's arrived.
     c.result(
         "terminal.input",
         &json!({"terminal": "w", "text": "echo done\n"}),
@@ -722,7 +704,6 @@ fn terminal_resize_from_the_watcher_resizes_the_screen_and_the_program() {
     watch.result("screen.watch", &json!({"terminal": "w"}));
     assert_eq!(watch.event()["cols"], 80);
 
-    // On the watching connection the terminal is implied; the response is not written.
     let resize = json!({"jsonrpc": "2.0", "id": 9, "method": "terminal.resize", "params": {"cols": 40, "rows": 10}});
     watch
         .writer
@@ -745,7 +726,6 @@ fn terminal_resize_from_the_watcher_resizes_the_screen_and_the_program() {
     assert_eq!(none["error"]["code"], -32602);
 }
 
-/// `read` params with only the name set.
 fn read_params() -> ReadParams {
     serde_json::from_value(serde_json::json!({"name": ""})).expect("read params")
 }

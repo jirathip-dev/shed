@@ -1,7 +1,3 @@
-//! The events stream: every terminal's starts, states, exits, kills and resource moves, numbered, in one
-//! log that each subscriber reads from its own cursor. The last [`RING`] are kept for replay, and all
-//! that a live subscriber has not read yet.
-
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
@@ -12,22 +8,18 @@ use tokio::sync::watch;
 
 use crate::lock;
 
-/// How many events are kept for `since`.
 pub(crate) const RING: u64 = 1_000;
 
 type Labels = BTreeMap<String, String>;
 
-/// One event's JSON line, serialised once and shared by the log and every subscriber.
 pub(crate) type Line = Arc<[u8]>;
 
-/// The kept events, oldest first, and each live subscriber's cursor (the last seq it read) by id.
 #[derive(Default)]
 struct Log {
     events: VecDeque<(Event, Line)>,
     cursors: BTreeMap<u64, u64>,
 }
 
-/// The numbered events; subscribers wait on the last seq.
 #[derive(Default)]
 pub(crate) struct Events {
     seq: u64,
@@ -39,22 +31,17 @@ fn matches(filter: &Labels, event: &Event) -> bool {
     filter.iter().all(|(k, v)| event.labels.get(k) == Some(v))
 }
 
-/// One event as a JSON line.
 fn line(event: &Event) -> Line {
-    // An event (strings, numbers and maps) always serialises.
     let mut line = serde_json::to_vec(event).unwrap_or_default();
     line.push(b'\n');
     line.into()
 }
 
 impl Events {
-    /// Numbers, keeps and streams one event of terminal `name`.
     pub(crate) fn emit(&mut self, name: &str, labels: &Labels, kind: EventKind) {
         self.emit_as(name, labels, kind, false);
     }
 
-    /// [`Self::emit`], flagged `replay` for a resumed ACP session's history: one push and one wake,
-    /// however many subscribe.
     pub(crate) fn emit_as(&mut self, name: &str, labels: &Labels, kind: EventKind, replay: bool) {
         self.seq += 1;
         let event = Event {
@@ -67,7 +54,6 @@ impl Events {
         let bytes = line(&event);
         let mut log = lock(&self.log);
         log.events.push_back((event, bytes));
-        // Trimmed once every RING events, to the last RING and what the slowest subscriber still needs.
         if log.events.len() as u64 > 2 * RING {
             let slowest = log.cursors.values().min().copied();
             let floor = slowest.unwrap_or(u64::MAX).min(self.seq - RING);
@@ -78,11 +64,8 @@ impl Events {
         self.last.send_replace(self.seq);
     }
 
-    /// A subscriber to the events that match `p.labels`: the kept ones after `p.since` (at most the last
-    /// [`RING`]), then those from now on.
     pub(crate) fn subscribe(&mut self, p: EventsParams) -> Subscriber {
         let mut log = lock(&self.log);
-        // Unique among the live ones.
         let id = log.cursors.last_key_value().map_or(0, |(id, _)| id + 1);
         let oldest = self.seq.saturating_sub(RING);
         let cursor = p.since.map_or(self.seq, |s| s.clamp(oldest, self.seq));
@@ -96,7 +79,6 @@ impl Events {
     }
 }
 
-/// One `events` stream: its filter, and its cursor in the shared log.
 pub(crate) struct Subscriber {
     log: Arc<Mutex<Log>>,
     id: u64,
@@ -105,7 +87,6 @@ pub(crate) struct Subscriber {
 }
 
 impl Subscriber {
-    /// The matching lines after the cursor, which moves past them.
     pub(crate) fn take(&mut self) -> Vec<Line> {
         let mut log = lock(&self.log);
         let cursor = log.cursors.get(&self.id).copied().unwrap_or_default();
@@ -118,7 +99,6 @@ impl Subscriber {
         lines
     }
 
-    /// Writes the replay, then all that is new at each wake as one write, until a write fails.
     pub(crate) async fn stream(mut self, out: &mut OwnedWriteHalf) {
         loop {
             let batch = self.take().concat();
@@ -174,12 +154,9 @@ mod tests {
         let log = lock(&events.log);
         let kept = &log.events[0].1;
         assert!(lines.len() == 3 && lines.iter().all(|l| Arc::ptr_eq(l, kept)));
-        // The log and the three subscribers hold the one allocation.
         assert_eq!(Arc::strong_count(kept), 4);
     }
 
-    /// A `since` past the last seq (a client resuming against a restarted server) still gets every new
-    /// event.
     #[test]
     fn since_beyond_seq_still_gets_new_events() {
         let mut events = Events::default();
@@ -194,8 +171,6 @@ mod tests {
         assert_eq!(sub.take().len(), 3);
     }
 
-    /// A subscriber that reads nothing for 5,000 events still gets them all; with none, the log stays
-    /// bounded.
     #[test]
     fn a_slow_subscriber_misses_nothing_and_the_log_is_trimmed_without_one() {
         let mut events = Events::default();

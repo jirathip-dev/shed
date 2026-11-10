@@ -63,7 +63,6 @@ pub enum Input {
 /// The bytes that deliver `input` to a bridge through its terminal: `RS`, the JSON, a newline.
 #[must_use]
 pub fn frame(input: &Input) -> String {
-    // An enum of strings always serialises.
     format!("\x1e{}\n", serde_json::to_string(input).unwrap_or_default())
 }
 
@@ -73,7 +72,6 @@ pub fn transcript(state: &Path, name: &str) -> PathBuf {
     state.with_file_name("acp").join(format!("{name}.jsonl"))
 }
 
-/// Control characters (but newlines and tabs) as `?`, so agent text cannot drive a terminal.
 fn clean(text: &str) -> String {
     text.chars()
         .map(|c| match c {
@@ -205,7 +203,6 @@ impl Preview {
     }
 }
 
-/// A status's tool glyph and plan checkbox; an unknown one has no glyph.
 fn mark(status: &str) -> (&'static str, &'static str) {
     let at = ["pending", "in_progress", "completed", "failed"]
         .iter()
@@ -218,8 +215,6 @@ fn mark(status: &str) -> (&'static str, &'static str) {
     })
 }
 
-/// A reply's markdown, lightly: headings bold, list items indented, fenced code indented and dim
-/// under its language.
 fn markdown(text: &str, put: &mut impl FnMut(&str, &str, &str, &str)) {
     let mut fence = false;
     for line in text.lines() {
@@ -247,7 +242,6 @@ fn markdown(text: &str, put: &mut impl FnMut(&str, &str, &str, &str)) {
     }
 }
 
-/// A line's inline code (`` `x` ``) highlighted.
 fn code(line: &str) -> String {
     let parts = line.split('`').enumerate();
     let parts = parts.map(|(i, p)| match i % 2 {
@@ -257,7 +251,6 @@ fn code(line: &str) -> String {
     parts.collect()
 }
 
-/// `line` wrapped at spaces to `width` columns; a longer word is cut.
 fn wrap(line: &str, width: usize) -> Vec<String> {
     let mut lines = vec![String::new()];
     for (i, word) in line.split(' ').enumerate() {
@@ -307,7 +300,6 @@ pub fn mcp_servers(entries: &[Value]) -> Result<Vec<McpServer>, String> {
     entries.iter().enumerate().map(parse).collect()
 }
 
-/// `servers` as JSON, each env and header value as `***`.
 fn redacted(servers: &[McpServer]) -> Vec<Value> {
     let mut shown = servers.to_vec();
     for server in &mut shown {
@@ -327,18 +319,13 @@ fn redacted(servers: &[McpServer]) -> Vec<Value> {
     serde_json::from_value(shown).unwrap_or_default()
 }
 
-/// What the connection hands the session task, in the order the agent sent it.
 enum FromAgent {
-    /// A `session/update`, or why it does not parse (a kind this SDK does not know).
     Update(Result<Box<SessionUpdate>, String>),
     Permission(Box<RequestPermissionRequest>, Asked),
-    /// The response to our prompt number `.0`.
     Prompt(u64, AcpResult<PromptResponse>),
-    /// The config options after `session/set_config_option`.
     Config(AcpResult<Vec<SessionConfigOption>>),
 }
 
-/// A `session/update`'s update: a text chunk (most of a turn) read straight from the JSON, else typed.
 fn update(params: &Value) -> Result<Box<SessionUpdate>, String> {
     let u = &params["update"];
     let chunk = u["sessionUpdate"] == "agent_message_chunk" && u["content"]["type"] == "text";
@@ -350,16 +337,12 @@ fn update(params: &Value) -> Result<Box<SessionUpdate>, String> {
     n.map(|n| Box::new(n.update)).map_err(|e| e.to_string())
 }
 
-/// What the session task hands the writer task, in order.
 enum Out {
-    /// An event; `true` when replayed, then `true` to keep it in the transcript.
     Emit(EventKind, bool, bool),
     State(Reported),
-    /// A line for the terminal only.
     Say(String),
 }
 
-/// A typed value's wire name (`end_turn`, `allow_once`, …).
 fn wire<T: Serialize>(value: &T) -> String {
     serde_json::to_string(value)
         .unwrap_or_default()
@@ -371,39 +354,28 @@ fn acp_error(why: impl Into<String>) -> agent_client_protocol::Error {
     agent_client_protocol::Error::new(ErrorCode::INTERNAL_ERROR, why)
 }
 
-/// The session task's state.
 struct Session {
     cx: ConnectionTo<Agent>,
-    /// Hands responses to our requests back to the task, in order with the agent's messages.
     back: UnboundedSender<FromAgent>,
     out: UnboundedSender<Out>,
     id: SessionId,
     policy: Policy,
-    /// Our `session/prompt` requests in flight, by our number.
     prompts: BTreeSet<u64>,
     next: u64,
-    /// Permission requests waiting for `approve`: their responder and options.
     asks: VecDeque<(Asked, Vec<ApprovalOption>)>,
-    /// Tool call titles and kinds by id, for updates that carry none.
     titles: BTreeMap<String, (String, Option<String>)>,
-    /// The current turn's reply so far.
     reply: String,
     auth: &'static [&'static str],
     heard: Instant,
-    /// Replaying a resumed session's history.
     replay: bool,
-    /// Loading the session again on a wake: its replay is already in the transcript.
     waking: bool,
-    /// The last state reported but `hibernated`, restored by a wake that starts no turn.
     last: (String, Option<String>),
-    /// The agent's `model` config option, if it has one.
     model: Option<String>,
     shown: AcpSession,
     mcp: Vec<McpServer>,
 }
 
 impl Session {
-    /// Hands `out` to the writer task; an error once it is gone.
     fn send(&self, out: Out) -> AcpResult<()> {
         let gone = |_| acp_error("the writer task is gone");
         self.out.send(out).map_err(gone)
@@ -429,14 +401,11 @@ impl Session {
         self.send(Out::Say(line))
     }
 
-    /// `auth: <line>` for the first line of `text` with one of the agent's auth-failure patterns.
     fn auth(&self, text: &str) -> Option<String> {
         let bad = |l: &&str| self.auth.iter().any(|p| l.contains(p));
         text.lines().find(bad).map(|l| format!("auth: {l}"))
     }
 
-    /// Ends the turn as `error` with the note `why`, cancelling it at the agent. An auth failure in
-    /// `why` makes the note `auth: <line>`, after a `reply` with the stop reason `auth_error`.
     fn fail(&mut self, why: String) -> AcpResult<()> {
         let cancelled = self.input(Input::Cancel);
         self.prompts.clear();
@@ -449,7 +418,6 @@ impl Session {
         cancelled
     }
 
-    /// Answers a permission request with option `id`, or `cancelled`.
     fn answer(asked: Asked, id: Option<String>) -> AcpResult<()> {
         let outcome = match id {
             Some(id) => RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(id)),
@@ -458,7 +426,6 @@ impl Session {
         asked.respond(RequestPermissionResponse::new(outcome))
     }
 
-    /// One framed or typed input.
     fn input(&mut self, input: Input) -> AcpResult<()> {
         self.heard = Instant::now();
         let back = self.back.clone();
@@ -530,7 +497,6 @@ impl Session {
         Ok(())
     }
 
-    /// One message from the agent.
     fn message(&mut self, m: FromAgent) -> AcpResult<()> {
         self.heard = Instant::now();
         match m {
@@ -573,7 +539,6 @@ impl Session {
                     }
                 }
             }
-            // A resumed session's prompts; each ends the reply before it.
             SessionUpdate::UserMessageChunk(c) if self.replay => {
                 if let Some(prompt) = text(c.content) {
                     self.end_replayed_turn();
@@ -628,7 +593,6 @@ impl Session {
         Ok(())
     }
 
-    /// Emits a replayed turn's reply, if any.
     fn end_replayed_turn(&mut self) {
         if !self.reply.is_empty() {
             let (text, stop_reason) = (std::mem::take(&mut self.reply), "end_turn".to_owned());
@@ -636,8 +600,6 @@ impl Session {
         }
     }
 
-    /// Takes the agent's `model` option (a select) from its config options (if any), then emits the
-    /// session.
     fn models(&mut self, options: &[SessionConfigOption]) -> AcpResult<()> {
         let model = options.iter().find_map(|o| match (&o.category, &o.kind) {
             (Some(Category::Model), Kind::Select(s)) => Some((o, s)),
@@ -698,15 +660,11 @@ impl Session {
     }
 }
 
-/// Seconds of idle before an ACP agent hibernates: `$SHED_ACP_HIBERNATE_AFTER` (default 600, `0` never).
 fn hibernate_after() -> Option<Duration> {
     let secs = std::env::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
     (secs > 0).then(|| Duration::from_secs(secs))
 }
 
-/// The session task: the handshake (loading the session again and then handing it `wake` when it
-/// wakes), then the agent's messages, the inputs and the watchdog, one at a time, until the agent
-/// closes its stdout (`None`) or the session has been idle long enough to hibernate (the session back).
 async fn drive(
     mut s: Session,
     mut from_agent: UnboundedReceiver<FromAgent>,
@@ -747,7 +705,6 @@ async fn drive(
             (s.id, s.replay, s.waking) = (SessionId::new(id), true, wake.is_some());
             let load = LoadSessionRequest::new(s.id.clone(), cwd).mcp_servers(s.mcp.clone());
             let loaded = cx.send_request(load).block_task().await.map_err(refused)?;
-            // The updates before the response, all queued by now, are the history.
             while let Ok(m) = from_agent.try_recv() {
                 s.message(m)?;
             }
@@ -773,8 +730,6 @@ async fn drive(
         s.input(input)?;
     }
     let idle = std::env::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
-    // Only an agent that can load its session again hibernates, once the session has a turn to load
-    // (an agent may keep no session before its first prompt).
     let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
     let mut typing = true;
     loop {
@@ -786,12 +741,9 @@ async fn drive(
                 None => typing = false,
             },
             () = cx.incoming_closed() => return Ok(None),
-            // Ends a turn that heard nothing for `idle` seconds, but while a request waits for `approve`;
-            // hibernates when no turn runs and no request waits.
             () = tokio::time::sleep(Duration::from_millis(100)) => {
                 let quiet = s.heard.elapsed();
                 if !s.asks.is_empty() {
-                    // A request waits for `approve`.
                 } else if !s.prompts.is_empty() && quiet.as_secs() >= idle {
                     s.fail("no response".to_owned())?;
                 } else if s.prompts.is_empty() && typing && (resumed || s.next > 0)
@@ -804,19 +756,15 @@ async fn drive(
     }
 }
 
-/// The writer task's end: the transcript, the terminal and the server.
 struct Writer {
     transcript: BufWriter<File>,
     server: Option<tokio::net::UnixStream>,
     socket: PathBuf,
     name: String,
-    /// What the terminal shows, redrawn whole on each change.
     preview: Preview,
 }
 
 impl Writer {
-    /// Writes each output to the transcript, the server and the terminal, flushing (in that order)
-    /// whenever the session task has nothing more queued.
     async fn run(mut self, mut outs: UnboundedReceiver<Out>) {
         let mut batch = Vec::new();
         while outs.recv_many(&mut batch, 4096).await > 0 {
@@ -856,8 +804,6 @@ impl Writer {
         }
     }
 
-    /// Sends notification lines, reconnecting once when the connection broke (a server restart). The
-    /// agent's session goes on when the server is gone.
     async fn send(&mut self, calls: &[u8]) {
         for _ in 0..2 {
             if self.server.is_none() {
@@ -876,8 +822,6 @@ impl Writer {
     }
 }
 
-/// Reads the terminal's input (raw mode) and hands each framed or typed line, and each lone
-/// `Esc` / `Ctrl+C`, to the session task.
 async fn read_input(inputs: UnboundedSender<Input>) {
     let mut stdin = tokio::io::stdin();
     let mut line = Vec::new();
@@ -953,7 +897,6 @@ pub fn bridge(
     result
 }
 
-/// Creates terminal `name`'s transcript, empty.
 fn open_transcript(state: &Path, name: &str) -> io::Result<File> {
     let path = transcript(state, name);
     if let Some(dir) = path.parent() {
@@ -970,8 +913,6 @@ fn open_transcript(state: &Path, name: &str) -> io::Result<File> {
         .open(&path)
 }
 
-/// Speaks ACP to `child` over its stdio: runs `main` (the session task) with the connection and the
-/// sender and receiver of the agent's messages, until it returns.
 async fn connect(
     child: &mut tokio::process::Child,
     main: impl AsyncFnOnce(
@@ -1041,7 +982,6 @@ fn run(
         preview: Preview::default(),
     };
     let (typed, mut inputs) = unbounded_channel();
-    // A woken session keeps its state; a new one starts empty.
     let session = move |cx, back, kept: Option<Session>| match kept {
         Some(s) => Session { cx, back, ..s },
         None => Session {
@@ -1101,7 +1041,6 @@ fn run(
                 shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap)?;
             }
             s.state("hibernated", None);
-            // Inputs from now on queue up in order; the first one wakes the agent.
             let Some(input) = inputs.recv().await else {
                 return Ok(0);
             };
@@ -1109,8 +1048,6 @@ fn run(
             kept = Some(s);
         }
     });
-    // The session's sender is gone with it: the writer drains what is queued and ends. The stdin read
-    // never ends on its own, so the runtime does not wait for it.
     let _ = runtime.block_on(writer);
     runtime.shutdown_background();
     result
@@ -1158,8 +1095,6 @@ mod tests {
         );
     }
 
-    /// A text chunk read straight from the JSON is the update the SDK makes of it; any other goes
-    /// through the SDK, and one it does not know is an error.
     #[test]
     fn a_text_chunk_skips_the_sdk_parse_and_matches_it() {
         let params = |update: Value| json!({"sessionId": "s", "update": update});

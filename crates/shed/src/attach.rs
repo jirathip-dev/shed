@@ -1,5 +1,3 @@
-//! `shed attach`: this terminal in raw mode, wired to a terminal on the server.
-
 use std::io::{self, Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
@@ -11,16 +9,12 @@ use rustix::termios::{
 use shed_server::proto::{Method, ResizeParams, SendParams, Target, TerminalInfo};
 use shed_server::{Client, notification};
 
-/// The detach key: `Ctrl+\`.
 const DETACH: u8 = 0x1c;
-/// How often the window size is checked for changes.
 const RESIZE_POLL: Duration = Duration::from_millis(100);
 
-/// Stdin in raw mode while alive; restores the saved mode on drop. A no-op when stdin is not a tty.
 pub(crate) struct RawMode(Option<Termios>);
 
 impl RawMode {
-    /// A read returns once `vmin` bytes came, or after `vtime` tenths of a second without input.
     pub(crate) fn enter(vmin: u8, vtime: u8) -> io::Result<Self> {
         let Ok(saved) = tcgetattr(io::stdin()) else {
             return Ok(Self(None));
@@ -42,7 +36,6 @@ impl Drop for RawMode {
     }
 }
 
-/// Attaches to `name` until `Ctrl+\` or the program's PTY closes.
 pub(crate) fn attach(mut client: Client, name: &str) -> anyhow::Result<()> {
     let target = Target {
         name: name.to_owned(),
@@ -70,7 +63,6 @@ pub(crate) fn attach(mut client: Client, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Sends stdin as `send` notifications; at `Ctrl+\` (or end of input) closes the connection.
 fn forward_input(mut conn: &UnixStream, name: &str) {
     let mut stdin = io::stdin().lock();
     let mut buf = [0u8; 1024];
@@ -94,7 +86,6 @@ fn forward_input(mut conn: &UnixStream, name: &str) {
     let _ = conn.shutdown(Shutdown::Both);
 }
 
-/// Sends a `resize` notification at once and whenever the window size changes.
 fn forward_resizes(mut conn: &UnixStream, name: &str) {
     let mut last = None;
     loop {

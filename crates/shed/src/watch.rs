@@ -1,5 +1,3 @@
-//! `shed watch`: a live list of the terminals beside a read-only preview of the selected one.
-
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Read as _, Write as _};
@@ -19,43 +17,27 @@ use shed_server::proto::{
 
 use crate::attach::{self, RawMode};
 
-/// An exited terminal stays, dim, this long.
 const LINGER: Duration = Duration::from_mins(1);
-/// The shortest time between two frames: at most 10 a second.
 const FRAME: Duration = Duration::from_millis(100);
-/// Below this many columns the preview is hidden.
 const NARROW: usize = 80;
-/// The list's width beside the preview.
 const LIST: usize = 34;
-/// The alternate screen, no cursor, no line wrap; and back.
 const ENTER: &str = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J";
 const LEAVE: &str = "\x1b[?7h\x1b[?25h\x1b[?1049l";
 
-/// What the loop hears from its threads.
 pub(crate) enum Msg {
-    /// From `events`.
     Event(Event),
-    /// From the `n`th preview's `screen.watch`.
     Screen(u64, ScreenUpdate),
-    /// The event stream closed.
     Closed,
 }
 
-/// The watch screen's terminal: its keys, clock, size and output, and the hand-off to attach.
 pub(crate) trait Tty {
-    /// The keys typed in the next tick (at most 100 ms), and the messages that came meanwhile.
     fn input(&mut self, rx: &Receiver<Msg>) -> io::Result<(Vec<u8>, Vec<Msg>)>;
-    /// The time now.
     fn now(&self) -> Instant;
-    /// Columns and rows.
     fn size(&self) -> (u16, u16);
-    /// Writes a frame.
     fn draw(&mut self, frame: &str) -> io::Result<()>;
-    /// Takes the terminal over until `Ctrl+\`.
     fn attach(&mut self, name: &str) -> anyhow::Result<()>;
 }
 
-/// `shed watch [--label k=v]`: this terminal, raw, until `q`.
 pub(crate) fn watch(
     server: &crate::Server,
     labels: BTreeMap<String, String>,
@@ -73,7 +55,6 @@ pub(crate) fn watch(
     run(&mut tty, &connect, machine, labels)
 }
 
-/// The real terminal.
 struct Screen<'a> {
     connect: &'a dyn Fn() -> anyhow::Result<Client>,
     _raw: RawMode,
@@ -114,7 +95,6 @@ impl Drop for Screen<'_> {
     }
 }
 
-/// The loop: the list from `ls` and `events`, the selection's preview from `screen.watch`, the keys.
 pub(crate) fn run(
     tty: &mut impl Tty,
     connect: &dyn Fn() -> anyhow::Result<Client>,
@@ -186,7 +166,6 @@ pub(crate) fn run(
     }
 }
 
-/// Starts the `n`th preview: `name`'s screen updates go to `tx`; shutting the returned stream ends it.
 fn watch_screen(
     connect: &dyn Fn() -> anyhow::Result<Client>,
     name: &str,
@@ -212,24 +191,20 @@ fn watch_screen(
     Ok(writer)
 }
 
-/// What a key asks the loop to do.
 #[derive(Debug, PartialEq, Eq)]
 enum Action {
     Quit,
     Attach(String),
 }
 
-/// One terminal in the list.
 struct Row {
     labels: BTreeMap<String, String>,
     state: String,
     note: Option<String>,
-    /// When the state last changed (or the watch first saw it).
     since: Instant,
     exited: Option<Instant>,
 }
 
-/// The watch screen's model: the list, the selection, the filter and the preview's screen.
 #[derive(Default)]
 struct Watch {
     machine: Option<String>,
@@ -291,7 +266,6 @@ impl Watch {
         self.dirty = true;
     }
 
-    /// Applies a screen update to the preview.
     fn update(&mut self, update: ScreenUpdate) {
         if update.full {
             self.screen = vec![Vec::new(); usize::from(update.rows)];
@@ -304,7 +278,6 @@ impl Watch {
         self.dirty = true;
     }
 
-    /// Drops terminals exited over a minute ago; redraws once a second for the ages.
     fn tick(&mut self, now: Instant) {
         let before = self.rows.len();
         self.rows
@@ -315,7 +288,6 @@ impl Watch {
         self.dirty |= stale || self.rows.len() != before;
     }
 
-    /// The terminals the filter keeps, as (fleet, name), in list order.
     fn visible(&self) -> Vec<(&str, &str)> {
         let mut list: Vec<(&str, &str)> = self
             .rows
@@ -336,7 +308,6 @@ impl Watch {
         list
     }
 
-    /// Keeps the selection on a visible terminal: the first when it went.
     fn reselect(&mut self) {
         let visible = self.visible();
         if !visible
@@ -362,7 +333,6 @@ impl Watch {
         self.dirty = true;
     }
 
-    /// Handles typed bytes: arrows or j/k select, `/` filters, Enter attaches, `q` (or `Ctrl+C`) quits.
     fn keys(&mut self, mut bytes: &[u8]) -> Option<Action> {
         if !bytes.is_empty() {
             self.status.clear();
@@ -399,7 +369,6 @@ impl Watch {
         None
     }
 
-    /// The list's lines, each `width` columns, and whether it is the selection.
     fn list(&self, now: Instant, width: usize) -> Vec<(String, bool)> {
         let mut lines = Vec::new();
         if let Some(machine) = &self.machine {
@@ -445,7 +414,6 @@ impl Watch {
         lines
     }
 
-    /// The next frame, when something changed and the last one is 100 ms old.
     fn frame(&mut self, now: Instant, (cols, rows): (u16, u16)) -> Option<String> {
         if !self.dirty || self.last_frame.is_some_and(|t| now - t < FRAME) {
             return None;
@@ -490,7 +458,6 @@ impl Watch {
         Some(out)
     }
 
-    /// The preview's header: the selection's name, state and note.
     fn header(&self, width: usize) -> String {
         let Some((name, row)) = self
             .selected
@@ -512,12 +479,10 @@ impl Watch {
     }
 }
 
-/// `s` cut or padded to `width` columns.
 fn clip(s: &str, width: usize) -> String {
     format!("{:width$}", s.chars().take(width).collect::<String>())
 }
 
-/// A screen row's runs with their pens, cut at `width` columns.
 fn draw_runs(runs: &[Run], mut width: usize) -> String {
     let mut out = String::new();
     for run in runs {
@@ -545,7 +510,6 @@ fn draw_runs(runs: &[Run], mut width: usize) -> String {
     out
 }
 
-/// An age: `42s`, `5m`, `3h`.
 fn age(d: Duration) -> String {
     match d.as_secs() {
         s @ 0..60 => format!("{s}s"),
@@ -564,13 +528,11 @@ mod tests {
 
     use super::*;
 
-    /// A fake server: `ls` answers `list`, `events` streams `events`, `screen.watch` writes `screens`.
     #[derive(Default)]
     struct Fake {
         list: Vec<Value>,
         events: Vec<Value>,
         screens: BTreeMap<String, Vec<Value>>,
-        /// Every method called, with its terminal when it names one.
         calls: Mutex<Vec<String>>,
     }
 
@@ -619,7 +581,6 @@ mod tests {
         }
     }
 
-    /// One tick: these keys, after waiting for `msgs` messages, with the clock moved by `ms`.
     struct Step {
         keys: &'static [u8],
         msgs: usize,
@@ -630,13 +591,11 @@ mod tests {
         Step { keys, msgs, ms }
     }
 
-    /// A fake terminal with a fake clock; `q` once the steps run out.
     struct FakeTty {
         start: Instant,
         clock: Duration,
         steps: std::vec::IntoIter<Step>,
         size: (u16, u16),
-        /// Each frame with the fake time it was drawn at.
         frames: Vec<(Duration, String)>,
         attached: Vec<String>,
     }
@@ -670,7 +629,6 @@ mod tests {
         }
     }
 
-    /// Runs the watch against `fake` until the steps run out.
     fn watch(fake: Fake, size: (u16, u16), steps: Vec<Step>) -> (FakeTty, Arc<Fake>) {
         let fake = Arc::new(fake);
         let mut tty = FakeTty {
@@ -715,7 +673,6 @@ mod tests {
             "lines": lines})
     }
 
-    /// `frame` without its escape sequences.
     fn plain(frame: &str) -> String {
         let mut out = String::new();
         let mut chars = frame.chars();
