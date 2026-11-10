@@ -9,6 +9,7 @@ pub mod agents;
 mod events;
 mod links;
 pub mod machines;
+mod providers;
 mod registry;
 mod screen;
 mod stats;

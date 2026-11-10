@@ -236,7 +236,7 @@ impl Command {
 enum AgentsCommand {
     /// Install an agent from the ACP registry, pinned to the version it lists now.
     Add {
-        /// The registry id (`claude-acp`, `codex-acp`, `gemini`, `pi-acp`, …).
+        /// The agent's id in the registry.
         id: String,
         /// The registry: a URL or a file.
         #[arg(long, value_name = "SRC", default_value = agents::REGISTRY)]

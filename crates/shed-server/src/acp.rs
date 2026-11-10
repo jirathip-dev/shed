@@ -774,7 +774,7 @@ async fn drive(
     }
     let idle = std::env::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
     // Only an agent that can load its session again hibernates, once the session has a turn to load
-    // (claude-agent-acp keeps no session before its first prompt).
+    // (an agent may keep no session before its first prompt).
     let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
     let mut typing = true;
     loop {
@@ -1055,7 +1055,7 @@ fn run(
             asks: VecDeque::new(),
             titles: BTreeMap::new(),
             reply: String::new(),
-            auth: crate::agents::auth_failures(agent_id),
+            auth: crate::providers::auth_failures(agent_id),
             heard: Instant::now(),
             replay: false,
             waking: false,

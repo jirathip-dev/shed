@@ -42,6 +42,8 @@ jobs:
         run: just deps
       - name: public hygiene (ci/denylist.txt)
         run: just hygiene
+      - name: neutral core (no agent or provider names outside providers/)
+        run: just neutral
 
   stable:
     strategy:
