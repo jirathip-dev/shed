@@ -60,7 +60,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: taiki-e/install-action@v2
         with:
-          tool: just,actionlint
+          tool: just
+      - name: install actionlint 1.7.12
+        run: |
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz |
+            tar -xz -C "$RUNNER_TEMP" actionlint
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: install herdsman
         run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging herdsman
       - name: actionlint (.github/workflows)
