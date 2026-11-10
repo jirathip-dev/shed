@@ -160,6 +160,10 @@ shed/
 - No AI co-author or "generated with" trailers.
 - **Versioning:** SemVer, with a `CHANGELOG.md` (Keep a Changelog). Releases are tagged builds with checksums (GitHub
   Actions); `cargo install` works from the repo.
+- **Install:** `scripts/install.sh [BIN_DIR]` (`just install`) builds shed and, on macOS, signs every build with the
+  self-signed identity `herdsman-local` that herdsman and cooee share (herdsman's `scripts/signing-identity.sh`
+  creates it once), so a Keychain item that trusts one shed build trusts the next; with no identity it keeps the
+  installed binary and exits 1.
 - **Repo files:** `LICENSE` (MIT OR Apache-2.0), `SECURITY.md` (private reporting), `CONTRIBUTING.md` (how to run the
   gates locally: `just check`), and issue templates for bug and feature.
 - **Public-repo hygiene:** placeholders only in docs, tests and fixtures; a CI check bans setup-specific names; secret

@@ -31,3 +31,7 @@ hygiene:
 bench:
     cargo test -p shed --locked --test cli timing_report -- --nocapture
     cargo test -p shed-core --locked --test history throughput_report -- --nocapture
+
+# Build shed and install it to BIN_DIR/shed (default ~/.cargo/bin), signed on macOS with "herdsman-local" (#56).
+install *BIN_DIR:
+    scripts/install.sh {{BIN_DIR}}
