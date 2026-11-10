@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: fmt clippy test doc deny cap deps hygiene neutral comments actionlint arch lessons temp-left
+check: fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint arch lessons temp-left
 
 fmt:
     cargo fmt --all --check
@@ -8,6 +8,10 @@ clippy:
     cargo clippy --workspace --all-targets --locked -- -D warnings
     # At most 10 allows in the workspace, each with a reason (clippy checks the reason).
     test "$(grep -rE 'allow\(' crates | wc -l)" -le 10
+
+# The banned APIs (#67): each fixture breaks one [workspace.lints] ban, and clippy must reject it.
+banned:
+    scripts/banned.sh
 
 test:
     cargo test --workspace --locked
@@ -44,12 +48,17 @@ actionlint:
     actionlint
     ! actionlint ci/fixtures/actionlint-bad.yml
 
-# Layers, banned calls (only shed_core::runner starts processes) and size limits in .herdsman/arch.toml; one
-# fixture breaks each.
+# Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
+# environment only in shed_server::config) and size limits in .herdsman/arch.toml; one fixture breaks each.
 arch:
     herdsman arch-check
     cd ci/fixtures/arch-layer && ! herdsman arch-check --config ../../../.herdsman/arch.toml
     cd ci/fixtures/arch-spawn && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-process && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-sleep && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-env && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-system-time && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-instant && ! herdsman arch-check --config ../../../.herdsman/arch.toml
     cd ci/fixtures/arch-size && ! herdsman arch-check --config ../../../.herdsman/arch.toml
 
 # The lesson checks in .herdsman/rules.md: an active one that fails fails, a shadow one only reports.

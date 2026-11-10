@@ -5,7 +5,9 @@ use std::io;
 use std::os::fd::OwnedFd;
 use std::os::unix::process::CommandExt as _;
 use std::path::Path;
-use std::process::{Child, Command, Output, Stdio};
+use std::process::{Command, Output, Stdio};
+
+pub use std::process::{Child, ExitCode, ExitStatus};
 
 /// Runs `program` with `args` and `envs` to its end, stdout and stderr captured, stdin empty.
 ///
@@ -92,4 +94,10 @@ where
         .env("TERM", "xterm-256color")
         .envs(env)
         .spawn(pts)
+}
+
+/// This process's id.
+#[must_use]
+pub fn pid() -> u32 {
+    std::process::id()
 }

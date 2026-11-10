@@ -28,6 +28,8 @@ jobs:
         run: just fmt
       - name: clippy (pedantic, at most 10 allows)
         run: just clippy
+      - name: banned APIs (one fixture per ban; clippy rejects each)
+        run: just banned
       - name: test
         run: just test
       - name: tests leave no temp folders (no shed-* in the temp dir)
@@ -49,8 +51,8 @@ jobs:
       - name: comment rule (no //; /// on public API only)
         run: just comments
 
-  # The fleet-wide rules: actionlint, herdsman's arch-check (layers, only shed_core::runner starts processes, size
-  # limits in .herdsman/arch.toml) and lesson checks (.herdsman/rules.md), each with the fixtures that break it.
+  # The fleet-wide rules: actionlint, herdsman's arch-check (layers, banned calls, size limits in
+  # .herdsman/arch.toml) and lesson checks (.herdsman/rules.md), each with the fixtures that break it.
   rules:
     runs-on: ubuntu-latest
     env:

@@ -1,6 +1,7 @@
 //! The idle-connections report (`scripts/bench-fanout.sh` runs it at a PR's base and head, report only):
 //! 500 `events` clients on one server, then one state change: the time until every client has it, and
 //! the server's thread count.
+#![cfg(test)]
 
 use std::io::BufRead as _;
 use std::os::unix::net::UnixStream;
@@ -31,7 +32,7 @@ fn threads(pid: u32) -> usize {
 #[ignore = "a timing report: scripts/bench-fanout.sh"]
 fn idle_connections() {
     let dir = std::env::temp_dir().join(format!("shed-idle-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).expect("temp dir");
     let mut server = Command::new(env!("CARGO_BIN_EXE_shed"))
         .args(["serve", "--sample", "3600", "--dir"])
@@ -67,7 +68,7 @@ fn idle_connections() {
     }
     let us = start.elapsed().as_micros();
     println!("idle {CLIENTS} clients: one state to all in {us} us, server threads {threads}");
-    let _ = server.kill();
-    let _ = server.wait();
-    let _ = std::fs::remove_dir_all(&dir);
+    server.kill().ok();
+    server.wait().ok();
+    std::fs::remove_dir_all(&dir).ok();
 }

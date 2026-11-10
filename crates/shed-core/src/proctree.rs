@@ -6,7 +6,7 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rustix::process::{Pid, Signal, kill_process, kill_process_group};
 
@@ -194,10 +194,10 @@ pub fn usage(procs: &[ProcessInfo]) -> Usage {
 
 fn signal_tree(root: i32, pids: &BTreeSet<i32>, sig: Signal) {
     if let Some(group) = Pid::from_raw(root) {
-        let _ = kill_process_group(group, sig);
+        kill_process_group(group, sig).ok();
     }
     for pid in pids.iter().filter_map(|&p| Pid::from_raw(p)) {
-        let _ = kill_process(pid, sig);
+        kill_process(pid, sig).ok();
     }
 }
 
@@ -220,7 +220,7 @@ pub fn kill_tree(
         .collect();
     signal_tree(root, &known, Signal::TERM);
     let mut killed = false;
-    let mut deadline = Instant::now() + grace;
+    let mut deadline = crate::clock::now() + grace;
     loop {
         reap();
         let live = tree(&table.list()?, root, &known);
@@ -228,15 +228,15 @@ pub fn kill_tree(
             return Ok(());
         }
         known.extend(live.iter().map(|p| p.pid));
-        if Instant::now() >= deadline {
+        if crate::clock::now() >= deadline {
             if killed {
                 return Ok(());
             }
             signal_tree(root, &known, Signal::KILL);
             killed = true;
-            deadline = Instant::now() + Duration::from_secs(1);
+            deadline = crate::clock::now() + Duration::from_secs(1);
         }
-        std::thread::sleep(Duration::from_millis(20));
+        crate::clock::sleep(Duration::from_millis(20));
     }
 }
 

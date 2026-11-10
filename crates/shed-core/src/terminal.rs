@@ -1,9 +1,9 @@
 //! A terminal: one program on a PTY, its screen, and its process tree.
 
+use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
-use std::process::{Child, ExitStatus};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -125,7 +125,7 @@ impl Terminal {
         let watch = Arc::new(watch::Sender::new(Status {
             changes: 0,
             closed: false,
-            last_output: Instant::now(),
+            last_output: crate::clock::now(),
             report: None,
             idle_after: None,
         }));
@@ -183,7 +183,7 @@ impl Terminal {
     #[must_use]
     pub fn report(&self) -> Option<Report> {
         let status = self.watch.borrow();
-        let idle = status.idle_at().is_some_and(|at| Instant::now() >= at);
+        let idle = status.idle_at().is_some_and(|at| crate::clock::now() >= at);
         status.report.clone().or_else(|| {
             idle.then(|| Report {
                 state: "idle".to_owned(),
@@ -224,7 +224,7 @@ impl Terminal {
             if self.try_wait()?.is_some() {
                 return Ok(Wake::Exited);
             }
-            let now = Instant::now();
+            let now = crate::clock::now();
             if deadline.is_some_and(|d| now >= d) {
                 return Ok(Wake::Timeout);
             }
@@ -313,7 +313,7 @@ impl Terminal {
     pub fn kill(&self, grace: Duration) -> Result<ExitStatus, Error> {
         let mut child = lock(&self.child);
         proctree::kill_tree(&proctree::system(), self.pid, grace, || {
-            let _ = child.try_wait();
+            child.try_wait().ok();
         })?;
         Ok(child.wait()?)
     }
@@ -325,8 +325,8 @@ impl Drop for Terminal {
         if matches!(child.try_wait(), Ok(None))
             && let Some(group) = Pid::from_raw(self.pid)
         {
-            let _ = kill_process_group(group, Signal::KILL);
-            let _ = child.wait();
+            kill_process_group(group, Signal::KILL).ok();
+            child.wait().ok();
         }
     }
 }
@@ -347,20 +347,21 @@ fn read_loop(
         match (&*pty).read(&mut buf) {
             Ok(0) => return,
             Ok(n) => {
+                let chunk = buf.get(..n).unwrap_or_default();
                 let replies = {
                     let mut screen = lock(screen);
-                    screen.feed(&buf[..n]);
+                    screen.feed(chunk);
                     let report = screen.take_report();
                     bump(watch, |s| {
-                        s.last_output = Instant::now();
+                        s.last_output = crate::clock::now();
                         s.report = report.or_else(|| s.report.take());
                     });
                     screen.take_replies()
                 };
                 if let Some(subs) = lock(outputs).as_mut() {
-                    subs.retain(|tx| tx.send(buf[..n].to_vec()).is_ok());
+                    subs.retain(|tx| tx.send(chunk.to_vec()).is_ok());
                 }
-                if log.as_mut().is_some_and(|l| l.append(&buf[..n]).is_err()) {
+                if log.as_mut().is_some_and(|l| l.append(chunk).is_err()) {
                     log = None;
                 }
                 if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {

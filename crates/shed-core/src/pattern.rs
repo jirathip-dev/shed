@@ -111,7 +111,7 @@ impl Pattern {
         let starts = if self.start { 0..=0 } else { 0..=chars.len() };
         starts
             .into_iter()
-            .any(|i| self.at(&self.atoms, &chars[i..]))
+            .any(|i| chars.get(i..).is_some_and(|t| self.at(&self.atoms, t)))
     }
 
     fn at(&self, atoms: &[(Atom, usize, usize)], text: &[char]) -> bool {
@@ -123,7 +123,9 @@ impl Pattern {
             .take(*max)
             .take_while(|&&c| atom.matches(c))
             .count();
-        (*min..=run).rev().any(|n| self.at(rest, &text[n..]))
+        (*min..=run)
+            .rev()
+            .any(|n| text.get(n..).is_some_and(|t| self.at(rest, t)))
     }
 }
 

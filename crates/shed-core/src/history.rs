@@ -120,7 +120,7 @@ impl Log {
         if self.len > self.max.saturating_mul(2) {
             let kept = tail(File::open(&self.path)?, self.max)?;
             let tmp = self.path.with_extension("log.tmp");
-            let _ = fs::remove_file(&tmp);
+            fs::remove_file(&tmp).ok();
             create(&tmp)?.write_all(&kept)?;
             fs::rename(&tmp, &self.path)?;
             self.file = create(&self.path)?;
@@ -139,7 +139,7 @@ mod tests {
     impl<R: Read> Read for Counting<R> {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
             let n = self.0.read(buf)?;
-            self.1 += n as u64;
+            self.1 += u64::try_from(n).unwrap();
             Ok(n)
         }
     }
@@ -151,8 +151,9 @@ mod tests {
     }
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("shed-history-{}-{name}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
+        let dir =
+            std::env::temp_dir().join(format!("shed-history-{}-{name}", crate::runner::pid()));
+        fs::remove_dir_all(&dir).ok();
         fs::create_dir_all(&dir).expect("temp dir");
         dir
     }
@@ -166,8 +167,12 @@ mod tests {
         old.extend(vec![b'y'; BYTES - 1]);
         fs::write(&path, &old).expect("write");
         let mut file = Counting(File::open(&path).expect("open"), 0);
-        let bytes = tail(&mut file, BYTES as u64).expect("tail");
-        assert_eq!(file.1, BYTES as u64, "reads exactly the 8 MiB tail");
+        let bytes = tail(&mut file, u64::try_from(BYTES).unwrap()).expect("tail");
+        assert_eq!(
+            file.1,
+            u64::try_from(BYTES).unwrap(),
+            "reads exactly the 8 MiB tail"
+        );
         assert_eq!(bytes, vec![b'y'; BYTES - 1]);
         let whole = tail(io::Cursor::new("é".as_bytes()), 8).expect("tail");
         assert_eq!(whole, "é".as_bytes(), "nothing is skipped without a cut");

@@ -11,7 +11,7 @@ struct Made(RefCell<Vec<PathBuf>>);
 impl Drop for Made {
     fn drop(&mut self) {
         for dir in self.0.borrow().iter() {
-            let _ = std::fs::remove_dir_all(dir);
+            std::fs::remove_dir_all(dir).ok();
         }
     }
 }
@@ -20,7 +20,7 @@ thread_local!(static MADE: Made = const { Made(RefCell::new(Vec::new())) });
 
 pub fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("shed-{name}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).expect("temp dir");
     MADE.with(|m| m.0.borrow_mut().push(dir.clone()));
     dir.canonicalize().expect("canonical temp dir")
@@ -66,7 +66,7 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        self.0.kill().ok();
+        self.0.wait().ok();
     }
 }

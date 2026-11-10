@@ -28,6 +28,36 @@ paths = ["crates/*/src/**"]
 except = ["crates/shed-core/src/runner.rs"]
 reason = "start processes through shed_core::runner"
 
+[[ban]]
+pattern = "std::process"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-core/src/runner.rs"]
+reason = "process types and calls come from shed_core::runner"
+
+[[ban]]
+pattern = "thread::sleep"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-core/src/clock.rs"]
+reason = "sleep through shed_core::clock"
+
+[[ban]]
+pattern = "env::var"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-server/src/config.rs"]
+reason = "read the environment through shed_server::config"
+
+[[ban]]
+pattern = "SystemTime::now"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-core/src/clock.rs"]
+reason = "read the time through shed_core::clock"
+
+[[ban]]
+pattern = "Instant::now"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-core/src/clock.rs"]
+reason = "read the time through shed_core::clock"
+
 [[size]]
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000

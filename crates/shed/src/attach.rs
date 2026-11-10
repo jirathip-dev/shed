@@ -31,7 +31,7 @@ impl RawMode {
 impl Drop for RawMode {
     fn drop(&mut self) {
         if let Some(saved) = &self.0 {
-            let _ = tcsetattr(io::stdin(), OptionalActions::Now, saved);
+            tcsetattr(io::stdin(), OptionalActions::Now, saved).ok();
         }
     }
 }
@@ -55,7 +55,7 @@ pub(crate) fn attach(mut client: Client, name: &str) -> anyhow::Result<()> {
         if n == 0 {
             break;
         }
-        out.write_all(&buf[..n])?;
+        out.write_all(buf.get(..n).unwrap_or_default())?;
         out.flush()?;
     }
     drop(raw);
@@ -67,8 +67,9 @@ fn forward_input(mut conn: &UnixStream, name: &str) {
     let mut stdin = io::stdin().lock();
     let mut buf = [0u8; 1024];
     while let Ok(n) = stdin.read(&mut buf) {
-        let detach = buf[..n].iter().position(|&b| b == DETACH);
-        let typed = &buf[..detach.unwrap_or(n)];
+        let read = buf.get(..n).unwrap_or_default();
+        let detach = read.iter().position(|&b| b == DETACH);
+        let typed = read.get(..detach.unwrap_or(n)).unwrap_or_default();
         if !typed.is_empty() {
             let params = SendParams {
                 name: name.to_owned(),
@@ -83,7 +84,7 @@ fn forward_input(mut conn: &UnixStream, name: &str) {
             break;
         }
     }
-    let _ = conn.shutdown(Shutdown::Both);
+    conn.shutdown(Shutdown::Both).ok();
 }
 
 fn forward_resizes(mut conn: &UnixStream, name: &str) {
@@ -105,6 +106,6 @@ fn forward_resizes(mut conn: &UnixStream, name: &str) {
                 return;
             }
         }
-        std::thread::sleep(RESIZE_POLL);
+        shed_server::clock::sleep(RESIZE_POLL);
     }
 }

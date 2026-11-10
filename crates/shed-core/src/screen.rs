@@ -197,7 +197,7 @@ fn line_text(row: &[Cell]) -> String {
 fn runs(row: &[Cell]) -> Vec<Run> {
     let end = row.iter().rposition(|c| *c != space()).map_or(0, |i| i + 1);
     let mut runs: Vec<Run> = Vec::new();
-    for &(c, pen) in &row[..end] {
+    for &(c, pen) in row.iter().take(end) {
         match runs.last_mut() {
             Some(run) if run.pen == pen => run.text.push(c),
             _ => runs.push(Run {
@@ -329,8 +329,8 @@ impl Grid {
 
     fn erase(&mut self, row: usize, from: usize, to: usize) {
         let to = to.min(self.cols);
-        if from < to {
-            self.cells[row][from..to].fill(space());
+        if let Some(cells) = self.cells.get_mut(row).and_then(|r| r.get_mut(from..to)) {
+            cells.fill(space());
         }
     }
 
@@ -379,14 +379,16 @@ impl Grid {
 
     fn chars_at_cursor(&mut self, n: usize, insert: bool) {
         let (col, cols) = (self.col, self.cols);
-        let line = &mut self.cells[self.row];
+        let Some(line) = self.cells.get_mut(self.row).and_then(|l| l.get_mut(col..)) else {
+            return;
+        };
         let n = n.min(cols - col);
         if insert {
-            line[col..].rotate_right(n);
-            line[col..col + n].fill(space());
+            line.rotate_right(n);
+            line.iter_mut().take(n).for_each(|c| *c = space());
         } else {
-            line[col..].rotate_left(n);
-            line[cols - n..].fill(space());
+            line.rotate_left(n);
+            line.iter_mut().rev().take(n).for_each(|c| *c = space());
         }
     }
 
@@ -412,7 +414,7 @@ impl Grid {
         self.cols = cols;
         while self.cells.len() > rows
             && self.cells.len() - 1 > self.row
-            && line_text(&self.cells[self.cells.len() - 1]).is_empty()
+            && self.cells.last().is_some_and(|l| line_text(l).is_empty())
         {
             self.cells.pop();
         }
@@ -437,7 +439,10 @@ impl Grid {
         while let Some(p) = it.next() {
             let pen = &mut self.pen;
             let index = |n: u16| Some(Color::Index(u8::try_from(n).unwrap_or(0)));
-            match p[0] {
+            let [first, tail @ ..] = p else {
+                continue;
+            };
+            match *first {
                 0 => *pen = Pen::default(),
                 1 => pen.bold = true,
                 3 => pen.italic = true,
@@ -454,23 +459,26 @@ impl Grid {
                 n @ 100..=107 => pen.bg = index(n - 92),
                 49 => pen.bg = None,
                 n @ (38 | 48) => {
-                    let mut rest: Vec<u16> = if p.len() > 1 {
-                        p[1..].to_vec()
-                    } else {
-                        let take = match it.peek().map(|v| v[0]) {
+                    let mut rest: Vec<u16> = if tail.is_empty() {
+                        let take = match it.peek().and_then(|v| v.first()) {
                             Some(5) => 2,
                             Some(2) => 4,
                             _ => 0,
                         };
-                        it.by_ref().take(take).map(|v| v[0]).collect()
+                        it.by_ref()
+                            .take(take)
+                            .filter_map(|v| v.first().copied())
+                            .collect()
+                    } else {
+                        tail.to_vec()
                     };
                     if rest.len() == 5 {
                         rest.remove(1);
                     }
-                    let byte = |i: usize| u8::try_from(rest[i]).unwrap_or(u8::MAX);
-                    let color = match rest.as_slice() {
-                        [5, _] => Some(Color::Index(byte(1))),
-                        [2, _, _, _] => Some(Color::Rgb(byte(1), byte(2), byte(3))),
+                    let byte = |v: u16| u8::try_from(v).unwrap_or(u8::MAX);
+                    let color = match *rest.as_slice() {
+                        [5, i] => Some(Color::Index(byte(i))),
+                        [2, r, g, b] => Some(Color::Rgb(byte(r), byte(g), byte(b))),
                         _ => continue,
                     };
                     *if n == 38 { &mut pen.fg } else { &mut pen.bg } = color;
@@ -497,7 +505,13 @@ impl Perform for Grid {
             self.linefeed();
             self.wrap_next = false;
         }
-        self.cells[self.row][self.col] = (c, self.pen);
+        if let Some(cell) = self
+            .cells
+            .get_mut(self.row)
+            .and_then(|r| r.get_mut(self.col))
+        {
+            *cell = (c, self.pen);
+        }
         if self.col + 1 == self.cols {
             self.wrap_next = true;
         } else {

@@ -16,7 +16,7 @@ struct Job {
 
 fn job() -> anyhow::Result<Job> {
     let var = |k| {
-        std::env::var_os(k)
+        shed_server::config::var_os(k)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
     };
@@ -75,29 +75,29 @@ pub fn install(force: bool) -> anyhow::Result<()> {
     let job = job()?;
     let file = job.path.display();
     match std::fs::read_to_string(&job.path) {
-        Ok(old) if old == job.text => println!("{file} is up to date"),
+        Ok(old) if old == job.text => crate::out::line(format_args!("{file} is up to date")),
         Ok(_) if !force => bail!("{file} has other contents; `shed install --force` replaces it"),
         old => {
             let dir = job.path.parent().context("the job's directory")?;
             std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
             std::fs::write(&job.path, &job.text).with_context(|| file.to_string())?;
-            println!("wrote {file}");
+            crate::out::line(format_args!("wrote {file}"));
             if old.is_ok() {
-                println!("stop the old job first:\n  {}", job.stop);
+                crate::out::line(format_args!("stop the old job first:\n  {}", job.stop));
             }
         }
     }
-    println!("start it with:\n  {}", job.start);
+    crate::out::line(format_args!("start it with:\n  {}", job.start));
     Ok(())
 }
 
 pub fn uninstall() -> anyhow::Result<()> {
     let job = job()?;
-    println!(
+    crate::out::line(format_args!(
         "stop it and remove it with:\n  {}\n  rm {}",
         job.stop,
         job.path.display()
-    );
+    ));
     Ok(())
 }
 
@@ -155,7 +155,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
             Ok(v) => ("ok", v),
             Err(v) => ("FAIL", v),
         };
-        println!("{mark:<5} {what:<8} {v}");
+        crate::out::line(format_args!("{mark:<5} {what:<8} {v}"));
     }
     Ok(checks.iter().all(|(_, r)| r.is_ok()))
 }

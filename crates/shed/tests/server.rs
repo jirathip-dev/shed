@@ -2,6 +2,7 @@
 //!
 //! Every method's request and response is checked against `tests/golden/<method>.jsonl` (the temp
 //! dir, version and pids normalised). Regenerate with `SHED_BLESS=1 cargo test -p shed`.
+#![cfg(test)]
 
 mod common;
 
@@ -607,7 +608,7 @@ fn screen_watch_sends_at_most_20_updates_a_second() {
     let n = until_row(&mut watch, "end").len();
     let elapsed = start.elapsed().as_millis();
     assert!(
-        (n as u128 - 1) * 50 <= elapsed,
+        (u128::try_from(n).unwrap() - 1) * 50 <= elapsed,
         "{n} updates in {elapsed} ms"
     );
 }

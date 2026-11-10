@@ -1,4 +1,5 @@
 //! herdsman's fixed bug classes that apply to shed (herdsman#553, "Reliability"), one test per row.
+#![cfg(test)]
 
 mod common;
 
@@ -136,8 +137,8 @@ fn a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over() {
             break status;
         }
         if Instant::now() > deadline {
-            let _ = second.kill();
-            let _ = second.wait();
+            second.kill().ok();
+            second.wait().ok();
             panic!("a second server came up beside the first");
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -291,8 +292,8 @@ fn a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream() {
         let v: Value = serde_json::from_str(&l.ok()?).ok()?;
         (v["event"] == "state").then_some(v)
     });
-    let _ = events.kill();
-    let _ = events.wait();
+    events.kill().ok();
+    events.wait().ok();
     let idle = idle.expect("a state event");
     assert_eq!(
         (&idle["name"], &idle["state"]),

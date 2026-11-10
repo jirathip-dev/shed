@@ -2,6 +2,7 @@
 //!
 //! The human and JSON output is checked against `tests/golden/cli.txt` (the temp dir and pids
 //! normalised). Regenerate with `SHED_BLESS=1 cargo test -p shed`.
+#![cfg(test)]
 
 mod common;
 
@@ -410,7 +411,7 @@ fn serve_prints_one_ready_line_once_its_socket_accepts() {
     assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok());
     serve.kill().expect("kill");
     assert!(lines.next().is_none(), "exactly one line");
-    let _ = serve.wait();
+    serve.wait().ok();
 }
 
 #[test]
@@ -466,8 +467,8 @@ fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
             break;
         }
     }
-    let _ = events.kill();
-    let _ = events.wait();
+    events.kill().ok();
+    events.wait().ok();
 
     let get: Value = serde_json::from_str(&stdout(&shed_in(&dir, &["get", "mem"]))).expect("json");
     assert!(get["resources"]["rss_mb"].as_u64() >= Some(50), "{get}");

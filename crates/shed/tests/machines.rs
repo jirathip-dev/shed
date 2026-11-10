@@ -3,6 +3,7 @@
 //!
 //! The CLI output is checked against `tests/golden/machines.txt` (the temp dir and version
 //! normalised). Regenerate with `SHED_BLESS=1 cargo test -p shed`.
+#![cfg(test)]
 
 mod common;
 
@@ -105,19 +106,21 @@ fn shed_on(root: &Path, args: &[&str]) -> Command {
 
 fn record(root: &Path, text: &mut String, args: &[&str]) -> Output {
     let out = shed_on(root, args).output().expect("shed runs");
-    let _ = write!(
+    write!(
         text,
         "$ shed {}\n{}",
         args.join(" "),
         String::from_utf8_lossy(&out.stdout)
-    );
+    )
+    .ok();
     if !out.status.success() {
         let code = out.status.code().unwrap_or(-1);
-        let _ = write!(
+        write!(
             text,
             "[exit {code}] {}",
             String::from_utf8_lossy(&out.stderr)
-        );
+        )
+        .ok();
     }
     out
 }
@@ -361,7 +364,11 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
 
     let pids = std::fs::read_to_string(root.join("bin/ssh.pids")).expect("pids");
     for pid in pids.lines() {
-        let _ = Command::new("kill").arg(pid).stderr(Stdio::null()).status();
+        Command::new("kill")
+            .arg(pid)
+            .stderr(Stdio::null())
+            .status()
+            .ok();
     }
     common::eventually("reconnecting", || {
         link(&root, "box")["state"] == "reconnecting"
@@ -376,7 +383,10 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     assert_eq!(link(&root, "box")["state"], "up");
 
     let seqs: Vec<u64> = seen.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
-    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>());
+    assert_eq!(
+        seqs,
+        (1..=u64::try_from(seqs.len()).unwrap()).collect::<Vec<_>>()
+    );
     let ours = |e: &Value| {
         let name = e["name"].as_str().unwrap().strip_prefix("box/")?;
         Some((name.to_owned(), e["event"].clone(), e["state"].clone()))
@@ -561,7 +571,7 @@ fn on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint() {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while child.try_wait().expect("try_wait").is_none() {
         if std::time::Instant::now() > deadline {
-            let _ = child.kill();
+            child.kill().ok();
             panic!("shed --on hung after ssh exited");
         }
         std::thread::sleep(std::time::Duration::from_millis(50));

@@ -3,6 +3,7 @@
 //!
 //! The turn with an approval is checked against `tests/golden/acp.txt` (commands, output and the event
 //! log). Regenerate with `SHED_BLESS=1 cargo test -p shed --test acp`.
+#![cfg(test)]
 
 mod common;
 

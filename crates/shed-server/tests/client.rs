@@ -8,7 +8,7 @@ use shed_server::Client;
 #[test]
 fn a_server_of_another_version_is_refused_by_the_client() {
     let dir = std::env::temp_dir().join(format!("shed-client-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).expect("temp dir");
     let socket = dir.join("shed.sock");
     let listener = UnixListener::bind(&socket).expect("bind");

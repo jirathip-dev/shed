@@ -64,11 +64,14 @@ impl Tty for Screen<'_> {
     fn input(&mut self, rx: &Receiver<Msg>) -> io::Result<(Vec<u8>, Vec<Msg>)> {
         let mut buf = [0u8; 256];
         let n = io::stdin().read(&mut buf)?;
-        Ok((buf[..n].to_vec(), rx.try_iter().collect()))
+        Ok((
+            buf.get(..n).unwrap_or_default().to_vec(),
+            rx.try_iter().collect(),
+        ))
     }
 
     fn now(&self) -> Instant {
-        Instant::now()
+        shed_server::clock::now()
     }
 
     fn size(&self) -> (u16, u16) {
@@ -91,7 +94,7 @@ impl Tty for Screen<'_> {
 
 impl Drop for Screen<'_> {
     fn drop(&mut self) {
-        let _ = self.draw(LEAVE);
+        self.draw(LEAVE).ok();
     }
 }
 
@@ -118,7 +121,7 @@ pub(crate) fn run(
                 return;
             }
         }
-        let _ = to.send(Msg::Closed);
+        to.send(Msg::Closed).ok();
     });
     let list: Vec<TerminalInfo> = connect()?.call(Method::Ls, &LsParams { labels })?;
     let mut w = Watch::new(machine, list, tty.now());
@@ -127,7 +130,7 @@ pub(crate) fn run(
     loop {
         if w.selected != watching {
             if let Some(old) = preview.take() {
-                let _ = old.shutdown(Shutdown::Both);
+                old.shutdown(Shutdown::Both).ok();
             }
             n += 1;
             watching.clone_from(&w.selected);
@@ -344,7 +347,11 @@ impl Watch {
                 [0x1b, b'[' | b'O', b'B', ..] => Some(true),
                 _ => None,
             };
-            bytes = if arrow.is_some() { &bytes[3..] } else { rest };
+            bytes = if arrow.is_some() {
+                bytes.get(3..).unwrap_or_default()
+            } else {
+                rest
+            };
             if self.filtering {
                 match first {
                     _ if arrow.is_some() => {}
@@ -385,7 +392,9 @@ impl Watch {
                 };
                 lines.push((format!("\x1b[1;4m{}\x1b[0m", clip(head, width)), false));
             }
-            let row = &self.rows[name];
+            let Some(row) = self.rows.get(name) else {
+                continue;
+            };
             let (color, dot) = match row.state.as_str() {
                 "working" => (33, '●'),
                 "blocked" => (35, '●'),
@@ -400,7 +409,7 @@ impl Watch {
                 .into_iter()
                 .flatten()
             {
-                let _ = write!(text, " {part}");
+                write!(text, " {part}").ok();
             }
             let selected = self.selected.as_deref() == Some(name);
             let dim = if row.exited.is_some() { ";2" } else { "" };
@@ -430,7 +439,7 @@ impl Watch {
         let mut out = String::new();
         for r in 0..body {
             let left = list.get(skip + r).map_or(blank.as_str(), |(l, _)| l);
-            let _ = write!(out, "\x1b[{};1H{left}", r + 1);
+            write!(out, "\x1b[{};1H{left}", r + 1).ok();
             if wide {
                 out.push_str("\x1b[0;90m│\x1b[0m");
                 let pane = cols - width - 1;
@@ -454,7 +463,7 @@ impl Watch {
             };
             format!("↑↓ select  enter attach (ctrl+\\ back)  / filter  q quit{filter}")
         };
-        let _ = write!(out, "\x1b[{rows};1H\x1b[0;2m{}\x1b[0m", clip(&footer, cols));
+        write!(out, "\x1b[{rows};1H\x1b[0;2m{}\x1b[0m", clip(&footer, cols)).ok();
         Some(out)
     }
 
@@ -473,7 +482,7 @@ impl Watch {
         };
         let mut head = format!("{name} · {state}");
         if let Some(note) = &row.note {
-            let _ = write!(head, " · {note}");
+            write!(head, " · {note}").ok();
         }
         format!("\x1b[1m{}", clip(&head, width))
     }
@@ -496,16 +505,16 @@ fn draw_runs(runs: &[Run], mut width: usize) -> String {
             (run.inverse, 7),
         ];
         for (_, code) in flags.into_iter().filter(|(on, _)| *on) {
-            let _ = write!(sgr, ";{code}");
+            write!(sgr, ";{code}").ok();
         }
         for (color, base) in [(run.fg, 38), (run.bg, 48)] {
-            let _ = match color {
-                Some(Color::Index(i)) => write!(sgr, ";{base};5;{i}"),
-                Some(Color::Rgb([r, g, b])) => write!(sgr, ";{base};2;{r};{g};{b}"),
-                None => Ok(()),
+            match color {
+                Some(Color::Index(i)) => write!(sgr, ";{base};5;{i}").ok(),
+                Some(Color::Rgb([r, g, b])) => write!(sgr, ";{base};2;{r};{g};{b}").ok(),
+                None => None,
             };
         }
-        let _ = write!(out, "\x1b[{sgr}m{text}");
+        write!(out, "\x1b[{sgr}m{text}").ok();
     }
     out
 }
@@ -632,7 +641,7 @@ mod tests {
     fn watch(fake: Fake, size: (u16, u16), steps: Vec<Step>) -> (FakeTty, Arc<Fake>) {
         let fake = Arc::new(fake);
         let mut tty = FakeTty {
-            start: Instant::now(),
+            start: shed_server::clock::now(),
             clock: Duration::ZERO,
             steps: steps.into_iter(),
             size,
