@@ -1,0 +1,5 @@
+Decided: links::remote checks the method and its name/machine field before cloning params
+Because: crates/shed-server/src/links.rs:44
+Rejected: skipping linked() for emit only — every non-linked method still paid the clone
+Check: bench-acp shed_only at the head against staging (locally 96%, was 107% at f0f68ba)
+Owner: remote links no longer slow down every ACP update on the local machine
