@@ -1,0 +1,12 @@
+Decided: merged origin/staging 719738b keeping both sides (#85's --size/rows/cols and --meta)
+Because: crates/shed-server/src/registry.rs:461
+Decided: the bridge reads $SHED_ACP_META like $SHED_ACP_MCP, dropping a bad value instead of failing
+Because: crates/shed-server/src/acp.rs:1021
+Decided: clap parses --meta with serde_json directly; no custom parser function
+Because: crates/shed/src/main.rs:319
+Rejected: dropping the SHED_ACP_META scrub from the agent's env — saves 4 lines, still over the cap
+Check: docs/shed.openrpc.json differs from staging only in the run description and the meta param
+Decided: merged staging after #106 instead of rebasing
+Because: q1557
+Check: just cap gives 7815 / 10000
+Owner: merged the latest staging and trimmed the change to +20 lines; the cap raise (#106) is merged in.
