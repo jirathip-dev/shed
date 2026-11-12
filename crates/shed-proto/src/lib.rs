@@ -686,7 +686,7 @@ pub enum EventKind {
     /// The program started (`run`, or a kept terminal back after a server restart).
     Started,
     /// The reported state changed.
-    State(Reported),
+    State(Box<Reported>),
     /// The program exited by itself.
     Exited {
         /// The exit status (128 + N for signal N).

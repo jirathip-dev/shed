@@ -59,7 +59,7 @@ const RESOURCES: Resources = Resources {
 fn events() -> Vec<Event> {
     [
         EventKind::Started,
-        EventKind::State(done()),
+        EventKind::State(Box::new(done())),
         EventKind::Resources(RESOURCES),
         EventKind::Exited { code: Some(0) },
         EventKind::Killed,

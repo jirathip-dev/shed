@@ -276,7 +276,8 @@ impl Registry {
                 .filter(|r| entry.info.reported.as_ref() != Some(*r))
                 .chain(news);
             for r in news {
-                self.events.emit(name, labels, EventKind::State(r.clone()));
+                self.events
+                    .emit(name, labels, EventKind::State(Box::new(r.clone())));
             }
             if (&entry.info.reported, &entry.info.records) != (&reported, &records) {
                 (entry.info.reported, entry.info.records) = (reported, records);
