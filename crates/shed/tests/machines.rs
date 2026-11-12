@@ -669,3 +669,101 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
         format!("box offline, last seen {last_seen}\n")
     );
 }
+
+fn fed(root: &Path, args: &[&str], input: &[u8]) -> Output {
+    let mut child = shed_on(root, args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("shed runs");
+    let mut stdin = child.stdin.take().expect("stdin");
+    stdin.write_all(input).expect("write stdin");
+    drop(stdin);
+    child.wait_with_output().expect("shed ends")
+}
+
+fn gone(pid_file: &Path) {
+    let pid = std::fs::read_to_string(pid_file).expect("the child's pid");
+    common::eventually("the background child to end", || {
+        let alive = Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(Stdio::null())
+            .status();
+        !alive.expect("kill runs").success()
+    });
+}
+
+fn exec_and_files(root: &Path, on: &[&str]) {
+    let dir = root.join("remote");
+    let shed = |args: &[&str], input: &[u8]| fed(root, &[on, args].concat(), input);
+    let refused = |out: &Output, why: &str| {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(!out.status.success() && out.stdout.is_empty(), "{out:?}");
+        assert!(stderr.contains("IO: ") && stderr.contains(why), "{stderr}");
+    };
+    let script = r"printf 'a\377\0b'; printf 'e\376' >&2; exit 7";
+    let out = shed(&["exec", "--", "sh", "-c", script], b"");
+    assert_eq!(out.stdout, b"a\xff\0b");
+    assert_eq!(out.stderr, b"e\xfe");
+    assert_eq!(out.status.code(), Some(7));
+    assert_eq!(
+        shed(&["exec", "-i", "--", "cat"], b"in\xff\0").stdout,
+        b"in\xff\0"
+    );
+
+    let returned = dir.join(format!("returned{}", on.len()));
+    let script = format!("sleep 60 & echo $! > '{}'", returned.display());
+    let started = Instant::now();
+    assert!(
+        shed(&["exec", "--", "sh", "-c", &script], b"")
+            .status
+            .success()
+    );
+    assert!(started.elapsed() < Duration::from_secs(10));
+    gone(&returned);
+    let timed_out = dir.join(format!("timed-out{}", on.len()));
+    let script = format!("sleep 60 & echo $! > '{}'; wait", timed_out.display());
+    let out = shed(
+        &["exec", "--timeout", "0.5", "--", "sh", "-c", &script],
+        b"",
+    );
+    refused(&out, "timed out");
+    gone(&timed_out);
+
+    let file = dir.join(format!("blob{}", on.len()));
+    let path = file.to_str().expect("utf-8 path");
+    std::fs::write(&file, b"old").expect("write");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o640)).expect("chmod");
+    let bytes: Vec<u8> = (0..=255).chain((0..=255).rev()).collect();
+    assert!(shed(&["file", "write", path], &bytes).status.success());
+    let mode = std::fs::metadata(&file)
+        .expect("written")
+        .permissions()
+        .mode();
+    assert_eq!(
+        (std::fs::read(&file).expect("read"), mode & 0o777),
+        (bytes.clone(), 0o640)
+    );
+    assert_eq!(shed(&["file", "read", path], b"").stdout, bytes);
+
+    let big = dir.join(format!("big{}", on.len()));
+    let file = std::fs::File::create(&big).expect("create");
+    file.set_len((8 << 20) + 1).expect("grow");
+    let path = big.to_str().expect("utf-8 path");
+    refused(&shed(&["file", "read", path], b""), "over the reply limit");
+    let flood = ["exec", "--", "head", "-c", "8388609", "/dev/zero"];
+    refused(&shed(&flood, b""), "over the reply limit");
+    let most = ["exec", "--", "head", "-c", "8388608", "/dev/zero"];
+    assert_eq!(shed(&most, b"").stdout.len(), 8 << 20);
+}
+
+#[test]
+fn exec_and_file_return_exact_bytes_and_codes_here_and_over_the_held_link() {
+    let root = temp_dir("exec");
+    let (_remote, _local) = linked(&root);
+    exec_and_files(&root, &[]);
+    let ssh = box_ssh(&root);
+    exec_and_files(&root, &["--on", "box"]);
+    assert_eq!(box_ssh(&root), ssh, "no ssh per call while the link is up");
+}

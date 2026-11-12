@@ -149,11 +149,13 @@ pub enum ErrorCode {
     ReadOnly,
     /// The machine a `<machine>/<name>` names has no link up (`machine.links` says why).
     NoLink,
+    /// `exec` or a file call failed: not found, denied, timed out, or its reply over [`REPLY_LIMIT`].
+    Io,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -167,6 +169,7 @@ impl ErrorCode {
         Self::SpawnFailed,
         Self::ReadOnly,
         Self::NoLink,
+        Self::Io,
     ];
 
     /// The numeric JSON-RPC code.
@@ -186,6 +189,7 @@ impl ErrorCode {
             Self::SpawnFailed => -32005,
             Self::ReadOnly => -32006,
             Self::NoLink => -32007,
+            Self::Io => -32008,
         }
     }
 
@@ -206,6 +210,7 @@ impl ErrorCode {
             Self::SpawnFailed => "SPAWN_FAILED",
             Self::ReadOnly => "READONLY",
             Self::NoLink => "NO_LINK",
+            Self::Io => "IO",
         }
     }
 }
@@ -259,11 +264,17 @@ pub enum Method {
     Model,
     /// The held links to the machines: `{}` → `{machine: Link}`.
     MachineLinks,
+    /// Run a program without a terminal: [`ExecParams`] → [`ExecResult`].
+    Exec,
+    /// Read a file: [`FileParams`] → its bytes.
+    FileRead,
+    /// Write a file: [`FileParams`] with `data` → `{}`.
+    FileWrite,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 26] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -287,6 +298,9 @@ impl Method {
         Self::MachineStats,
         Self::Model,
         Self::MachineLinks,
+        Self::Exec,
+        Self::FileRead,
+        Self::FileWrite,
     ];
 
     /// The wire name.
@@ -316,6 +330,9 @@ impl Method {
             Self::MachineStats => "machine.stats",
             Self::Model => "acp.model",
             Self::MachineLinks => "machine.links",
+            Self::Exec => "exec",
+            Self::FileRead => "file.read",
+            Self::FileWrite => "file.write",
         }
     }
 
@@ -385,6 +402,15 @@ impl Method {
             }
             Self::MachineLinks => {
                 "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since."
+            }
+            Self::Exec => {
+                "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link."
+            }
+            Self::FileRead => {
+                "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there."
+            }
+            Self::FileWrite => {
+                "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there."
             }
         }
     }
@@ -795,6 +821,52 @@ pub struct ModelParams {
     pub name: String,
     /// The model id, one of the session's `models`.
     pub model: String,
+}
+
+/// The most bytes one `exec` or `file.read` reply carries: 8 MiB.
+pub const REPLY_LIMIT: u64 = 8 << 20;
+
+/// `exec` params.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExecParams {
+    /// The program and its arguments.
+    pub cmd: Vec<String>,
+    /// Its working directory; default the server's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    /// End it after this many seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<f64>,
+    /// Bytes fed to its stdin, then closed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stdin: Vec<u8>,
+    /// Run it on this machine, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// `exec` result.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExecResult {
+    /// The exit code, or 128 + the signal that ended it.
+    pub code: i32,
+    /// What it wrote to stdout.
+    pub stdout: Vec<u8>,
+    /// What it wrote to stderr.
+    pub stderr: Vec<u8>,
+}
+
+/// `file.read` and `file.write` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FileParams {
+    /// The file.
+    pub path: PathBuf,
+    /// `file.write`: its new bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<u8>>,
+    /// The machine it is on, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
 }
 
 /// `machine.stats` params.
