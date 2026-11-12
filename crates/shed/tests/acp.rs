@@ -825,8 +825,7 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
 fn meta_reaches_the_agent_unchanged_on_new_on_a_wake_and_on_resume() {
     let dir = temp_dir("acp-meta");
     let history = dir.join("history.jsonl");
-    let meta = json!({"claudeCode": {"options": {"settingSources": ["project", "local"],
-                                                 "strictMcpConfig": true}}});
+    let meta = json!({"vendorX": {"opts": {"layers": ["a", "b"], "strict": true}}, "n": 1});
     let file = dir.join("meta.json");
     std::fs::write(&file, meta.to_string()).expect("write the meta");
     let _server = sleepy_server(&dir);
