@@ -348,7 +348,7 @@ impl Terminal {
         )))
     }
 
-    /// Ends the whole process tree: SIGTERM, then SIGKILL after `grace`; returns the program's exit status.
+    /// Ends the whole process tree: SIGTERM, then SIGKILL after `grace`; returns the program's exit status and drops its `working` and `blocked` reports.
     ///
     /// # Errors
     /// [`Error::Io`] when the process table or the exit status cannot be read.
@@ -357,7 +357,9 @@ impl Terminal {
         proctree::kill_tree(&proctree::system(), self.pid, grace, || {
             child.try_wait().ok();
         })?;
-        Ok(child.wait()?)
+        let status = child.wait()?;
+        bump(&self.watch, |s| s.end(true));
+        Ok(status)
     }
 }
 

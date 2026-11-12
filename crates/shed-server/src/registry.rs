@@ -282,6 +282,10 @@ impl Registry {
         (entry.info.state, entry.info.exit) = (State::Exited, code);
         entry.info.pid = None;
         entry.resources = None;
+        if let Some(term) = &entry.term {
+            entry.info.reported = term.report().map(to_reported);
+            entry.info.records = term.records().into_iter().map(to_reported).collect();
+        }
         let kind = if entry.killing {
             EventKind::Killed
         } else {
