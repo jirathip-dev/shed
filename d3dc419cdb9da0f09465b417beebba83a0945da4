@@ -1,0 +1,13 @@
+Decided: `--meta` takes one JSON object, sent unchanged as `_meta` on session/new and session/load
+Because: "sends them as the session's `_meta` on `session/new` (and on a load or resume), unchanged"
+Rejected: a repeated `--meta key=json` flag — the value already is the `_meta` object; merging keys adds code and a second shape
+Decided: the server passes it to the bridge in $SHED_ACP_META, and runner::piped removes it from the agent's environment
+Because: "as long as it never goes through the agent's command line or a label"
+Decided: the bridge keeps it in its Session, so a wake from hibernation (session/load) sends it again
+Because: "They are kept with the terminal, so a restarted or resumed session gets the same ones."
+Decided: a caller's own `--resume` sends `--meta` again, the same as `--mcp`
+Because: docs/acp.md:93
+Check: the fake agent fails any session/new or session/load whose keys are not exactly today's (plus `_meta` only when --meta is given)
+Check: the new acp test fails with the bridge's `.meta(...)` set to None (exit 101)
+Check: the PR body's real claude-agent-acp run: 56 vs 109 commands, no global CLAUDE.md and no claude.ai connector with the options
+Owner: an agent started by shed can be told to load only its project's settings and the given MCP servers, keeping the normal login.
