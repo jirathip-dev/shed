@@ -333,7 +333,7 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle."
             }
             Self::Ls => {
                 "List terminals, by name; `labels` keeps those that carry every given label."
@@ -473,6 +473,12 @@ pub struct RunParams {
     /// Start it on this machine, over its held link (`machine.links`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// Rows; default the server's `$SHED_SIZE`, else 50.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u16>,
+    /// Columns; default the server's `$SHED_SIZE`, else 200.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u16>,
 }
 
 /// `ls` params.

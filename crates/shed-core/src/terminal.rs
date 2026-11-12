@@ -354,20 +354,20 @@ fn read_loop(
             Ok(0) => return,
             Ok(n) => {
                 let chunk = buf.get(..n).unwrap_or_default();
-                let replies = {
+                let (relayed, replies) = {
                     let mut screen = lock(screen);
-                    screen.feed(chunk);
+                    let relayed = screen.relay(chunk);
                     let report = screen.take_report();
                     bump(watch, |s| {
                         s.last_output = crate::clock::now();
                         s.report = report.or_else(|| s.report.take());
                     });
-                    screen.take_replies()
+                    (relayed, screen.take_replies())
                 };
                 if let Some(subs) = lock(outputs).as_mut() {
-                    subs.retain(|tx| tx.send(chunk.to_vec()).is_ok());
+                    subs.retain(|tx| tx.send(relayed.clone()).is_ok());
                 }
-                if log.as_mut().is_some_and(|l| l.append(chunk).is_err()) {
+                if log.as_mut().is_some_and(|l| l.append(&relayed).is_err()) {
                     log = None;
                 }
                 if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {

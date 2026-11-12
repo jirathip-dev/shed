@@ -1,11 +1,12 @@
 //! The screen model: a VT parser feeding a visible grid and a bounded scrollback ring.
 //!
 //! Each cell keeps its character and pen (colours, bold, italic, underline, inverse) for
-//! [`Screen::snapshot`]; the text reads drop the pen. Each character takes one cell; wide and combining
-//! characters are not measured yet.
+//! [`Screen::snapshot`]; the text reads drop the pen. A wide character takes two cells and a combining
+//! one joins the cell before it, as `unicode-width` measures them.
 
 use std::collections::VecDeque;
 
+use unicode_width::UnicodeWidthChar as _;
 use vte::{Params, Parser, Perform};
 
 /// A terminal size in character cells.
@@ -124,6 +125,22 @@ impl Screen {
         self.parser.advance(&mut self.grid, bytes);
     }
 
+    /// Feeds program output like [`feed`](Self::feed) and returns it without the queries the screen
+    /// answered, so an attached client's terminal does not answer them a second time.
+    pub fn relay(&mut self, mut bytes: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(bytes.len());
+        while !bytes.is_empty() {
+            self.grid.answered = false;
+            let n = self.parser.advance_until_terminated(&mut self.grid, bytes);
+            let (done, rest) = bytes.split_at_checked(n).unwrap_or((bytes, &[]));
+            let query = done.iter().rposition(|&b| b == 0x1b);
+            let keep = query.filter(|_| self.grid.answered).unwrap_or(done.len());
+            out.extend_from_slice(done.get(..keep).unwrap_or(done));
+            bytes = rest;
+        }
+        out
+    }
+
     /// Takes the bytes the screen owes the program (answers to cursor and device queries).
     pub fn take_replies(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.grid.replies)
@@ -189,29 +206,38 @@ fn join(mut lines: Vec<String>) -> String {
     lines.join("\n")
 }
 
+fn chars(glyph: &Glyph) -> impl Iterator<Item = char> + '_ {
+    glyph.iter().copied().filter(|&c| c != '\0')
+}
+
 fn line_text(row: &[Cell]) -> String {
-    let s: String = row.iter().map(|c| c.0).collect();
+    let s: String = row.iter().flat_map(|c| chars(&c.0)).collect();
     s.trim_end().to_owned()
 }
 
 fn runs(row: &[Cell]) -> Vec<Run> {
     let end = row.iter().rposition(|c| *c != space()).map_or(0, |i| i + 1);
     let mut runs: Vec<Run> = Vec::new();
-    for &(c, pen) in row.iter().take(end) {
+    for (glyph, pen) in row.iter().take(end) {
         match runs.last_mut() {
-            Some(run) if run.pen == pen => run.text.push(c),
+            Some(run) if run.pen == *pen => run.text.extend(chars(glyph)),
             _ => runs.push(Run {
-                text: c.to_string(),
-                pen,
+                text: chars(glyph).collect(),
+                pen: *pen,
             }),
         }
     }
     runs
 }
 
-type Cell = (char, Pen);
+type Glyph = [char; 4];
+const TAIL: Glyph = ['\0'; 4];
+type Cell = (Glyph, Pen);
+fn glyph(c: char) -> Glyph {
+    [c, '\0', '\0', '\0']
+}
 fn space() -> Cell {
-    (' ', Pen::default())
+    (glyph(' '), Pen::default())
 }
 type Cells = Vec<Vec<Cell>>;
 
@@ -230,6 +256,7 @@ struct Grid {
     limit: (usize, usize),
     primary: Option<(Cells, (usize, usize))>,
     replies: Vec<u8>,
+    answered: bool,
     report: Option<Report>,
     pen: Pen,
 }
@@ -252,6 +279,7 @@ impl Grid {
             limit,
             primary: None,
             replies: Vec::new(),
+            answered: false,
             report: None,
             pen: Pen::default(),
         }
@@ -434,6 +462,45 @@ impl Grid {
         self.goto(self.row, self.col);
     }
 
+    fn reply(&mut self, bytes: &[u8]) {
+        self.replies.extend_from_slice(bytes);
+        self.answered = true;
+    }
+
+    fn put(&mut self, c: char, span: usize) {
+        let (col, pen) = (self.col, self.pen);
+        let Some(line) = self.cells.get_mut(self.row) else {
+            return;
+        };
+        if line.get(col).is_some_and(|c| c.0 == TAIL)
+            && let Some(head) = line.get_mut(col.saturating_sub(1))
+        {
+            *head = space();
+        }
+        if let Some(tail) = line.get_mut(col + span).filter(|c| c.0 == TAIL) {
+            *tail = space();
+        }
+        for (i, cell) in line.iter_mut().skip(col).take(span).enumerate() {
+            *cell = (if i == 0 { glyph(c) } else { TAIL }, pen);
+        }
+    }
+
+    fn combine(&mut self, c: char) {
+        let Some(mut col) = self.col.checked_sub(usize::from(!self.wrap_next)) else {
+            return;
+        };
+        let Some(line) = self.cells.get_mut(self.row) else {
+            return;
+        };
+        if line.get(col).is_some_and(|c| c.0 == TAIL) {
+            col = col.saturating_sub(1);
+        }
+        let cell = line.get_mut(col);
+        if let Some(slot) = cell.and_then(|c| c.0.iter_mut().find(|s| **s == '\0')) {
+            *slot = c;
+        }
+    }
+
     fn sgr(&mut self, params: &Params) {
         let mut it = params.iter().peekable();
         while let Some(p) = it.next() {
@@ -500,23 +567,27 @@ fn param(params: &Params, i: usize, default: u16) -> usize {
 
 impl Perform for Grid {
     fn print(&mut self, c: char) {
-        if self.wrap_next {
+        let width = c.width().unwrap_or(1);
+        if width == 0 {
+            return self.combine(c);
+        }
+        if self.wrap_next || (width > 1 && self.col > 0 && self.col + width > self.cols) {
             self.col = 0;
             self.linefeed();
             self.wrap_next = false;
         }
-        if let Some(cell) = self
-            .cells
-            .get_mut(self.row)
-            .and_then(|r| r.get_mut(self.col))
-        {
-            *cell = (c, self.pen);
-        }
-        if self.col + 1 == self.cols {
+        let span = width.min(self.cols - self.col);
+        self.put(c, span);
+        if self.col + span == self.cols {
+            self.col = self.cols - 1;
             self.wrap_next = true;
         } else {
-            self.col += 1;
+            self.col += span;
         }
+    }
+
+    fn terminated(&self) -> bool {
+        self.answered
     }
 
     fn execute(&mut self, byte: u8) {
@@ -591,11 +662,9 @@ impl Perform for Grid {
             'm' => self.sgr(params),
             's' => self.saved = (row, col),
             'u' => self.goto(self.saved.0, self.saved.1),
-            'n' if n == 6 => self
-                .replies
-                .extend(format!("\x1b[{};{}R", row + 1, col + 1).bytes()),
-            'n' if n == 5 => self.replies.extend(b"\x1b[0n"),
-            'c' => self.replies.extend(b"\x1b[?1;2c"),
+            'n' if n == 6 => self.reply(format!("\x1b[{};{}R", row + 1, col + 1).as_bytes()),
+            'n' if n == 5 => self.reply(b"\x1b[0n"),
+            'c' => self.reply(b"\x1b[?1;2c"),
             _ => {}
         }
     }
