@@ -803,5 +803,9 @@ mod tests {
         assert_eq!(exists(), [true, true, false, false, false]);
         registry.rm("kept.1").unwrap().1();
         assert_eq!(exists(), [false; 5]);
+        tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap()
+            .block_on(registry.saver().flushed());
     }
 }
