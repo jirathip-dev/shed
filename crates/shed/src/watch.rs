@@ -25,7 +25,7 @@ const ENTER: &str = "\x1b[?1049h\x1b[?25l\x1b[?7l\x1b[2J";
 const LEAVE: &str = "\x1b[?7h\x1b[?25h\x1b[?1049l";
 
 pub(crate) enum Msg {
-    Event(Event),
+    Event(Box<Event>),
     Screen(u64, ScreenUpdate),
     Closed,
 }
@@ -116,7 +116,7 @@ pub(crate) fn run(
         let (reader, _writer) = events.split();
         for line in reader.lines().map_while(Result::ok) {
             if let Ok(event) = serde_json::from_str(&line)
-                && to.send(Msg::Event(event)).is_err()
+                && to.send(Msg::Event(Box::new(event))).is_err()
             {
                 return;
             }
@@ -143,7 +143,7 @@ pub(crate) fn run(
         let now = tty.now();
         for msg in msgs {
             match msg {
-                Msg::Event(event) => w.event(event, now),
+                Msg::Event(event) => w.event(*event, now),
                 Msg::Screen(k, update) if k == n => w.update(update),
                 Msg::Screen(..) => {}
                 Msg::Closed => bail!("the server closed the event stream"),

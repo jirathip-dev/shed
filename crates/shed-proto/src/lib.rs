@@ -349,7 +349,7 @@ impl Method {
             Self::Kill => {
                 "End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exited terminal."
             }
-            Self::Rm => "Remove an exited terminal; returns it as it was.",
+            Self::Rm => "Remove an exited terminal, its ACP session closed; returns it as it was.",
             Self::Resize => "Resize the terminal; the program gets SIGWINCH.",
             Self::Attach => {
                 "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection."
@@ -728,6 +728,8 @@ pub enum EventKind {
     },
     /// ACP: the session is ready, or its model or slash commands changed.
     Session(AcpSession),
+    /// ACP: the agent's context window use and cost changed (`usage_update`).
+    Usage(AcpUsage),
 }
 
 impl EventKind {
@@ -773,6 +775,21 @@ pub struct AcpSession {
     /// The agent's slash commands (a prompt `/name …` runs one): name, description, input hint.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub commands: Vec<[String; 3]>,
+    /// The agent's last `usage_update`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<AcpUsage>,
+}
+
+/// An ACP session's context window use and cost, as the agent last reported it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AcpUsage {
+    /// Tokens in context.
+    pub used: u64,
+    /// The context window, in tokens.
+    pub size: u64,
+    /// The session's total cost so far (`amount`, `currency`), when the agent reports it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Value>,
 }
 
 /// `emit` params.

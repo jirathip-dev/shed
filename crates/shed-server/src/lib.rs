@@ -487,11 +487,11 @@ async fn dispatch(
         let status = status.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
         return json(&lock(registry).killed(&name, &term, status)?);
     }
-    if method == Method::Wait {
-        return json(&wait(registry, &params(request)?).await?);
-    }
-    if method == Method::MachineStats {
-        return machine_stats(registry, params(request)?).await;
+    match method {
+        Method::Wait => return json(&wait(registry, &params(request)?).await?),
+        Method::Rm => return rm(registry, params(request)?).await,
+        Method::MachineStats => return machine_stats(registry, params(request)?).await,
+        _ => {}
     }
     let mut reg = lock(registry);
     reg.refresh()?;
@@ -507,7 +507,6 @@ async fn dispatch(
         Method::Read => json(&reg.read(&params(request)?)?),
         Method::Send | Method::Input => reg.send(&params(request)?).map(|()| empty()),
         Method::Keys | Method::TerminalKeys => reg.keys(&params(request)?).map(|()| empty()),
-        Method::Rm => json(&reg.rm(&params::<Target>(request)?.name)?),
         Method::Resize => reg.resize(&params(request)?).map(|()| empty()),
         Method::Attach => {
             let (info, attached) = reg.attach(&params::<Target>(request)?.name)?;
@@ -547,10 +546,22 @@ async fn dispatch(
         Method::Hello
         | Method::Kill
         | Method::Wait
+        | Method::Rm
         | Method::MachineStats
         | Method::Ls
         | Method::MachineLinks => Err(RpcError::new(ErrorCode::Internal, "handled above")),
     }
+}
+
+async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
+    let info = {
+        let mut reg = lock(registry);
+        reg.refresh()?;
+        reg.rm(&name)?
+    };
+    let closing = info.clone();
+    blocking(move || crate::acp::close(&closing)).await?.ok();
+    json(&info)
 }
 
 async fn machine_stats(registry: &Shared, p: StatsParams) -> Result<Value, RpcError> {

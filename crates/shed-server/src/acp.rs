@@ -21,13 +21,14 @@ use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
-    AvailableCommandInput, CancelNotification, ContentBlock, ContentChunk, Implementation,
-    InitializeRequest, LoadSessionRequest, McpServer, McpServerHttp, McpServerSse,
-    NewSessionRequest, PromptRequest, PromptResponse, RequestPermissionOutcome,
-    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
-    SessionConfigKind as Kind, SessionConfigOption, SessionConfigOptionCategory as Category,
-    SessionConfigOptionValue, SessionConfigSelectOption, SessionConfigSelectOptions as Choices,
-    SessionId, SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, TextContent,
+    AgentCapabilities, AvailableCommandInput, CancelNotification, CloseSessionRequest,
+    ContentBlock, ContentChunk, Implementation, InitializeRequest, ListSessionsRequest,
+    LoadSessionRequest, McpServer, McpServerHttp, McpServerSse, NewSessionRequest, PromptRequest,
+    PromptResponse, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigKind as Kind, SessionConfigOption,
+    SessionConfigOptionCategory as Category, SessionConfigOptionValue, SessionConfigSelectOption,
+    SessionConfigSelectOptions as Choices, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::v1::{ConnectionTo, Responder};
 use agent_client_protocol::{Agent, ErrorCode, JsonRpcMessage as _, Lines, UntypedMessage};
@@ -35,11 +36,12 @@ use futures::{sink, stream};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shed_proto::{
-    AcpSession, ApprovalOption, EmitParams, EventKind, Method, Reported, StateParams,
+    AcpSession, ApprovalOption, EmitParams, EventKind, Method, Reported, StateParams, TerminalInfo,
 };
 use tokio::io::{
     AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader,
 };
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::Instant;
 
@@ -368,6 +370,12 @@ fn acp_error(why: impl Into<String>) -> agent_client_protocol::Error {
     agent_client_protocol::Error::new(ErrorCode::INTERNAL_ERROR, why)
 }
 
+async fn handshake(cx: &ConnectionTo<Agent>) -> AcpResult<AgentCapabilities> {
+    let init = InitializeRequest::new(ProtocolVersion::V1)
+        .client_info(Implementation::new("shed", shed_proto::VERSION));
+    Ok(cx.send_request(init).block_task().await?.agent_capabilities)
+}
+
 struct Session {
     cx: ConnectionTo<Agent>,
     back: UnboundedSender<FromAgent>,
@@ -591,6 +599,14 @@ impl Session {
                 self.emit(EventKind::Mode { mode });
             }
             SessionUpdate::ConfigOptionUpdate(c) => return self.models(&c.config_options),
+            SessionUpdate::UsageUpdate(u) => {
+                self.shown.usage = serde_json::to_value(u)
+                    .and_then(serde_json::from_value)
+                    .ok();
+                if let Some(usage) = self.shown.usage.clone() {
+                    self.emit(EventKind::Usage(usage));
+                }
+            }
             SessionUpdate::AvailableCommandsUpdate(u) => {
                 let commands: Vec<_> = (u.available_commands.into_iter())
                     .map(|c| match c.input {
@@ -706,10 +722,8 @@ async fn drive(
             format!("agent refused: {e}")
         })
     };
-    let init = InitializeRequest::new(ProtocolVersion::V1)
-        .client_info(Implementation::new("shed", shed_proto::VERSION));
-    let init = cx.send_request(init).block_task().await.map_err(refused)?;
-    let can = &init.agent_capabilities.mcp_capabilities;
+    let agent = handshake(&cx).await.map_err(refused)?;
+    let can = &agent.mcp_capabilities;
     for server in &s.mcp {
         let (kind, name) = match server {
             McpServer::Http(h) if !can.http => ("http", &h.name),
@@ -721,7 +735,7 @@ async fn drive(
     }
     let resumed = resume.is_some();
     let options = match resume {
-        Some(_) if !init.agent_capabilities.load_session => {
+        Some(_) if !agent.load_session => {
             let why = "the agent cannot resume a session (no loadSession)";
             return Err(acp_error(why));
         }
@@ -753,7 +767,7 @@ async fn drive(
         }
         s.input(input)?;
     }
-    let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
+    let sleep_after = hibernate_after().filter(|_| agent.load_session);
     let mut typing = true;
     loop {
         tokio::select! {
@@ -942,7 +956,7 @@ fn open_transcript(state: &Path, name: &str) -> io::Result<File> {
         .open(&path)
 }
 
-async fn connect(
+async fn connect<T>(
     stdin: impl AsyncWrite + Send + Unpin + 'static,
     stdout: impl AsyncRead + Send + Unpin + 'static,
     stderr: impl AsyncRead + Send + Unpin + 'static,
@@ -951,8 +965,8 @@ async fn connect(
         UnboundedSender<FromAgent>,
         UnboundedReceiver<FromAgent>,
         Arc<AtomicBool>,
-    ) -> AcpResult<Option<Session>>,
-) -> Result<Option<Session>, Error> {
+    ) -> AcpResult<T>,
+) -> Result<T, Error> {
     let stirred = Arc::new(AtomicBool::new(false));
     let lines = (BufReader::new(stdout).lines(), stirred.clone());
     let incoming = stream::unfold(lines, async |(mut lines, stirred)| {
@@ -1002,6 +1016,95 @@ async fn connect(
         )
         .await
         .map_err(|e| Error::Acp(e.to_string()))
+}
+
+fn start(
+    cmd: &[String],
+    cwd: &Path,
+) -> Result<(Child, ChildStdin, ChildStdout, ChildStderr), Error> {
+    let (program, args) = cmd
+        .split_first()
+        .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
+    let mut child = shed_core::runner::piped(program, args, cwd, "SHED_ACP_MCP")
+        .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
+    let (Some(stdin), Some(stdout), Some(stderr)) =
+        (child.stdin.take(), child.stdout.take(), child.stderr.take())
+    else {
+        return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
+    };
+    Ok((child, stdin, stdout, stderr))
+}
+
+fn stop(mut child: Child) -> Result<(), Error> {
+    if let Some(pid) = child.id().and_then(|p| i32::try_from(p).ok()) {
+        let table = shed_core::proctree::system();
+        let reap = || drop(child.try_wait());
+        shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap)?;
+    }
+    Ok(())
+}
+
+fn oneshot<T>(
+    cmd: &[String],
+    cwd: &Path,
+    act: impl AsyncFnOnce(ConnectionTo<Agent>, AgentCapabilities) -> AcpResult<T>,
+) -> Result<T, Error> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    runtime.block_on(async {
+        let (child, stdin, stdout, stderr) = start(cmd, cwd)?;
+        let talk = connect(stdin, stdout, stderr, async |cx, _, _, _| {
+            let can = handshake(&cx).await?;
+            act(cx, can).await
+        });
+        let done = tokio::time::timeout(Duration::from_secs(30), talk).await;
+        stop(child)?;
+        done.map_err(|_| Error::Acp("the agent did not answer within 30 s".to_owned()))?
+    })
+}
+
+/// The sessions agent `cmd` (run in `cwd`) lists (`session/list`, every page), as ACP's objects.
+///
+/// # Errors
+/// [`Error::Acp`] when the agent cannot start or list sessions.
+pub fn sessions(cmd: &[String], cwd: &Path) -> Result<Vec<Value>, Error> {
+    let all = oneshot(cmd, cwd, async |cx, can| {
+        if can.session_capabilities.list.is_none() {
+            let why = "the agent cannot list sessions (no sessionCapabilities.list)";
+            return Err(acp_error(why));
+        }
+        let (mut all, mut cursor) = (Vec::new(), None);
+        loop {
+            let page = cx.send_request(ListSessionsRequest::new().cursor(cursor));
+            let page = page.block_task().await?;
+            all.extend(page.sessions);
+            cursor = page.next_cursor;
+            if cursor.is_none() {
+                return Ok(all);
+            }
+        }
+    })?;
+    Ok(all
+        .iter()
+        .map(serde_json::to_value)
+        .collect::<Result<_, _>>()?)
+}
+
+pub(crate) fn close(info: &TerminalInfo) -> Result<(), Error> {
+    let id = info.session.as_ref().map(|s| s.id.clone());
+    let Some(id) = id.filter(|id| !id.is_empty() && info.acp.is_some()) else {
+        return Ok(());
+    };
+    let cmd = info.cmd.iter().skip_while(|a| *a != "--").skip(1);
+    let cmd: Vec<String> = cmd.cloned().collect();
+    oneshot(&cmd, &info.cwd, async |cx, can| {
+        if can.session_capabilities.close.is_some() {
+            let close = CloseSessionRequest::new(id);
+            cx.send_request(close).block_task().await?;
+        }
+        Ok(())
+    })
 }
 
 fn run(
@@ -1064,19 +1167,10 @@ fn run(
     let writer = runtime.spawn(writer.run(outs));
     runtime.spawn(read_input(typed));
     let result = runtime.block_on(async move {
-        let (program, args) = cmd
-            .split_first()
-            .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
         let (mut kept, mut wake) = (None, None);
         loop {
-            let mut child = shed_core::runner::piped(program, args, cwd, "SHED_ACP_MCP")
-                .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
+            let (mut child, stdin, stdout, stderr) = start(cmd, cwd)?;
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
-            let (Some(stdin), Some(stdout), Some(stderr)) =
-                (child.stdin.take(), child.stdout.take(), child.stderr.take())
-            else {
-                return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
-            };
             let slept = connect(
                 stdin,
                 stdout,
@@ -1090,11 +1184,7 @@ fn run(
             let Some(mut s) = slept else {
                 return Ok(child.wait().await?.code().unwrap_or(1));
             };
-            if let Some(pid) = child.id().and_then(|p| i32::try_from(p).ok()) {
-                let table = shed_core::proctree::system();
-                let reap = || drop(child.try_wait());
-                shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap)?;
-            }
+            stop(child)?;
             s.state("hibernated", None);
             let Some(input) = inputs.recv().await else {
                 return Ok(0);

@@ -608,6 +608,10 @@ impl Registry {
         let info = &mut entry.ok_or_else(|| not_found(&p.name))?.info;
         let session = match &p.kind {
             EventKind::Session(s) => info.session.replace(s.clone()).is_none_or(|old| old != *s),
+            EventKind::Usage(u) => {
+                info.session.get_or_insert_default().usage = Some(u.clone());
+                false
+            }
             _ => false,
         };
         let labels = info.labels.clone();

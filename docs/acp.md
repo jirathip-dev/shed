@@ -2,7 +2,7 @@
 
 shed runs any [Agent Client Protocol](https://agentclientprotocol.com) agent (Claude Code, Codex, Pi, Gemini, …)
 as a structured terminal: prompts, tool calls, approvals and replies come back as events and states instead of
-screen text. ACP v1 only; v2 becomes an opt-in once it is stable.
+screen text. ACP v1 only; v2 becomes an opt-in once it is stable (see [ACP v2](#acp-v2)).
 
 ## Install an agent
 
@@ -10,6 +10,7 @@ screen text. ACP v1 only; v2 becomes an opt-in once it is stable.
 shed agents add claude-acp      # or codex-acp, pi-acp, gemini, …
 shed agents                     # id, pinned version, distribution, command
 shed agents rm claude-acp
+shed agents sessions claude-acp # the agent's sessions: id, last activity, folder, title
 ```
 
 `add` reads the ACP registry (`--registry <url|file>`, default
@@ -31,7 +32,7 @@ shed read t1 --events             # the same events drawn: › prompt, ✓ kind 
 shed read t1 --events --json      # each event with its seq; page with --before <seq> --lines <n>
 shed cancel t1                    # or: shed keys t1 esc
 shed model t1 opus                # one of `shed get t1`'s session.models
-shed run --acp claude-acp --resume <session id>   # load a past session (`shed get`'s session.id)
+shed run --acp claude-acp --resume <session id>   # load a past session (`agents sessions`, `shed get`'s session.id)
 shed run --acp claude-acp --mcp servers.json      # with MCP servers (below)
 shed send t1 "/review src/"                       # a slash command is an ordinary prompt
 ```
@@ -50,12 +51,15 @@ usage, tool-call progress), any request, and each line it writes to stderr; a pe
 for minutes on a healthy turn; an expired login is caught at once by its reply, so the watchdog is only a
 backstop for an agent that really hangs. `shed events`
 streams `turn`, `text` (reply chunks), `tool_call` (each status change), `plan`, `mode`, `approval_request`,
-`approved`, `reply` (the whole reply and its `stop_reason`) and `session` (its id, the current `model` and the
-`models`, also kept as the terminal's `session`) next to the usual `started`, `state` and `exited`; see
-[protocol.md](protocol.md).
+`approved`, `reply` (the whole reply and its `stop_reason`), `session` (its id, the current `model` and the
+`models`, also kept as the terminal's `session`) and `usage` (the agent's `usage_update`: tokens `used` of the
+context window's `size` and the session's `cost`, also kept as `session.usage`; `shed top` shows it as
+`TOKENS`, e.g. `53k/200k`) next to the usual `started`, `state` and `exited`; see [protocol.md](protocol.md).
 
 `--resume <id>` (the `run` method's `resume`) needs an agent that advertises `loadSession`, else the terminal
-ends as `error`. The agent replays the session's history first: those events carry `"replay": true` and rebuild
+ends as `error`. `shed agents sessions <id>` lists the agent's sessions (`session/list`, every page; run in the
+current folder) when it advertises `sessionCapabilities.list`, and refuses otherwise; `--json` gives ACP's
+session objects. The agent replays the session's history first: those events carry `"replay": true` and rebuild
 the transcript, so `read` shows the whole conversation. The session id survives a server restart in the lost
 terminal's `shed get`. `shed model` (the `acp.model` method) sets the agent's `model` config option
 (`session/set_config_option`; the SDK shed uses has no `session/set_model`).
@@ -74,6 +78,11 @@ never hibernates. Measured on 2026-11-07: ten idle fake agents took 197,248 KiB 
 hibernated (wake 76 ms); one claude-agent-acp 0.100.0 took 502,700 KiB in 7 processes awake and 8,064 KiB in 1
 hibernated, and woke to its first update in 1,946 ms (`crates/shed/tests/acp_bench.rs`, `hibernate` and
 `hibernate_live`).
+
+`shed rm` of an exited ACP terminal closes its session (`session/close`) when the agent advertises
+`sessionCapabilities.close`: the agent's process is gone by then, so shed starts the agent once in the
+terminal's folder, sends `initialize` and the close, and stops it (at most 30 s; a failure does not stop the
+`rm`). Without the capability only the handshake runs. Hibernation never closes a session; it loads it again.
 
 ### MCP servers and slash commands
 
@@ -119,6 +128,14 @@ capabilities) and `session/new` (the terminal's cwd and MCP servers) or `session
 So kill, process-tree cleanup, resources and `wait` work as for any terminal. Agent text is shown with its
 control characters replaced, so it cannot drive the reader's terminal. See
 [decisions/0003-acp-bridge.md](decisions/0003-acp-bridge.md).
+
+## ACP v2
+
+The v2 draft (2026-07-20) drops JSON-RPC batches, the client file system and terminal methods, and session
+modes. shed sends no batches and offers no file system or terminal methods (it answers them "method not
+found"), so only modes touch it: the `mode` event (`current_mode_update`) would no longer come. shed asks for
+v1 in `initialize`; an agent that answers with another version is refused and the terminal ends as `error`
+with the note `acp: agent refused: … required ACP protocol version 1 but peer negotiated 2 …`.
 
 ## Accounts
 
