@@ -206,13 +206,9 @@ async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     let Ok(sample) = blocking(move || stats::system(&dir)).await else {
         return Duration::from_secs(1);
     };
-    let (save, wait) = {
-        let mut reg = lock(registry);
-        reg.refresh().ok();
-        let save = reg.record(sample);
-        (save, reg.stats.until_due(shed_core::clock::unix_now()))
-    };
+    let save = lock(registry).record(sample);
     blocking(save).await.ok();
+    let wait = lock(registry).stats.until_due(shed_core::clock::unix_now());
     Duration::from_secs(wait.max(1))
 }
 
@@ -275,7 +271,6 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         _ => {}
     }
     let listener = tokio::net::UnixListener::bind(&paths.socket)?;
-    let saver = lock(&registry).saver();
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
     writeln!(
         io::stdout(),
@@ -289,7 +284,6 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
                 tokio::spawn(connection(
                     Arc::clone(&registry),
                     Arc::clone(&links),
-                    saver.clone(),
                     stream,
                 ));
             }
@@ -361,12 +355,8 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
     (named.into_iter().flatten()).find(|n| input && session.readonly.contains(*n))
 }
 
-async fn connection(
-    registry: Shared,
-    held: Arc<links::Links>,
-    saver: registry::Saver,
-    stream: tokio::net::UnixStream,
-) {
+async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
+    let saver = lock(&registry).saver.clone();
     let mut session = Session {
         links: held,
         ..Session::default()
@@ -561,21 +551,13 @@ async fn kill(registry: &Shared, Target { name }: Target) -> Result<Value, RpcEr
 }
 
 async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
-    let (info, remove) = {
-        let mut reg = lock(registry);
-        reg.refresh()?;
-        reg.rm(&name)?
-    };
+    let (info, remove) = lock(registry).refresh()?.rm(&name)?;
     blocking(remove).await?;
     json(&info)
 }
 
 async fn read(registry: &Shared, p: proto::ReadParams) -> Result<Value, RpcError> {
-    let read = {
-        let mut reg = lock(registry);
-        reg.refresh()?;
-        reg.read(p)?
-    };
+    let read = lock(registry).refresh()?.read(p)?;
     json(&blocking(read).await??)
 }
 

@@ -2,7 +2,7 @@
 
 use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
-use std::io::{Read as _, Write as _};
+use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
 use std::path::Path;
 use std::sync::mpsc::{RecvTimeoutError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
@@ -59,8 +59,7 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 
 /// A program running on a PTY, in its own session and process group.
 ///
-/// Its output feeds a [`Screen`] from a reader thread, its input goes through a writer thread and a
-/// reaper thread records its exit. Dropping the terminal SIGKILLs its process group.
+/// Its output feeds a [`Screen`] from a reader thread. Dropping the terminal SIGKILLs its process group.
 pub struct Terminal {
     pty: Weak<pty_process::blocking::Pty>,
     input: Sender<Input>,
@@ -192,8 +191,7 @@ impl Terminal {
     }
 
     /// The state the program last reported (`shed state`, the OSC 7501 escape or another agent's). Without one, `idle`
-    /// once the program has been silent for the [`set_idle_after`](Self::set_idle_after) time. `stuck` over
-    /// both while a [`write`](Self::write) has timed out and the program has not taken it yet.
+    /// once silent for the [`set_idle_after`](Self::set_idle_after) time; `stuck` while a [`write`](Self::write) waits.
     #[must_use]
     pub fn report(&self) -> Option<Report> {
         let status = self.watch.borrow();
@@ -274,21 +272,16 @@ impl Terminal {
         rx
     }
 
-    /// Writes raw bytes to the program's input through the terminal's writer thread, waiting at most a
-    /// second for the program to take them.
+    /// Writes raw bytes to the program's input, waiting at most a second for the program to take them.
     ///
     /// # Errors
-    /// [`Error::Stuck`] when the program has not taken them in time (they stay queued, and
-    /// [`report`](Self::report) says `stuck` until it does); [`Error::Io`] when the PTY is closed.
+    /// [`Error::Stuck`] when the program has not taken them in time (they stay queued); [`Error::Io`] when closed.
     pub fn write(&self, bytes: &[u8]) -> Result<(), Error> {
         let (done, wrote) = sync_channel(1);
-        let closed = || std::io::Error::from(std::io::ErrorKind::BrokenPipe);
-        self.input
-            .send((bytes.to_vec(), done))
-            .map_err(|_| closed())?;
+        self.input.send((bytes.to_vec(), done)).ok();
         match wrote.recv_timeout(WRITE_TIMEOUT) {
             Ok(wrote) => Ok(wrote?),
-            Err(RecvTimeoutError::Disconnected) => Err(closed().into()),
+            Err(RecvTimeoutError::Disconnected) => Err(Error::Io(BrokenPipe.into())),
             Err(RecvTimeoutError::Timeout) => {
                 let mut late = None;
                 bump(&self.watch, |s| {
@@ -382,10 +375,9 @@ fn write_loop(
     watch: &watch::Sender<Status>,
 ) {
     for (bytes, done) in inputs {
-        let wrote = pty.upgrade().map_or_else(
-            || Err(std::io::ErrorKind::BrokenPipe.into()),
-            |pty| (&*pty).write_all(&bytes),
-        );
+        let wrote = pty
+            .upgrade()
+            .map_or_else(|| Err(BrokenPipe.into()), |pty| (&*pty).write_all(&bytes));
         done.send(wrote).ok();
         if watch.borrow().stuck {
             bump(watch, |s| s.stuck = false);

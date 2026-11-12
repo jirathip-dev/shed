@@ -132,7 +132,7 @@ pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
     path: PathBuf,
     socket: PathBuf,
-    saver: Saver,
+    pub(crate) saver: Saver,
     pub(crate) events: Events,
     pub(crate) stats: Stats,
 }
@@ -290,16 +290,12 @@ impl Registry {
         self.saver.save(self.state_file());
     }
 
-    pub(crate) fn saver(&self) -> Saver {
-        self.saver.clone()
-    }
-
     fn saved<T>(&self, value: T) -> T {
         self.save();
         value
     }
 
-    pub(crate) fn refresh(&mut self) -> Result<(), RpcError> {
+    pub(crate) fn refresh(&mut self) -> Result<&mut Self, RpcError> {
         let mut changed = false;
         for entry in self.entries.values_mut() {
             let Some(term) = &entry.term else { continue };
@@ -326,7 +322,7 @@ impl Registry {
         if changed {
             self.save();
         }
-        Ok(())
+        Ok(self)
     }
 
     fn exited(events: &mut Events, entry: &mut Entry, status: ExitStatus) {
@@ -436,6 +432,7 @@ impl Registry {
     }
 
     pub(crate) fn record(&mut self, mut sample: Sample) -> impl FnOnce() + Send + use<> {
+        self.refresh().ok();
         sample.terminals = self.counts();
         self.stats.push(sample);
         self.stats.saving()
@@ -564,11 +561,8 @@ impl Registry {
         p: ReadParams,
     ) -> Result<impl FnOnce() -> Result<ReadResult, RpcError> + Send + use<>, RpcError> {
         let entry = self.entry(&p.name)?;
-        let (state, acp, term) = (
-            self.path.clone(),
-            entry.info.acp.is_some(),
-            entry.term.clone(),
-        );
+        let (state, term) = (self.path.clone(), entry.term.clone());
+        let acp = entry.info.acp.is_some();
         Ok(move || {
             let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
             let file = || fs::read_to_string(crate::acp::transcript(&state, &p.name));
@@ -729,17 +723,13 @@ impl Registry {
             return Err(RpcError::new(ErrorCode::StillRunning, name));
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
-        let log = history(&self.path, name).log;
-        let files = log
-            .into_iter()
-            .chain([crate::acp::transcript(&self.path, name)]);
-        let files: Vec<PathBuf> = files.collect();
-        let remove = move || {
-            for file in files {
+        let transcript = Some(crate::acp::transcript(&self.path, name));
+        let files = [history(&self.path, name).log, transcript];
+        Ok((self.saved(entry.info), move || {
+            for file in files.into_iter().flatten() {
                 fs::remove_file(file).ok();
             }
-        };
-        Ok((self.saved(entry.info), remove))
+        }))
     }
 }
 
@@ -835,6 +825,6 @@ mod tests {
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
-            .block_on(registry.saver().flushed());
+            .block_on(registry.saver.flushed());
     }
 }
