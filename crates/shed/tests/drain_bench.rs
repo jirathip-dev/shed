@@ -1,6 +1,8 @@
-//! The drain bench (`scripts/bench-drain.sh` runs it at a PR's base and head): each stream `cat` into a
-//! terminal of a fresh `shed serve`, timed until `read` (polled every 2 ms) shows its last line, and serve's peak RSS (sampled
-//! every 10 ms) while it drains. The raw-read ceiling is shed-core's `tests/drain_raw.rs`.
+//! The drain bench (`scripts/bench-drain.sh` runs it at a PR's base and head): `$SHED_DRAIN_MB` (default
+//! 100) MB each of plain text, coloured text with `EL` on every line and full-screen redraw frames
+//! (`drain/fixture.rs`), each `cat` into a terminal of a fresh `shed serve`, timed until `read` (polled every
+//! 2 ms) shows its last line, with serve's peak RSS (sampled every 10 ms) and CPU time. The raw-read
+//! ceiling is shed-core's `tests/drain_raw.rs`.
 #![cfg(test)]
 
 #[path = "drain/fixture.rs"]
@@ -15,15 +17,24 @@ use serde_json::{Value, json};
 use shed_server::proto::Method;
 use shed_server::{Client, Paths};
 
-fn rss_kb(pid: u32) -> u64 {
+fn ps(pid: u32, field: &str) -> String {
     let ps = Command::new("ps")
-        .args(["-o", "rss=", "-p", &pid.to_string()])
+        .args(["-o", field, "-p", &pid.to_string()])
         .output()
         .expect("ps");
-    String::from_utf8_lossy(&ps.stdout)
-        .trim()
-        .parse()
-        .unwrap_or(0)
+    String::from_utf8_lossy(&ps.stdout).trim().to_owned()
+}
+
+fn rss_kb(pid: u32) -> u64 {
+    ps(pid, "rss=").parse().unwrap_or(0)
+}
+
+fn cpu_ms(pid: u32) -> f64 {
+    let time = ps(pid, "time=");
+    let parts = time
+        .split([':', '-'])
+        .map(|p| p.parse::<f64>().expect("a cpu time"));
+    parts.fold(0.0, |acc, part| acc * 60.0 + part) * 1e3
 }
 
 fn drain(dir: &std::path::Path, kind: &str) {
@@ -43,6 +54,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
     let mut client = Client::connect(&socket).expect("connect");
     let done = AtomicBool::new(false);
     let pid = server.id();
+    let cpu = cpu_ms(pid);
     let (secs, peak) = std::thread::scope(|s| {
         let sampler = s.spawn(|| {
             let mut peak = 0;
@@ -76,6 +88,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
     let bytes = std::fs::metadata(&file).expect("stream").len();
     fixture::report(kind, bytes, secs);
     println!("drain {kind} peak rss: {} MB", peak >> 10);
+    println!("drain {kind} serve cpu: {:.0} ms", cpu_ms(pid) - cpu);
     server.kill().ok();
     server.wait().ok();
     std::fs::remove_file(&file).ok();

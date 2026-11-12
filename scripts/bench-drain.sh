@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The drain bench (crates/shed/tests/drain_bench.rs) at the base and the head checkouts: each stream
 # (plain, colour, redraw; $SHED_DRAIN_MB MB, default 100) `cat` into a fresh serve's terminal, timed until
-# `read` shows its last line, with serve's peak RSS; median of 5 interleaved release runs. Fails if the
+# `read` shows its last line, with serve's peak RSS and CPU time; median of 5 interleaved release runs. Fails if the
 # head is more than 10% slower on any stream. Then the raw-read ceiling at each side
 # (crates/shed-core/tests/drain_raw.rs), reported only. Both sides run the head's bench. Builds go to
 # $BENCH_TARGET/drain-{base,head}.
@@ -31,9 +31,13 @@ slower=0
 for kind in plain colour redraw; do
   ms() { sed -n "s/^$1: drain $kind: \([0-9]*\) ms.*/\1/p" "$out"; }
   rss() { sed -n "s/^$1: drain $kind peak rss: \([0-9]*\) MB/\1/p" "$out"; }
+  cpu() { sed -n "s/^$1: drain $kind serve cpu: \([0-9]*\) ms/\1/p" "$out"; }
   # shellcheck disable=SC2046
   mb=$(median $(ms base)) mh=$(median $(ms head)) rb=$(median $(rss base)) rh=$(median $(rss head))
-  echo "drain $kind median of 5: base $mb ms, head $mh ms (head/base $((mh * 100 / mb))%); peak rss base $rb MB, head $rh MB"
+  # shellcheck disable=SC2046
+  cb=$(median $(cpu base)) ch=$(median $(cpu head))
+  echo "drain $kind median of 5: base $mb ms, head $mh ms (head/base $((mh * 100 / mb))%); peak rss base $rb MB," \
+    "head $rh MB; serve cpu base $cb ms, head $ch ms"
   [ $((mh * 10)) -le $((mb * 11)) ] || { echo "FAIL: $kind: the head is more than 10% slower"; slower=1; }
 done
 exit "$slower"

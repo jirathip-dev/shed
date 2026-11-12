@@ -1,6 +1,3 @@
-//! The drain bench's streams (`scripts/bench-drain.sh`): `$SHED_DRAIN_MB` (default 100) MB of plain
-//! text, coloured text with `EL` on every line, and full-screen redraw frames, each ending in `drain-end`.
-
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
