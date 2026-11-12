@@ -16,4 +16,5 @@
 - Don't commit a setup-specific name (home paths, tailnet hosts, private IPs, chat IDs). Enforcer: `just hygiene` (ci/denylist.txt).
 - Don't name an agent or provider outside crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
 - Don't push a GitHub workflow actionlint rejects. Enforcer: `just actionlint`.
+- Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo. Enforcer: `just self-hosted` (scripts/self-hosted.py).
 - Don't fail an active lesson check in this file (a shadow one only reports). Enforcer: `just lessons` (herdsman lesson-check).
