@@ -604,7 +604,7 @@ impl Session {
                     .and_then(serde_json::from_value)
                     .ok();
                 if let Some(usage) = self.shown.usage.clone() {
-                    self.emit(EventKind::Usage(usage));
+                    self.emit(EventKind::Usage(*usage));
                 }
             }
             SessionUpdate::AvailableCommandsUpdate(u) => {

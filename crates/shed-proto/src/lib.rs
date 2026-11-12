@@ -777,7 +777,7 @@ pub struct AcpSession {
     pub commands: Vec<[String; 3]>,
     /// The agent's last `usage_update`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<AcpUsage>,
+    pub usage: Option<Box<AcpUsage>>,
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.

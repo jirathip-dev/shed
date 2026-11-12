@@ -47,7 +47,7 @@ fn session() -> AcpSession {
             "name": "web", "type": "http", "url": "https://mcp.example/"}),
         ],
         commands: vec![["review".into(), "Review the diff".into(), "files".into()]],
-        usage: Some(usage()),
+        usage: Some(Box::new(usage())),
     }
 }
 

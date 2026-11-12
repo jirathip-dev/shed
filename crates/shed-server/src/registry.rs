@@ -609,7 +609,7 @@ impl Registry {
         let session = match &p.kind {
             EventKind::Session(s) => info.session.replace(s.clone()).is_none_or(|old| old != *s),
             EventKind::Usage(u) => {
-                info.session.get_or_insert_default().usage = Some(u.clone());
+                info.session.get_or_insert_default().usage = Some(Box::new(u.clone()));
                 false
             }
             _ => false,
