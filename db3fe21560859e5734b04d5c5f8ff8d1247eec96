@@ -1,0 +1,11 @@
+Decided: raise the soft RLIMIT_NOFILE to the hard limit before the runtime starts, capped on macOS by kern.maxfilesperproc
+Because: "raises its soft `RLIMIT_NOFILE` to the hard limit, capped at `kern.maxfilesperproc` on macOS"
+Decided: an accept error is logged and retried after 1 s instead of ending listen()
+Because: "A spawn that still gets EMFILE returns a clear error and does not take the daemon down"
+Decided: Terminal holds a Weak pty; the reader thread owns the only Arc, so the master fd closes when output ends
+Because: "after N spawn and exit cycles, the daemon's open-fd count returns to its baseline"
+Rejected: libc sysctlbyname for maxfilesperproc — needs unsafe, which the workspace forbids
+Rejected: dropping the Terminal from the registry on exit — read and history of exited terminals need its screen
+Check: crates/shed-server/src/lib.rs raise_open_files treats None as unlimited in both soft and hard
+Check: the three new tests in crates/shed/tests/reliability.rs fail at 7876ada and pass at head
+Owner: shed serve no longer dies when it runs out of file handles, and it starts with a much higher limit
