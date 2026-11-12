@@ -1,0 +1,6 @@
+Decided: raise line_cap from 7800 to 10000 in ci/cap.toml with a cap-history note
+Because: q1551
+Because: "Raise shed's line cap (`ci/cap.toml` `line_cap`) from 7,800 to 10,000"
+Rejected: a smaller raise for #89 alone — the owner sized it once for the whole queue in q1551
+Check: sh scripts/line-cap.sh prints 7795 / cap 10000 and exits 0
+Owner: The size limit goes to 10,000 lines so #89 and the rest of the queue fit.
