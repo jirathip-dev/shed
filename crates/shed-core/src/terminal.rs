@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
 use std::sync::mpsc::{RecvTimeoutError, Sender, SyncSender, sync_channel};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, kill_process_group};
@@ -62,7 +62,7 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 /// Its output feeds a [`Screen`] from a reader thread, its input goes through a writer thread and a
 /// reaper thread records its exit. Dropping the terminal SIGKILLs its process group.
 pub struct Terminal {
-    pty: Arc<pty_process::blocking::Pty>,
+    pty: Weak<pty_process::blocking::Pty>,
     input: Sender<Input>,
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
@@ -125,7 +125,8 @@ impl Terminal {
         let child = crate::runner::pty(program, args, cwd, env, pts)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
-        let pty = Arc::new(pty);
+        let reader = Arc::new(pty);
+        let pty = Arc::downgrade(&reader);
         let outputs = Arc::new(Mutex::new(Some(Vec::new())));
         let watch = Arc::new(watch::Sender::new(Status {
             changes: 0,
@@ -135,17 +136,18 @@ impl Terminal {
             stuck: false,
             exit: None,
         }));
-        let (reader, sink, subs) = (Arc::clone(&pty), Arc::clone(&screen), Arc::clone(&outputs));
+        let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
         std::thread::spawn(move || {
             read_loop(&reader, &sink, &subs, &watcher, log);
+            drop(reader);
             *lock(&subs) = None;
             bump(&watcher, |_| {});
         });
         let exits = Arc::clone(&watch);
         std::thread::spawn(move || reap(child, &exits));
         let (input, inputs) = std::sync::mpsc::channel();
-        let (writer, watcher) = (Arc::clone(&pty), Arc::clone(&watch));
+        let (writer, watcher) = (Weak::clone(&pty), Arc::clone(&watch));
         std::thread::spawn(move || write_loop(&writer, &inputs, &watcher));
         Ok(Self {
             pty,
@@ -298,6 +300,10 @@ impl Terminal {
         }
     }
 
+    fn open_pty(&self) -> Result<Arc<pty_process::blocking::Pty>, Error> {
+        (self.pty.upgrade()).ok_or_else(|| Error::Io(std::io::ErrorKind::BrokenPipe.into()))
+    }
+
     /// Sends one key by name (`enter`, `ctrl+c`, `up`, …); see [`keys::encode`].
     ///
     /// # Errors
@@ -309,10 +315,10 @@ impl Terminal {
     /// Resizes the PTY (the program gets SIGWINCH) and the screen.
     ///
     /// # Errors
-    /// [`Error::Pty`] when the PTY rejects the size.
+    /// [`Error::Pty`] when the PTY rejects the size; [`Error::Io`] when it is closed.
     pub fn resize(&self, size: Size) -> Result<(), Error> {
         let mut screen = lock(&self.screen);
-        self.pty.resize(pty_size(size))?;
+        self.open_pty()?.resize(pty_size(size))?;
         screen.resize(size);
         bump(&self.watch, |_| {});
         Ok(())
@@ -371,12 +377,16 @@ fn reap(mut child: Child, watch: &watch::Sender<Status>) {
 }
 
 fn write_loop(
-    pty: &pty_process::blocking::Pty,
+    pty: &Weak<pty_process::blocking::Pty>,
     inputs: &std::sync::mpsc::Receiver<Input>,
     watch: &watch::Sender<Status>,
 ) {
     for (bytes, done) in inputs {
-        done.send((&*pty).write_all(&bytes)).ok();
+        let wrote = pty.upgrade().map_or_else(
+            || Err(std::io::ErrorKind::BrokenPipe.into()),
+            |pty| (&*pty).write_all(&bytes),
+        );
+        done.send(wrote).ok();
         if watch.borrow().stuck {
             bump(watch, |s| s.stuck = false);
         }
