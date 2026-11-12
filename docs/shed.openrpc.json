@@ -1,0 +1,2620 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "shed",
+    "version": "0.0.0"
+  },
+  "methods": [
+    {
+      "name": "hello",
+      "description": "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "product",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "The product, `shed`; a peer that sends none is refused like another version.",
+            "default": ""
+          }
+        },
+        {
+          "name": "version",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The shed version."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Hello"
+        }
+      }
+    },
+    {
+      "name": "run",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal's name, unique per server; `[A-Za-z0-9._-]+`."
+          }
+        },
+        {
+          "name": "labels",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Labels, `k=v`.",
+            "default": {}
+          }
+        },
+        {
+          "name": "cwd",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The working directory (absolute)."
+          }
+        },
+        {
+          "name": "keep",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Come back as a shell after a server restart.",
+            "default": false
+          }
+        },
+        {
+          "name": "idle_after",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Report `idle` after this many seconds without output, until the program reports a state."
+          }
+        },
+        {
+          "name": "cmd",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The program and its arguments; with `acp`, the agent's ACP adapter (empty: the installed\nagent's), which the server wraps in its own bridge."
+          }
+        },
+        {
+          "name": "acp",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The ACP agent the program bridges (`shed run --acp`): `read` renders its transcript."
+          }
+        },
+        {
+          "name": "policy",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Policy"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ACP: how the bridge answers permission requests (default `ask`)."
+          }
+        },
+        {
+          "name": "resume",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACP: load this agent session (`session/load`, `$SHED_ACP_RESUME` to the bridge) instead of a new one."
+          }
+        },
+        {
+          "name": "mcp_servers",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": true,
+            "description": "ACP: MCP servers for the agent, in ACP's shapes: stdio `{name, command, args, env}`, or\n`{type: \"http\" | \"sse\", name, url, headers}`. Kept in memory only; send them again to resume."
+          }
+        },
+        {
+          "name": "no_hibernate",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "ACP: never hibernate the agent when idle."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Start it on this machine, over its held link (`machine.links`)."
+          }
+        },
+        {
+          "name": "rows",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Rows; default the server's `$SHED_SIZE`, else 50."
+          }
+        },
+        {
+          "name": "cols",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Columns; default the server's `$SHED_SIZE`, else 200."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "ls",
+      "description": "List terminals, by name; `labels` keeps those that carry every given label.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "labels",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Only terminals carrying every one of these labels.",
+            "default": {}
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/TerminalInfo"
+          }
+        }
+      }
+    },
+    {
+      "name": "get",
+      "description": "One terminal.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "read",
+      "description": "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "lines",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0,
+            "description": "Only the last N lines."
+          }
+        },
+        {
+          "name": "history",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Scrollback and screen instead of the screen alone.",
+            "default": false
+          }
+        },
+        {
+          "name": "events",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "ACP: the transcript's events instead of text."
+          }
+        },
+        {
+          "name": "before",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "With `events`: only those before this `seq`."
+          }
+        },
+        {
+          "name": "n",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0,
+            "description": "With `events`: only the last N."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ReadResult"
+        }
+      }
+    },
+    {
+      "name": "send",
+      "description": "Type text into the terminal.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name (`terminal` in `terminal.input`)."
+          }
+        },
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The text, sent as UTF-8."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "keys",
+      "description": "Press keys by name (`enter`, `esc`, `ctrl+c`, `up`, …); nothing is sent if any name is unknown.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name (`terminal` in `terminal.keys`)."
+          }
+        },
+        {
+          "name": "keys",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Key names, pressed in order."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "kill",
+      "description": "End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exited terminal.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "rm",
+      "description": "Remove an exited terminal, its ACP session closed; returns it as it was.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "resize",
+      "description": "Resize the terminal; the program gets SIGWINCH.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "rows",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Rows, at least 1."
+          }
+        },
+        {
+          "name": "cols",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Columns, at least 1."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "attach",
+      "description": "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "state",
+      "description": "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "state",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`working`, `blocked`, `done` or `error`; `idle` from the `idle_after` fallback."
+          }
+        },
+        {
+          "name": "note",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A free-text note."
+          }
+        },
+        {
+          "name": "state_source",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "wait",
+      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "until",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Reported states that end the wait.",
+            "default": []
+          }
+        },
+        {
+          "name": "output",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A pattern (`.`, `[…]`, `\\d \\w \\s`, `* + ?`, `^ $`) that ends the wait when a screen line matches."
+          }
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Give up after this many seconds; none waits for ever."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/WaitResult"
+        }
+      }
+    },
+    {
+      "name": "events",
+      "description": "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "labels",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Only events of terminals carrying every one of these labels.",
+            "default": {}
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Replay the kept events whose `seq` is above this one first."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      },
+      "x-stream": {
+        "$ref": "#/components/schemas/Event"
+      }
+    },
+    {
+      "name": "emit",
+      "description": "Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply`); its bridge (`shed run --acp`) calls this. Other events are refused.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "replay",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "A resumed session's history, replayed."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      },
+      "x-params": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The terminal's name."
+          },
+          "replay": {
+            "type": "boolean",
+            "description": "A resumed session's history, replayed."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "started"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The program started (`run`, or a kept terminal back after a server restart)."
+          },
+          {
+            "$ref": "#/components/schemas/Reported",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "state"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The reported state changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "exited"
+              },
+              "code": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "The exit status (128 + N for signal N)."
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The program exited by itself."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "killed"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "`kill` ended the process tree."
+          },
+          {
+            "$ref": "#/components/schemas/Resources",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "resources"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The tree's memory or CPU moved by more than 10 % since the last such event."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "turn"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt text."
+              }
+            },
+            "required": [
+              "event",
+              "prompt"
+            ],
+            "description": "ACP: a prompt started a turn."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "text"
+              },
+              "text": {
+                "type": "string",
+                "description": "The chunk."
+              }
+            },
+            "required": [
+              "event",
+              "text"
+            ],
+            "description": "ACP: a chunk of the agent's reply."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "tool_call"
+              },
+              "id": {
+                "type": "string",
+                "description": "The agent's tool call id."
+              },
+              "title": {
+                "type": "string",
+                "description": "What the tool does, in the agent's words."
+              },
+              "status": {
+                "type": "string",
+                "description": "`pending`, `in_progress`, `completed` or `failed`."
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              }
+            },
+            "required": [
+              "event",
+              "id",
+              "title",
+              "status"
+            ],
+            "description": "ACP: a tool call started or changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "plan"
+              },
+              "entries": {
+                "type": "array",
+                "items": true,
+                "description": "The entries (`content`, `priority`, `status`)."
+              }
+            },
+            "required": [
+              "event",
+              "entries"
+            ],
+            "description": "ACP: the agent's plan, as it sent it."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "mode"
+              },
+              "mode": {
+                "type": "string",
+                "description": "The mode id."
+              }
+            },
+            "required": [
+              "event",
+              "mode"
+            ],
+            "description": "ACP: the session's mode changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "approval_request"
+              },
+              "tool": {
+                "type": "string",
+                "description": "The tool call's title."
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ApprovalOption"
+                },
+                "description": "The choices."
+              }
+            },
+            "required": [
+              "event",
+              "tool",
+              "options"
+            ],
+            "description": "ACP: the agent asks to run a tool; `shed approve` answers with one option."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "approved"
+              },
+              "option": {
+                "type": "string",
+                "description": "The chosen option's id."
+              }
+            },
+            "required": [
+              "event",
+              "option"
+            ],
+            "description": "ACP: a permission request was answered (by `shed approve` or the `--policy`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "reply"
+              },
+              "text": {
+                "type": "string",
+                "description": "The agent's whole reply text."
+              },
+              "stop_reason": {
+                "type": "string",
+                "description": "Why it ended: `end_turn`, `max_tokens`, `max_turn_requests`, `refusal` or `cancelled`."
+              }
+            },
+            "required": [
+              "event",
+              "text",
+              "stop_reason"
+            ],
+            "description": "ACP: the turn ended."
+          },
+          {
+            "$ref": "#/components/schemas/AcpSession",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "session"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the session is ready, or its model or slash commands changed."
+          },
+          {
+            "$ref": "#/components/schemas/AcpUsage",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "usage"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          }
+        ],
+        "description": "`emit` params."
+      }
+    },
+    {
+      "name": "screen.watch",
+      "description": "Stream a running terminal's screen. After the response the server writes screen updates (see Screen updates), at most 20 a second: the full screen first (none when `since` is the screen's current `seq`), then the rows that changed. It closes the connection when the program's PTY closes. The connection still takes requests; their responses are not written.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "terminal",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The `seq` of the last update the client applied: no full screen first if nothing changed since."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      },
+      "x-stream": {
+        "$ref": "#/components/schemas/ScreenUpdate"
+      }
+    },
+    {
+      "name": "terminal.input",
+      "description": "Type text into the terminal, as `send`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The text, sent as UTF-8."
+          }
+        },
+        {
+          "name": "terminal",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name (`terminal` in `terminal.input`)."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "terminal.keys",
+      "description": "Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "keys",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Key names, pressed in order."
+          }
+        },
+        {
+          "name": "terminal",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name (`terminal` in `terminal.keys`)."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "terminal.resize",
+      "description": "Resize the terminal, as `resize`; without `terminal`, the one this connection watches.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "terminal",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal's name; default the one this connection watches."
+          }
+        },
+        {
+          "name": "cols",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Columns, at least 1."
+          }
+        },
+        {
+          "name": "rows",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Rows, at least 1."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "terminal.readonly",
+      "description": "Mark the terminal read-only for this connection: from then on, until it closes, the connection's `send`, `keys`, `resize`, `attach`, `terminal.input`, `terminal.keys` and `terminal.resize` to the terminal are refused with `READONLY`. The connection may resize only the terminals it has not marked.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "terminal",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "machine.stats",
+      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Add the kept samples taken after this time (unix seconds) as `history`."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/MachineStats"
+        }
+      }
+    },
+    {
+      "name": "acp.model",
+      "description": "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        },
+        {
+          "name": "model",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The model id, one of the session's `models`."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "machine.links",
+      "description": "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/components/schemas/Link"
+          }
+        }
+      }
+    },
+    {
+      "name": "rpc.discover",
+      "description": "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": true
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Hello": {
+        "type": "object",
+        "properties": {
+          "product": {
+            "type": "string",
+            "description": "The product, `shed`; a peer that sends none is refused like another version.",
+            "default": ""
+          },
+          "version": {
+            "type": "string",
+            "description": "The shed version."
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "description": "`hello` params and result: the sender's product and version."
+      },
+      "Policy": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "allow",
+            "description": "Pick the first `allow_once` (else `allow_always`) option."
+          },
+          {
+            "type": "string",
+            "const": "deny",
+            "description": "Pick the first `reject_once` (else `reject_always`) option."
+          },
+          {
+            "type": "string",
+            "const": "ask",
+            "description": "Report `blocked` and wait for `shed approve`."
+          }
+        ],
+        "description": "How an ACP bridge answers the agent's permission requests."
+      },
+      "TerminalInfo": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The unique name."
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Labels, `k=v`."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The working directory."
+          },
+          "cmd": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The program and its arguments."
+          },
+          "keep": {
+            "type": "boolean",
+            "description": "Comes back as a shell after a server restart."
+          },
+          "state": {
+            "$ref": "#/components/schemas/State",
+            "description": "Running or exited."
+          },
+          "exit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The exit status once exited (128 + N for signal N); `null` while running or when lost."
+          },
+          "pid": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The program's pid while running."
+          },
+          "reported": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Reported"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The state the program last reported, if any."
+          },
+          "idle_after": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The `idle` fallback's silence, in seconds, if on."
+          },
+          "resources": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Resources"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The process tree's resource use at the last sample, while running."
+          },
+          "acp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The ACP agent the program bridges, for an ACP terminal."
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcpSession"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ACP agent session, from the bridge's last `session` event."
+          }
+        },
+        "required": [
+          "name",
+          "labels",
+          "cwd",
+          "cmd",
+          "keep",
+          "state"
+        ],
+        "description": "One terminal, as `run`, `ls`, `get`, `kill` and `rm` return it and the state file stores it."
+      },
+      "State": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "running",
+            "description": "The program runs."
+          },
+          {
+            "type": "string",
+            "const": "exited",
+            "description": "The program has exited, or was lost in a server restart."
+          }
+        ],
+        "description": "Whether a terminal's program runs."
+      },
+      "Reported": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "description": "`working`, `blocked`, `done` or `error`; `idle` from the `idle_after` fallback."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A free-text note."
+          },
+          "state_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own."
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "description": "A state a terminal's program reported."
+      },
+      "Resources": {
+        "type": "object",
+        "properties": {
+          "rss_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Summed resident memory, in MiB."
+          },
+          "cpu_pct": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "CPU use since the previous sample, in percent of one core."
+          }
+        },
+        "required": [
+          "rss_mb",
+          "cpu_pct"
+        ],
+        "description": "A terminal's process tree's resource use at the last sample."
+      },
+      "AcpSession": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The agent's session id, for `run --acp … --resume`."
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The current model, when the agent offers models."
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "The models `acp.model` switches to: id and name."
+          },
+          "mcp_servers": {
+            "type": "array",
+            "items": true,
+            "description": "The `run`'s `mcp_servers`, each env and header value as `***`."
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "description": "The agent's slash commands (a prompt `/name …` runs one): name, description, input hint."
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcpUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The agent's last `usage_update`."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "description": "An ACP terminal's agent session, as its bridge last reported it."
+      },
+      "AcpUsage": {
+        "type": "object",
+        "properties": {
+          "used": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Tokens in context."
+          },
+          "size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The context window, in tokens."
+          },
+          "cost": {
+            "description": "The session's total cost so far (`amount`, `currency`), when the agent reports it."
+          }
+        },
+        "required": [
+          "used",
+          "size"
+        ],
+        "description": "An ACP session's context window use and cost, as the agent last reported it."
+      },
+      "ReadResult": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Plain text, one line per row, trailing blanks dropped."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Logged"
+            },
+            "description": "With `events`: the transcript's events, in order."
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "description": "`read` result."
+      },
+      "Logged": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Its place in the transcript, from 1."
+          }
+        },
+        "required": [
+          "seq"
+        ],
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "started"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The program started (`run`, or a kept terminal back after a server restart)."
+          },
+          {
+            "$ref": "#/components/schemas/Reported",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "state"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The reported state changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "exited"
+              },
+              "code": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "The exit status (128 + N for signal N)."
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The program exited by itself."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "killed"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "`kill` ended the process tree."
+          },
+          {
+            "$ref": "#/components/schemas/Resources",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "resources"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The tree's memory or CPU moved by more than 10 % since the last such event."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "turn"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt text."
+              }
+            },
+            "required": [
+              "event",
+              "prompt"
+            ],
+            "description": "ACP: a prompt started a turn."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "text"
+              },
+              "text": {
+                "type": "string",
+                "description": "The chunk."
+              }
+            },
+            "required": [
+              "event",
+              "text"
+            ],
+            "description": "ACP: a chunk of the agent's reply."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "tool_call"
+              },
+              "id": {
+                "type": "string",
+                "description": "The agent's tool call id."
+              },
+              "title": {
+                "type": "string",
+                "description": "What the tool does, in the agent's words."
+              },
+              "status": {
+                "type": "string",
+                "description": "`pending`, `in_progress`, `completed` or `failed`."
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              }
+            },
+            "required": [
+              "event",
+              "id",
+              "title",
+              "status"
+            ],
+            "description": "ACP: a tool call started or changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "plan"
+              },
+              "entries": {
+                "type": "array",
+                "items": true,
+                "description": "The entries (`content`, `priority`, `status`)."
+              }
+            },
+            "required": [
+              "event",
+              "entries"
+            ],
+            "description": "ACP: the agent's plan, as it sent it."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "mode"
+              },
+              "mode": {
+                "type": "string",
+                "description": "The mode id."
+              }
+            },
+            "required": [
+              "event",
+              "mode"
+            ],
+            "description": "ACP: the session's mode changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "approval_request"
+              },
+              "tool": {
+                "type": "string",
+                "description": "The tool call's title."
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ApprovalOption"
+                },
+                "description": "The choices."
+              }
+            },
+            "required": [
+              "event",
+              "tool",
+              "options"
+            ],
+            "description": "ACP: the agent asks to run a tool; `shed approve` answers with one option."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "approved"
+              },
+              "option": {
+                "type": "string",
+                "description": "The chosen option's id."
+              }
+            },
+            "required": [
+              "event",
+              "option"
+            ],
+            "description": "ACP: a permission request was answered (by `shed approve` or the `--policy`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "reply"
+              },
+              "text": {
+                "type": "string",
+                "description": "The agent's whole reply text."
+              },
+              "stop_reason": {
+                "type": "string",
+                "description": "Why it ended: `end_turn`, `max_tokens`, `max_turn_requests`, `refusal` or `cancelled`."
+              }
+            },
+            "required": [
+              "event",
+              "text",
+              "stop_reason"
+            ],
+            "description": "ACP: the turn ended."
+          },
+          {
+            "$ref": "#/components/schemas/AcpSession",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "session"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the session is ready, or its model or slash commands changed."
+          },
+          {
+            "$ref": "#/components/schemas/AcpUsage",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "usage"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          }
+        ],
+        "description": "One event of an ACP terminal's transcript."
+      },
+      "ApprovalOption": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The option id `shed approve` takes."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its label."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`allow_once`, `allow_always`, `reject_once` or `reject_always`."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "description": "One choice of an [`EventKind::ApprovalRequest`]."
+      },
+      "Empty": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "WaitResult": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/WaitOutcome",
+            "description": "How the wait ended."
+          },
+          "terminal": {
+            "$ref": "#/components/schemas/TerminalInfo",
+            "description": "The terminal at that moment."
+          }
+        },
+        "required": [
+          "outcome",
+          "terminal"
+        ],
+        "description": "`wait` result."
+      },
+      "WaitOutcome": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "matched",
+            "description": "A state in `until` or the `output` pattern matched."
+          },
+          {
+            "type": "string",
+            "const": "exited",
+            "description": "The program exited first."
+          },
+          {
+            "type": "string",
+            "const": "timeout",
+            "description": "The timeout passed first."
+          }
+        ],
+        "description": "How a `wait` ended."
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Counts up from 1 for every event the server emits, so a reconnecting client can ask for what it\nmissed with `since`."
+          },
+          "name": {
+            "type": "string",
+            "description": "The terminal's name."
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The terminal's labels."
+          },
+          "replay": {
+            "type": "boolean",
+            "description": "ACP: a resumed session's history, replayed (`session/load`), not a new event."
+          }
+        },
+        "required": [
+          "seq",
+          "name",
+          "labels"
+        ],
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "started"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The program started (`run`, or a kept terminal back after a server restart)."
+          },
+          {
+            "$ref": "#/components/schemas/Reported",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "state"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The reported state changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "exited"
+              },
+              "code": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "description": "The exit status (128 + N for signal N)."
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The program exited by itself."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "killed"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "`kill` ended the process tree."
+          },
+          {
+            "$ref": "#/components/schemas/Resources",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "resources"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "The tree's memory or CPU moved by more than 10 % since the last such event."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "turn"
+              },
+              "prompt": {
+                "type": "string",
+                "description": "The prompt text."
+              }
+            },
+            "required": [
+              "event",
+              "prompt"
+            ],
+            "description": "ACP: a prompt started a turn."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "text"
+              },
+              "text": {
+                "type": "string",
+                "description": "The chunk."
+              }
+            },
+            "required": [
+              "event",
+              "text"
+            ],
+            "description": "ACP: a chunk of the agent's reply."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "tool_call"
+              },
+              "id": {
+                "type": "string",
+                "description": "The agent's tool call id."
+              },
+              "title": {
+                "type": "string",
+                "description": "What the tool does, in the agent's words."
+              },
+              "status": {
+                "type": "string",
+                "description": "`pending`, `in_progress`, `completed` or `failed`."
+              },
+              "kind": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              }
+            },
+            "required": [
+              "event",
+              "id",
+              "title",
+              "status"
+            ],
+            "description": "ACP: a tool call started or changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "plan"
+              },
+              "entries": {
+                "type": "array",
+                "items": true,
+                "description": "The entries (`content`, `priority`, `status`)."
+              }
+            },
+            "required": [
+              "event",
+              "entries"
+            ],
+            "description": "ACP: the agent's plan, as it sent it."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "mode"
+              },
+              "mode": {
+                "type": "string",
+                "description": "The mode id."
+              }
+            },
+            "required": [
+              "event",
+              "mode"
+            ],
+            "description": "ACP: the session's mode changed."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "approval_request"
+              },
+              "tool": {
+                "type": "string",
+                "description": "The tool call's title."
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ApprovalOption"
+                },
+                "description": "The choices."
+              }
+            },
+            "required": [
+              "event",
+              "tool",
+              "options"
+            ],
+            "description": "ACP: the agent asks to run a tool; `shed approve` answers with one option."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "approved"
+              },
+              "option": {
+                "type": "string",
+                "description": "The chosen option's id."
+              }
+            },
+            "required": [
+              "event",
+              "option"
+            ],
+            "description": "ACP: a permission request was answered (by `shed approve` or the `--policy`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "reply"
+              },
+              "text": {
+                "type": "string",
+                "description": "The agent's whole reply text."
+              },
+              "stop_reason": {
+                "type": "string",
+                "description": "Why it ended: `end_turn`, `max_tokens`, `max_turn_requests`, `refusal` or `cancelled`."
+              }
+            },
+            "required": [
+              "event",
+              "text",
+              "stop_reason"
+            ],
+            "description": "ACP: the turn ended."
+          },
+          {
+            "$ref": "#/components/schemas/AcpSession",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "session"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the session is ready, or its model or slash commands changed."
+          },
+          {
+            "$ref": "#/components/schemas/AcpUsage",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "usage"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          }
+        ],
+        "description": "One event, as `events` streams it."
+      },
+      "ScreenUpdate": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The screen's change count it shows; pass it as `since` when watching again."
+          },
+          "full": {
+            "type": "boolean",
+            "description": "Every row is in `lines` (the first update, and after a resize)."
+          },
+          "rows": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Rows."
+          },
+          "cols": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Columns."
+          },
+          "cursor": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint16",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "The cursor's row and column, from 0."
+          },
+          "scrollback": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Lines in scrollback."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Line"
+            },
+            "description": "The rows that changed."
+          }
+        },
+        "required": [
+          "seq",
+          "full",
+          "rows",
+          "cols",
+          "cursor",
+          "scrollback",
+          "lines"
+        ],
+        "description": "One `screen.watch` update."
+      },
+      "Line": {
+        "type": "object",
+        "properties": {
+          "row": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "The row, from 0."
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            },
+            "description": "Its cells, in runs of the same pen; trailing blank default cells dropped."
+          }
+        },
+        "required": [
+          "row",
+          "runs"
+        ],
+        "description": "One row of a [`ScreenUpdate`]."
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The cells' characters."
+          },
+          "fg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Color"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Foreground."
+          },
+          "bg": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Color"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Background."
+          },
+          "bold": {
+            "type": "boolean",
+            "description": "Bold."
+          },
+          "italic": {
+            "type": "boolean",
+            "description": "Italic."
+          },
+          "underline": {
+            "type": "boolean",
+            "description": "Underline."
+          },
+          "inverse": {
+            "type": "boolean",
+            "description": "Foreground and background swapped."
+          }
+        },
+        "required": [
+          "text",
+          "bold",
+          "italic",
+          "underline",
+          "inverse"
+        ],
+        "description": "Consecutive cells with the same pen; `null` colours are the terminal's defaults."
+      },
+      "Color": {
+        "anyOf": [
+          {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255,
+            "description": "A palette index."
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Red, green, blue."
+          }
+        ],
+        "description": "A colour: a palette index (0–15 the named colours, up to 255 the xterm palette) or `[r, g, b]`."
+      },
+      "MachineStats": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was taken, unix seconds."
+          },
+          "load_per_cpu": {
+            "type": "number",
+            "format": "double",
+            "description": "The 1-minute load average divided by `cpus`."
+          },
+          "mem_pressure_pct": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Percent of memory not available."
+          },
+          "swap_used_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Swap in use, MiB."
+          },
+          "disk_free_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Free space on the volume of the state file, MiB."
+          },
+          "cpus": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Logical CPUs."
+          },
+          "uptime_s": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds since boot."
+          },
+          "terminals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "Terminals by state: the reported state while running, else `running`; `exited`."
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sample"
+            },
+            "description": "The kept samples (one a minute, 24 h) after `since`, oldest first."
+          }
+        },
+        "required": [
+          "at",
+          "load_per_cpu",
+          "mem_pressure_pct",
+          "swap_used_mb",
+          "disk_free_mb",
+          "cpus",
+          "uptime_s",
+          "terminals"
+        ],
+        "description": "`machine.stats` result: a sample taken now, and the kept ones after `since`."
+      },
+      "Sample": {
+        "type": "object",
+        "properties": {
+          "at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was taken, unix seconds."
+          },
+          "load_per_cpu": {
+            "type": "number",
+            "format": "double",
+            "description": "The 1-minute load average divided by `cpus`."
+          },
+          "mem_pressure_pct": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Percent of memory not available."
+          },
+          "swap_used_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Swap in use, MiB."
+          },
+          "disk_free_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Free space on the volume of the state file, MiB."
+          },
+          "cpus": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Logical CPUs."
+          },
+          "uptime_s": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds since boot."
+          },
+          "terminals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "Terminals by state: the reported state while running, else `running`; `exited`."
+          }
+        },
+        "required": [
+          "at",
+          "load_per_cpu",
+          "mem_pressure_pct",
+          "swap_used_mb",
+          "disk_free_mb",
+          "cpus",
+          "uptime_s",
+          "terminals"
+        ],
+        "description": "One sample of a machine's health."
+      },
+      "Link": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/LinkState",
+            "description": "Up, reconnecting or down."
+          },
+          "since": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Since when, unix seconds."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is down: the last connect's error."
+          }
+        },
+        "required": [
+          "state",
+          "since"
+        ],
+        "description": "One machine's held link, as `machine.links` reports it."
+      },
+      "LinkState": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "up",
+            "description": "Connected."
+          },
+          {
+            "type": "string",
+            "const": "reconnecting",
+            "description": "Dropped, retried with backoff."
+          },
+          {
+            "type": "string",
+            "const": "down",
+            "description": "Never connected, or refused (another version); retried with backoff."
+          }
+        ],
+        "description": "A held link's state."
+      }
+    },
+    "errors": {
+      "PARSE": {
+        "code": -32700,
+        "message": "PARSE"
+      },
+      "INVALID_REQUEST": {
+        "code": -32600,
+        "message": "INVALID_REQUEST"
+      },
+      "NO_SUCH_METHOD": {
+        "code": -32601,
+        "message": "NO_SUCH_METHOD"
+      },
+      "INVALID_PARAMS": {
+        "code": -32602,
+        "message": "INVALID_PARAMS"
+      },
+      "INTERNAL": {
+        "code": -32603,
+        "message": "INTERNAL"
+      },
+      "SHED_VERSION": {
+        "code": -32000,
+        "message": "SHED_VERSION"
+      },
+      "NO_HELLO": {
+        "code": -32001,
+        "message": "NO_HELLO"
+      },
+      "NO_SUCH_TERMINAL": {
+        "code": -32002,
+        "message": "NO_SUCH_TERMINAL"
+      },
+      "NAME_TAKEN": {
+        "code": -32003,
+        "message": "NAME_TAKEN"
+      },
+      "STILL_RUNNING": {
+        "code": -32004,
+        "message": "STILL_RUNNING"
+      },
+      "SPAWN_FAILED": {
+        "code": -32005,
+        "message": "SPAWN_FAILED"
+      },
+      "READONLY": {
+        "code": -32006,
+        "message": "READONLY"
+      },
+      "NO_LINK": {
+        "code": -32007,
+        "message": "NO_LINK"
+      }
+    }
+  }
+}
