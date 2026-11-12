@@ -1,0 +1,12 @@
+Decided: serve registers a tokio handler for every catchable signal before any spawn; exec resets caught signals to default, and std's spawn already empties the mask
+Because: "Programs start with default dispositions for every signal and an empty signal mask, whatever serve inherited."
+Rejected: sigaction to SIG_DFL in pre_exec or at serve start — needs unsafe, which the workspace forbids
+Decided: ILL, FPE, SEGV, BUS, TRAP and SYS are left alone; tokio refuses the first three, and a caught hardware fault would loop serve
+Decided: signals other than TERM and INT are swallowed by serve, so a nohup'd serve still outlives a hang-up
+Because: crates/shed-server/src/lib.rs:249
+Decided: SIGTERM/SIGINT end every running tree with the kill path's SIGTERM, grace, SIGKILL, in parallel; the state file keeps them running so keep terminals return
+Because: "ends every terminal's process tree (the same SIGTERM, grace, SIGKILL as `kill`) before it exits"
+Decided: on load, a running entry's live process group is ended and logged, unless the state file predates the boot (pid reuse); unknown uptime counts as the same boot
+Because: crates/shed-server/src/registry.rs:149
+Check: tests 2 and 4 fail with the registration loop or end_left_over disabled (exit 101, PR body)
+Owner: stopping or crashing the server no longer leaves programs running unseen, and programs get normal signal handling.
