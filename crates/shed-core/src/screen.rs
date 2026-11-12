@@ -807,6 +807,23 @@ mod tests {
     }
 
     #[test]
+    fn wide_and_combining_characters_keep_the_box_edge_in_its_column() {
+        let s = screen(
+            4,
+            10,
+            0,
+            "┌──────┐\r\n│日本語\x1b[2;8H│\r\n│😀e\u{301}x\x1b[3;8H│\r\n└──────┘",
+        );
+        assert_eq!(s.text(), "┌──────┐\n│日本語│\n│😀e\u{301}x  │\n└──────┘");
+    }
+
+    #[test]
+    fn a_wide_character_at_the_last_column_wraps_whole() {
+        assert_eq!(screen(3, 5, 0, "abcd日x").text(), "abcd\n日x");
+        assert_eq!(screen(3, 5, 0, "abcde\u{301}日").text(), "abcde\u{301}\n日");
+    }
+
+    #[test]
     fn answers_cursor_position_queries() {
         let mut s = screen(5, 10, 0, "ab\x1b[6n");
         assert_eq!(s.take_replies(), b"\x1b[1;3R");
