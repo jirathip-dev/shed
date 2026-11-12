@@ -692,16 +692,25 @@ impl Registry {
         Ok(self.saved(info))
     }
 
-    pub(crate) fn rm(&mut self, name: &str) -> Result<TerminalInfo, RpcError> {
+    pub(crate) fn rm(
+        &mut self,
+        name: &str,
+    ) -> Result<(TerminalInfo, impl FnOnce() + Send + use<>), RpcError> {
         if self.entry(name)?.info.state == State::Running {
             return Err(RpcError::new(ErrorCode::StillRunning, name));
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
-        if let Some(log) = history(&self.path, name).log {
-            fs::remove_file(log).ok();
-        }
-        fs::remove_file(crate::acp::transcript(&self.path, name)).ok();
-        Ok(self.saved(entry.info))
+        let log = history(&self.path, name).log;
+        let files = log
+            .into_iter()
+            .chain([crate::acp::transcript(&self.path, name)]);
+        let files: Vec<PathBuf> = files.collect();
+        let remove = move || {
+            for file in files {
+                fs::remove_file(file).ok();
+            }
+        };
+        Ok((self.saved(entry.info), remove))
     }
 }
 
@@ -792,7 +801,7 @@ mod tests {
         let exists = || files.map(|f| root.join(f).exists());
         let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
         assert_eq!(exists(), [true, true, false, false, false]);
-        registry.rm("kept.1").unwrap();
+        registry.rm("kept.1").unwrap().1();
         assert_eq!(exists(), [false; 5]);
     }
 }

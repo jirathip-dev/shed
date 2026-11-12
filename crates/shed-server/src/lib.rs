@@ -452,6 +452,7 @@ async fn dispatch(
         Method::Wait => return json(&wait(registry, &params(request)?).await?),
         Method::Emit => return lock(registry).emit(params(request)?).map(|()| empty()),
         Method::Read => return read(registry, params(request)?).await,
+        Method::Rm => return rm(registry, params(request)?).await,
         Method::Send | Method::Input | Method::Keys | Method::TerminalKeys | Method::Model => {
             return input(registry, method, request).await;
         }
@@ -469,7 +470,6 @@ async fn dispatch(
             json(&info)
         }
         Method::Get => json(&reg.get(&params::<Target>(request)?.name)?),
-        Method::Rm => json(&reg.rm(&params::<Target>(request)?.name)?),
         Method::Resize => reg.resize(&params(request)?).map(|()| empty()),
         Method::Attach => {
             let (info, attached) = reg.attach(&params::<Target>(request)?.name)?;
@@ -517,6 +517,16 @@ async fn kill(registry: &Shared, Target { name }: Target) -> Result<Value, RpcEr
     let status = blocking(move || killing.kill(registry::GRACE)).await?;
     let status = status.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
     json(&lock(registry).killed(&name, &term, status)?)
+}
+
+async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
+    let (info, remove) = {
+        let mut reg = lock(registry);
+        reg.refresh()?;
+        reg.rm(&name)?
+    };
+    blocking(remove).await?;
+    json(&info)
 }
 
 async fn read(registry: &Shared, p: proto::ReadParams) -> Result<Value, RpcError> {
