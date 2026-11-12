@@ -1122,6 +1122,149 @@ mod tests {
         assert!(update(&params(json!({"sessionUpdate": "brand_new_kind"}))).is_err());
     }
 
+    enum Beat {
+        Thought,
+        Stderr,
+    }
+
+    async fn fake_agent(
+        stdio: tokio::io::DuplexStream,
+        mut stderr: tokio::io::DuplexStream,
+        beats: (Beat, u32),
+        gap: Duration,
+    ) {
+        let (read, mut write) = tokio::io::split(stdio);
+        let mut lines = BufReader::new(read).lines();
+        let thought = json!({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": "s", "update": {"sessionUpdate": "agent_thought_chunk",
+            "content": {"type": "text", "text": "hm"}}}});
+        while let Ok(Some(line)) = lines.next_line().await {
+            let msg: Value = serde_json::from_str(&line).unwrap();
+            let result = match msg["method"].as_str() {
+                Some("initialize") => {
+                    json!({"protocolVersion": 1, "agentCapabilities": {}, "authMethods": []})
+                }
+                Some("session/new") => json!({"sessionId": "s"}),
+                Some("session/prompt") => {
+                    for _ in 0..beats.1 {
+                        tokio::time::sleep(gap).await;
+                        match beats.0 {
+                            Beat::Thought => {
+                                write.write_all(format!("{thought}\n").as_bytes()).await
+                            }
+                            Beat::Stderr => stderr.write_all(b"still thinking\n").await,
+                        }
+                        .unwrap();
+                    }
+                    tokio::time::sleep(gap).await;
+                    json!({"stopReason": "end_turn"})
+                }
+                _ => continue,
+            };
+            let reply = json!({"jsonrpc": "2.0", "id": msg["id"], "result": result});
+            write
+                .write_all(format!("{reply}\n").as_bytes())
+                .await
+                .unwrap();
+        }
+    }
+
+    async fn turn(idle: Duration, beats: (Beat, u32), gap: Duration) -> (Reported, Duration) {
+        let (bridge, agent) = tokio::io::duplex(1 << 16);
+        let (err_agent, err_ours) = tokio::io::duplex(1 << 16);
+        tokio::spawn(fake_agent(agent, err_agent, beats, gap));
+        let (read, write) = tokio::io::split(bridge);
+        let (out, mut outs) = unbounded_channel();
+        let (typed, mut inputs) = unbounded_channel();
+        typed.send(Input::Prompt("think hard".to_owned())).unwrap();
+        let started = shed_core::clock::tokio_now();
+        let session = connect(
+            write,
+            read,
+            err_ours,
+            async |cx, back, from_agent, stirred| {
+                let s = Session {
+                    cx,
+                    back,
+                    out,
+                    id: SessionId::new(""),
+                    policy: Policy::Ask,
+                    prompts: BTreeSet::new(),
+                    next: 0,
+                    asks: VecDeque::new(),
+                    titles: BTreeMap::new(),
+                    reply: String::new(),
+                    auth: &[],
+                    heard: shed_core::clock::tokio_now(),
+                    stirred,
+                    idle,
+                    replay: false,
+                    waking: false,
+                    last: ("idle".to_owned(), None),
+                    model: None,
+                    shown: AcpSession::default(),
+                    mcp: Vec::new(),
+                };
+                drive(s, from_agent, &mut inputs, Path::new("/"), None, None).await
+            },
+        );
+        let ended = async {
+            loop {
+                match outs.recv().await {
+                    Some(Out::State(r)) if r.state == "done" || r.state == "error" => return r,
+                    Some(_) => {}
+                    None => panic!("the session ended without a state"),
+                }
+            }
+        };
+        tokio::select! {
+            r = ended => (r, started.elapsed()),
+            e = session => panic!("the session ended first: {:?}", e.err()),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_default_watchdog_lets_a_turn_think_silently_past_two_minutes() {
+        let (r, took) = turn(
+            turn_idle_timeout(),
+            (Beat::Thought, 0),
+            Duration::from_secs(121),
+        )
+        .await;
+        assert_eq!(
+            (r.state.as_str(), r.note.as_deref()),
+            ("done", Some("end_turn"))
+        );
+        assert!(took >= Duration::from_secs(121), "took {took:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn thought_chunks_or_stderr_lines_keep_a_turn_alive_past_the_timeout() {
+        for beat in [Beat::Thought, Beat::Stderr] {
+            let idle = Duration::from_secs(5);
+            let (r, took) = turn(idle, (beat, 30), Duration::from_secs(1)).await;
+            assert_eq!(
+                (r.state.as_str(), r.note.as_deref()),
+                ("done", Some("end_turn"))
+            );
+            assert!(took >= Duration::from_secs(31), "took {took:?}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_turn_ends_as_no_response_after_the_timeout() {
+        let idle = Duration::from_secs(5);
+        let (r, took) = turn(idle, (Beat::Thought, 0), Duration::from_secs(30)).await;
+        assert_eq!(
+            (r.state.as_str(), r.note.as_deref()),
+            ("error", Some("no response"))
+        );
+        assert!(
+            took >= idle && took < idle + Duration::from_secs(1),
+            "took {took:?}"
+        );
+    }
+
     #[test]
     fn frames_are_one_line_of_json() {
         let framed = frame(&Input::Prompt("a\nb".to_owned()));
