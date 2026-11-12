@@ -1,0 +1,8 @@
+Decided: merged staging 719738b; Reported derives Default and JsonSchema both
+Because: crates/shed-proto/src/lib.rs:592
+Decided: re-blessed docs/shed.openrpc.json; its diff only adds Reported's new fields and wait's kind
+Because: "The protocol goldens and `docs/protocol.md` show the new fields."
+Rejected: dropping Default from Reported — every caller builds it with ..Reported::default()
+Check: the openrpc diff adds only id, kind, progress, app, title, msg, records and wait kind
+Check: machine_stats_..._within_5_s is the only failing test, the same host failure as at staging
+Owner: the branch is current with staging again; merging still waits for the cap raise in #106
