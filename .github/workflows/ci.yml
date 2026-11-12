@@ -114,6 +114,21 @@ jobs:
       - name: fan-out bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-fanout.sh base .
 
+  # The drain bench at the PR's base and head on one runner: 100 MB of plain, coloured and full-screen
+  # redraw output through serve, median of 5 each; fails if the head is more than 10% slower on any.
+  bench-drain:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - name: drain bench, base vs head
+        run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-drain.sh base .
+
   # The ACP benches at the PR's base and head on one runner: throughput (median of 5) and shed-only (canned
   # updates, median of 9); fails if the head is more than 10% slower on either. Then the head's
   # session/load replay time.
