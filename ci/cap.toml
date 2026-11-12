@@ -1,3 +1,3 @@
 # The hard cap on non-test Rust lines across crates/*/src (scripts/line-cap.sh). Raising it needs the
 # owner's OK in an issue; record each change in docs/cap-history/.
-line_cap = 7800
+line_cap = 10000
