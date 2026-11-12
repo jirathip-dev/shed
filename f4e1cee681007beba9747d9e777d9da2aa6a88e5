@@ -1,0 +1,8 @@
+Decided: [profile.release] with lto = "fat", codegen-units = 1, strip = true; release binary 8,004,304 -> 3,997,536 bytes
+Because: "Add `[profile.release]` with `lto = \"fat\"`, `codegen-units = 1` and `strip = true`"
+Rejected: panic = "abort" — "Keep `panic` as it is unless a measurement says otherwise"; size and benches met the goal without it
+Decided: README status says experimental, unreleased 0.0.0, the v0.1 commands work, install via scripts/install.sh
+Because: "Replace the README status line with what is true now"
+Check: fan-out bench median head/base 107% then 96% on a rerun (noise), ACP throughput 88%, shed-only 81%
+Check: scripts/install.sh signs the stripped binary; codesign -R with its designated requirement exits 0
+Owner: Release builds are half the size and no slower; the README no longer claims there is no code.
