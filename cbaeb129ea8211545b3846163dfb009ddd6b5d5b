@@ -1,0 +1,15 @@
+Decided: kept in scope; shed links a child to the terminal that started it, apart from herdsman's labels
+Because: "This issue is for agents that delegate on their own, without herdsman."
+Decided: parent is one {name, outlive, notify} value on run and terminals; events carry the name only
+Because: crates/shed-proto/src/lib.rs:489
+Rejected: flat outlive_parent and notify bools — four bools in RunParams fail clippy, and the flags mean nothing without a parent
+Decided: the cascade runs in the parent's watch task once its program exits, so exit and kill share one path
+Because: "When a parent's program ends or is killed, its children are ended too, unless started with `--outlive-parent`."
+Decided: a note for a working parent is held and typed on the first refresh where it is not working
+Because: "only while the parent is not working and at most once per piece of news"
+Rejected: dropping notes while the parent works — the parent would never learn of that child's news
+Decided: wait --children subscribes to the event stream; any takes only news after the wait starts
+Because: "`any` returns on the next child that reports done, blocked or error, or exits"
+Check: machine_stats_..._within_5_s fails on base 05f4d50 on this host too (load 0.0, uptime 0); every other test passes
+Check: the notify test proves "none while working" by FIFO input order: a mark sent after the news shows with no note before it
+Owner: helpers started by an agent are now linked to it, can be waited on as a group and stop with it
