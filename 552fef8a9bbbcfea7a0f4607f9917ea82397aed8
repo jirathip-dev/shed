@@ -1,0 +1,12 @@
+Decided: schemars 1.2.3 derives on the proto types; it was already locked through the ACP SDK, so only schemars_derive and serde_derive_internals are new
+Because: "if `schemars` is the smaller change, it has to pass `cargo deny` and the PR states its cost in lines and crates"
+Rejected: extending the Markdown generator — it lives in a test and works from examples, while shed schema and rpc.discover need the document in production code
+Decided: params are OpenRPC by-name descriptors; emit (flattened tagged event) also carries its whole params schema as x-params, events and screen.watch their line schema as x-stream
+Decided: terminal.input and terminal.keys reuse SendParams/KeysParams with name renamed to terminal, as the golden examples send
+Because: crates/shed-proto/src/lib.rs:1061
+Decided: rpc.discover is a Method, so it is in protocol.md and the document, and it is answered without hello
+Because: crates/shed-server/src/lib.rs:467
+Decided: shed-proto turns on serde_json preserve_order so the blessed file and shed schema have the same key order whatever is built
+Check: the golden-validation test's checker refuses any schema keyword it does not implement
+Check: machine_stats_..._within_5_s fails on this host at base and head (uptime_s 0); unrelated
+Owner: shed schema and rpc.discover give clients the whole API as an OpenRPC document, kept in docs/shed.openrpc.json and checked against the code
