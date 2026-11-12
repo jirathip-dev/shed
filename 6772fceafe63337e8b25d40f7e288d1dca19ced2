@@ -1,0 +1,5 @@
+Decided: the two autostart tests wait for the SIGTERMed server's pid to be gone before the temp folder is removed
+Because: crates/shed-server/src/registry.rs:248
+Rejected: skipping the state save during shutdown in src — save is right there; the tests ended before the server did
+Check: on 9555f02 the autostart tests leave shed-autostart-* behind in a fresh TMPDIR; at this head they leave none
+Owner: fixes a test cleanup race that left temporary folders behind on CI; no product behaviour changes.
