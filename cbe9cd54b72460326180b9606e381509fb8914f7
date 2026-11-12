@@ -1,0 +1,14 @@
+Decided: implement shed setup; the hooks act only inside shed and setup edits only its own marked entries
+Because: "It only adds its own marked entries and leaves the rest of the file as it was"
+Decided: hook command is `[ -z "$SHED" ] || shed state <state>`; `|| shed state ` marks shed's entries
+Because: "A hook does nothing when `$SHED` is unset, so the agent behaves the same outside shed"
+Rejected: a `shed state --hook` flag — 3 more lines with the repo at its line cap
+Decided: generic setup in crates/shed-server/src/hooks.rs; each agent's table in providers/<name>.rs
+Because: "Each agent's hook table lives in its provider module"
+Rejected: setup code in providers/mod.rs — the comment rule allows `///` only in pub modules, and line-cap.sh stops counting there at line 2
+Decided: serde_json preserve_order requested explicitly (already on via a dependency; lock unchanged)
+Because: "`--remove` restores the file byte for byte"
+Decided: a file left an empty object is deleted, so a missing config is missing again after remove
+Check: hooks::tests and setup_hooks_report_nothing_outside_shed_and_doctor_lists_them pass; just cap is 7800/7800
+Check: machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s fails on the base on this host too
+Owner: `shed setup` wires Claude Code's hooks so it reports its state in shed; `--remove` undoes it exactly.
