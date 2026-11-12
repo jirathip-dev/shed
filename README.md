@@ -38,7 +38,7 @@ around lanes:
 |---|---|
 | `shed serve` | The per-user server (launchd/systemd user job). Owns the PTYs, the state and the socket. |
 | `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and print how to load it (or unload it); check the job, socket, version and log. |
-| `shed run [--name N] [--label k=v…] [--cwd D] [--keep] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. |
+| `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. |
 | `shed ls [--label k=v] [--json]` | List terminals: name, labels, cwd, state, pid tree, RSS/CPU, age. |
 | `shed get <t>` | One terminal as JSON. |
 | `shed read <t> [--lines N] [--screen\|--history]` | The current screen, or scrollback, as plain text. |

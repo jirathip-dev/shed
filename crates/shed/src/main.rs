@@ -316,6 +316,8 @@ struct RunArgs {
     mcp: Option<PathBuf>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
+    #[arg(long, value_name = "RxC", value_parser = size)]
+    size: Option<(u16, u16)>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
 }
@@ -335,6 +337,10 @@ struct WaitArgs {
 fn policy(s: &str) -> Result<Policy, String> {
     serde_json::from_value(Value::String(s.to_owned()))
         .map_err(|_| format!("{s:?}: allow, deny or ask"))
+}
+
+fn size(s: &str) -> Result<(u16, u16), String> {
+    shed_server::config::size(s).ok_or_else(|| format!("{s:?} is not RxC, e.g. 50x200"))
 }
 
 fn label(s: &str) -> Result<(String, String), String> {
@@ -496,6 +502,8 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
             .as_ref()
             .filter(|_| server.linked)
             .map(|m| m.name.clone()),
+        rows: args.size.map(|s| s.0),
+        cols: args.size.map(|s| s.1),
     };
     let mut client = server.connect(Some(args.autostart))?;
     let info: TerminalInfo = client.call(Method::Run, &params)?;

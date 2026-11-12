@@ -551,10 +551,10 @@ fn screen_watch_sends_the_full_screen_then_diffs_and_since_skips_the_full_one() 
     );
     let first = watch.event();
     assert_eq!(first["full"], true);
-    assert_eq!((&first["rows"], &first["cols"]), (&json!(24), &json!(80)));
+    assert_eq!((&first["rows"], &first["cols"]), (&json!(50), &json!(200)));
     assert_eq!(first["cursor"], json!([0, 2]));
     let all = rows(&first);
-    assert_eq!(all.len(), 24);
+    assert_eq!(all.len(), 50);
     assert_eq!(all[0], (0, "$".to_owned()));
 
     c.result(
@@ -564,7 +564,7 @@ fn screen_watch_sends_the_full_screen_then_diffs_and_since_skips_the_full_one() 
     let updates = until_row(&mut watch, "red");
     let last = updates.last().expect("an update");
     assert!(updates.iter().all(|u| u["full"] == false), "{updates:?}");
-    assert!(rows(last).len() < 24, "only changed rows: {last}");
+    assert!(rows(last).len() < 50, "only changed rows: {last}");
     let red = &last["lines"]
         .as_array()
         .expect("lines")
@@ -703,7 +703,7 @@ fn terminal_resize_from_the_watcher_resizes_the_screen_and_the_program() {
     shell(&mut c, &dir, "w");
     let mut watch = hello(&dir);
     watch.result("screen.watch", &json!({"terminal": "w"}));
-    assert_eq!(watch.event()["cols"], 80);
+    assert_eq!(watch.event()["cols"], 200);
 
     let resize = json!({"jsonrpc": "2.0", "id": 9, "method": "terminal.resize", "params": {"cols": 40, "rows": 10}});
     watch

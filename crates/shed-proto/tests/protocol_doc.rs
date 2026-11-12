@@ -205,6 +205,8 @@ fn run_params() -> Value {
         mcp_servers: Vec::new(),
         no_hibernate: false,
         machine: None,
+        rows: None,
+        cols: None,
     })
     .unwrap()
 }
