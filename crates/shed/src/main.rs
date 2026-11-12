@@ -46,6 +46,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Hello,
+    Schema,
     Serve {
         #[arg(long)]
         detach: bool,
@@ -224,6 +225,7 @@ impl Server<'_> {
         let local = matches!(
             command,
             Command::Hello
+                | Command::Schema
                 | Command::Serve { .. }
                 | Command::Connect { .. }
                 | Command::Machine(
@@ -379,6 +381,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     let server = Server::new(&paths, cli.dir.as_deref(), cli.on, &mut cli.command)?;
     match cli.command {
         Command::Hello => out::line(format_args!("shed {}", env!("CARGO_PKG_VERSION"))),
+        Command::Schema => out::line(format_args!("{:#}", shed_server::proto::openrpc())),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
         Command::Run(args) => run_terminal(&server, json, args)?,
         Command::Ls { labels } => {
