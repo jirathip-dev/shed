@@ -1,0 +1,11 @@
+Decided: input goes through a per-terminal writer thread with a 1 s timeout; a timed-out write stays queued and the terminal reports stuck
+Because: "Writes go through a per-terminal writer task (or `spawn_blocking`) with a timeout"
+Decided: a reaper thread owns the Child and records the exit in the terminal's watch, so try_wait never takes a lock
+Because: "Exit is tracked by a reaper that sets a per-terminal flag or watch, so `refresh()` never takes `child`."
+Decided: state.json saves go to a saver thread that writes the latest snapshot; a failed write is no longer returned to run/rm/kill
+Because: "No PTY write, process wait, transcript render or file write runs while the registry lock is held."
+Rejected: writing the snapshot in the request path after unlocking, ordered by a generation number — every refresh caller would need the plumbing
+Rejected: running blocking writes in spawn_blocking without a writer thread — each stuck terminal would pile up blocked pool threads
+Check: crates/shed/tests/lock.rs fails on base 05f4d50 (send 99.98s, ls 2.09s) and passes at head; the AC4 emit test passes on both
+Check: crates/shed-core/src/terminal.rs write() bump closure: the stuck flag cannot stick after a write that finished late
+Owner: one stuck terminal no longer freezes shed; it shows as stuck instead
