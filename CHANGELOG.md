@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Parent and child terminals: `shed run` inside a terminal (`$SHED`) records it as the child's `parent`
+  (`--parent T` sets it, `--no-parent` clears it); `get`, `ls --json` and every event show it, and
+  `ls --parent T` lists a terminal's children. When a parent's program ends or is killed its children are
+  killed too, unless started with `--outlive-parent`. `shed wait --children all|any [T]` waits until no child
+  is working, or for the next child that reports `done`, `blocked` or `error`, or exits. With `--notify` a
+  child that blocks, errors or ends types one `[shed] <name> …` line into its parent (a prompt for an ACP
+  parent), held while the parent reports `working`.
 - `shed read --events [--json]` (`read` with `events`, paged by `before` and `n`): an ACP terminal's transcript
   as events, each with its `seq`; `tool_call` events carry ACP's tool `kind` when the agent sends one.
 - An ACP terminal's screen (`attach`, the `shed watch` preview) draws its events readably: the prompt bold, one

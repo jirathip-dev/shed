@@ -24,9 +24,9 @@ use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
 use shed_server::proto::{
-    Event, EventsParams, KeysParams, Link, LinkState, LsParams, MachineStats, Method, ModelParams,
-    ReadParams, ReadResult, Reported, RunParams, SendParams, State, StateParams, StatsParams,
-    Target, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
+    Children, Event, EventsParams, KeysParams, Link, LinkState, LsParams, MachineStats, Method,
+    ModelParams, Parent, ReadParams, ReadResult, Reported, RunParams, SendParams, State,
+    StateParams, StatsParams, Target, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
 };
 use shed_server::{Client, Paths};
 
@@ -56,6 +56,8 @@ enum Command {
     Ls {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
+        #[arg(long, value_name = "T")]
+        parent: Option<String>,
     },
     Get {
         name: String,
@@ -163,7 +165,9 @@ impl Command {
             | Self::Approve { name, .. }
             | Self::Cancel { name }
             | Self::Model { name, .. }
-            | Self::Wait(WaitArgs { name, .. }) => Some(name),
+            | Self::Wait(WaitArgs {
+                name: Some(name), ..
+            }) => Some(name),
             _ => None,
         }
     }
@@ -316,13 +320,30 @@ struct RunArgs {
     mcp: Option<PathBuf>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
+    #[command(flatten)]
+    parent: ParentArgs,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
 }
 
 #[derive(Args)]
+struct ParentArgs {
+    #[arg(long, value_name = "T")]
+    parent: Option<String>,
+    #[arg(long, conflicts_with = "parent")]
+    no_parent: bool,
+    #[arg(long)]
+    outlive_parent: bool,
+    #[arg(long)]
+    notify: bool,
+}
+
+#[derive(Args)]
 struct WaitArgs {
-    name: String,
+    #[arg(required_unless_present = "children")]
+    name: Option<String>,
+    #[arg(long, value_name = "all|any", value_parser = children, conflicts_with_all = ["until", "output"])]
+    children: Option<Children>,
     #[arg(long, num_args = 1.., value_name = "STATE",
           value_parser = ["working", "blocked", "done", "error", "idle", "hibernated"])]
     until: Vec<String>,
@@ -335,6 +356,10 @@ struct WaitArgs {
 fn policy(s: &str) -> Result<Policy, String> {
     serde_json::from_value(Value::String(s.to_owned()))
         .map_err(|_| format!("{s:?}: allow, deny or ask"))
+}
+
+fn children(s: &str) -> Result<Children, String> {
+    serde_json::from_value(Value::String(s.to_owned())).map_err(|_| format!("{s:?}: all or any"))
 }
 
 fn label(s: &str) -> Result<(String, String), String> {
@@ -364,9 +389,10 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Hello => out::line(format_args!("shed {}", env!("CARGO_PKG_VERSION"))),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
         Command::Run(args) => run_terminal(&server, json, args)?,
-        Command::Ls { labels } => {
+        Command::Ls { labels, parent } => {
             let params = LsParams {
                 labels: labels.into_iter().collect(),
+                parent,
             };
             let mut list: Vec<TerminalInfo> = server.connect(None)?.call(Method::Ls, &params)?;
             if server.linked {
@@ -491,6 +517,16 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         resume: args.resume,
         mcp_servers,
         no_hibernate: args.no_hibernate,
+        parent: match (args.parent.no_parent, &server.on) {
+            (true, _) => None,
+            (false, None) => (args.parent.parent).or_else(|| shed_server::config::var("SHED")),
+            (false, Some(_)) => args.parent.parent,
+        }
+        .map(|name| Parent {
+            name,
+            outlive: args.parent.outlive_parent,
+            notify: args.parent.notify,
+        }),
         machine: server
             .on
             .as_ref()
@@ -630,8 +666,16 @@ fn state(
 }
 
 fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode> {
+    let name = match args.name {
+        Some(name) => name,
+        None => server.name(
+            shed_server::config::var("SHED")
+                .context("no terminal given and $SHED is unset (it is set inside a terminal)")?,
+        ),
+    };
     let params = WaitParams {
-        name: args.name,
+        name,
+        children: args.children,
         until: args.until,
         output: args.output,
         timeout: args.timeout,
@@ -640,6 +684,19 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     let t = &done.terminal;
     let state = t.reported.as_ref().map(|r| &r.state);
     print(json, &done, || match (done.outcome, t.exit) {
+        (WaitOutcome::Matched, _) if params.children == Some(Children::All) => {
+            format!("{} no child working\n", t.name)
+        }
+        (WaitOutcome::Matched, code) if params.children.is_some() && t.state == State::Exited => {
+            format!(
+                "{} exited{}\n",
+                t.name,
+                code.map(|c| format!(" {c}")).unwrap_or_default()
+            )
+        }
+        (WaitOutcome::Matched, _) if params.children.is_some() => {
+            format!("{} {}\n", t.name, state.map_or("running", String::as_str))
+        }
         (WaitOutcome::Matched, _) => match state.filter(|s| params.until.contains(s)) {
             Some(state) => format!("{} {state}\n", t.name),
             None => format!("{} output\n", t.name),

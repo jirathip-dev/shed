@@ -139,6 +139,19 @@ fn record_events(dir: &Path, goldens: &mut Goldens) {
     goldens.record("events", &(request, response, Value::Null));
 }
 
+fn record_child(c: &mut Conn, goldens: &mut Goldens, dir: &Path) -> Value {
+    let other = json!({"name": "other", "labels": {"role": "rev"}, "cwd": dir, "cmd": ["sleep", "100"],
+        "parent": {"name": "build", "outlive": true}});
+    goldens.record("run", &c.call(23, "run", &other));
+    let ls = c.call(3, "ls", &json!({"labels": {"role": "impl"}}));
+    goldens.record("ls", &ls);
+    assert_eq!(ls.2["result"].as_array().map(Vec::len), Some(1));
+    let children = c.call(24, "ls", &json!({"parent": "build"}));
+    goldens.record("ls", &children);
+    assert_eq!(children.2["result"][0]["name"], "other");
+    other
+}
+
 #[test]
 fn run_ls_read_kill_over_the_socket_match_the_goldens() {
     let dir = temp_dir("golden");
@@ -175,12 +188,7 @@ fn run_ls_read_kill_over_the_socket_match_the_goldens() {
     goldens.record("run", &run);
     assert_eq!(run.2["result"]["state"], "running");
 
-    let other =
-        json!({"name": "other", "labels": {"role": "rev"}, "cwd": dir, "cmd": ["sleep", "100"]});
-    c.result("run", &other);
-    let ls = c.call(3, "ls", &json!({"labels": {"role": "impl"}}));
-    goldens.record("ls", &ls);
-    assert_eq!(ls.2["result"].as_array().map(Vec::len), Some(1));
+    let other = record_child(&mut c, &mut goldens, &dir);
 
     goldens.record("get", &c.call(4, "get", &json!({"name": "build"})));
     eventually("hello on screen", || {
@@ -234,6 +242,11 @@ fn run_ls_read_kill_over_the_socket_match_the_goldens() {
         (11, "run", other.clone()),
         (12, "keys", json!({"name": "build", "keys": ["hyper"]})),
         (13, "run", json!({"cwd": dir, "cmd": []})),
+        (
+            25,
+            "run",
+            json!({"cwd": dir, "cmd": ["true"], "parent": {"name": "nope"}}),
+        ),
     ] {
         goldens.record("errors", &c.call(id, method, &params));
     }

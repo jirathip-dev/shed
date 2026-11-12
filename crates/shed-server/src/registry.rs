@@ -65,6 +65,7 @@ struct Entry {
     resources: Option<Resources>,
     emitted: Option<Resources>,
     sampled: (Instant, Duration),
+    notes: Vec<String>,
 }
 
 impl Entry {
@@ -76,6 +77,7 @@ impl Entry {
             resources: None,
             emitted: None,
             sampled: (shed_core::clock::now(), Duration::ZERO),
+            notes: Vec::new(),
         }
     }
 
@@ -105,6 +107,15 @@ fn internal(e: impl std::fmt::Display) -> RpcError {
 
 fn moved(old: u64, new: u64) -> bool {
     new.abs_diff(old) * 10 > old
+}
+
+fn note(child: &TerminalInfo, what: &str) -> Option<(String, String)> {
+    let parent = child.parent.as_ref().filter(|p| p.notify)?;
+    Some((parent.name.clone(), format!("[shed] {} {what}", child.name)))
+}
+
+fn working(t: &TerminalInfo) -> bool {
+    t.reported.as_ref().is_some_and(|r| r.state == "working")
 }
 
 fn exit_code(status: ExitStatus) -> Option<i32> {
@@ -171,7 +182,7 @@ impl Registry {
             }
             info.pid = term.as_ref().map(|t| t.pid());
             if term.is_some() {
-                events.emit(&info.name, &info.labels, EventKind::Started);
+                events.emit(&info, EventKind::Started);
             }
             entries.insert(info.name.clone(), Entry::new(info, term));
         }
@@ -228,7 +239,7 @@ impl Registry {
     }
 
     pub(crate) fn refresh(&mut self) -> Result<(), RpcError> {
-        let mut changed = false;
+        let (mut changed, mut notes) = (false, Vec::new());
         for entry in self.entries.values_mut() {
             let Some(term) = &entry.term else { continue };
             let reported = term.report().map(|r| Reported {
@@ -239,35 +250,90 @@ impl Registry {
             if entry.info.reported != reported {
                 entry.info.reported.clone_from(&reported);
                 if let Some(r) = reported {
-                    let (name, labels) = (&entry.info.name, &entry.info.labels);
-                    self.events.emit(name, labels, EventKind::State(r));
+                    if ["blocked", "error"].contains(&r.state.as_str()) {
+                        let what = [Some(&r.state), r.note.as_ref()].into_iter().flatten();
+                        notes.extend(note(
+                            &entry.info,
+                            &what.cloned().collect::<Vec<_>>().join(": "),
+                        ));
+                    }
+                    self.events.emit(&entry.info, EventKind::State(r));
                 }
                 changed = true;
             }
             if entry.info.state == State::Running
                 && let Some(status) = term.try_wait().map_err(internal)?
             {
-                Self::exited(&mut self.events, entry, status);
+                notes.extend(Self::exited(&mut self.events, entry, status));
                 changed = true;
             }
         }
+        self.deliver(notes);
         if changed {
             self.save().map_err(internal)?;
         }
         Ok(())
     }
 
-    fn exited(events: &mut Events, entry: &mut Entry, status: ExitStatus) {
+    fn exited(
+        events: &mut Events,
+        entry: &mut Entry,
+        status: ExitStatus,
+    ) -> Option<(String, String)> {
         let code = exit_code(status);
         (entry.info.state, entry.info.exit) = (State::Exited, code);
         entry.info.pid = None;
         entry.resources = None;
-        let kind = if entry.killing {
-            EventKind::Killed
-        } else {
-            EventKind::Exited { code }
+        let (kind, what) = match code {
+            _ if entry.killing => (EventKind::Killed, "killed".to_owned()),
+            Some(n) => (EventKind::Exited { code }, format!("exited {n}")),
+            None => (EventKind::Exited { code }, "exited".to_owned()),
         };
-        events.emit(&entry.info.name, &entry.info.labels, kind);
+        events.emit(&entry.info, kind);
+        note(&entry.info, &what)
+    }
+
+    fn deliver(&mut self, notes: Vec<(String, String)>) {
+        for (parent, note) in notes {
+            if let Some(entry) = self.entries.get_mut(&parent) {
+                entry.notes.push(note);
+            }
+        }
+        for entry in self.entries.values_mut() {
+            let Some(term) = &entry.term else { continue };
+            if entry.notes.is_empty() || entry.info.state == State::Exited || working(&entry.info) {
+                continue;
+            }
+            let notes = std::mem::take(&mut entry.notes);
+            let text = if entry.info.acp.is_some() {
+                let state = "working".to_owned();
+                term.set_report(Report {
+                    state,
+                    note: None,
+                    source: None,
+                });
+                crate::acp::frame(&crate::acp::Input::Prompt(notes.join("\n")))
+            } else {
+                notes.into_iter().map(|n| n + "\r").collect()
+            };
+            term.write(text.as_bytes()).ok();
+        }
+    }
+
+    pub(crate) fn children(&self, name: &str) -> impl Iterator<Item = &TerminalInfo> {
+        let infos = self.entries.values().map(|e| &e.info);
+        infos.filter(move |t| t.parent.as_ref().is_some_and(|p| p.name == name))
+    }
+
+    pub(crate) fn busy_children(&self, name: &str) -> bool {
+        let running = |t: &&TerminalInfo| t.state == State::Running;
+        (self.children(name).filter(running)).any(|t| t.reported.is_none() || working(t))
+    }
+
+    pub(crate) fn orphans(&self, name: &str) -> Vec<String> {
+        let ended = (self.children(name)).filter(|t| t.parent.as_ref().is_some_and(|p| !p.outlive));
+        let running = ended.filter(|t| t.state == State::Running);
+        running.map(|t| t.name.clone()).collect()
     }
 
     pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) {
@@ -293,8 +359,7 @@ impl Registry {
                 .is_none_or(|old| moved(old.rss_mb, now.rss_mb) || moved(old.cpu_pct, now.cpu_pct))
             {
                 entry.emitted = Some(now);
-                let (name, labels) = (&entry.info.name, &entry.info.labels);
-                self.events.emit(name, labels, EventKind::Resources(now));
+                self.events.emit(&entry.info, EventKind::Resources(now));
             }
         }
     }
@@ -378,11 +443,11 @@ impl Registry {
         Stream::Events(self.events.subscribe(p))
     }
 
-    pub(crate) fn running(&self) -> Vec<Arc<Terminal>> {
+    pub(crate) fn running(&self) -> Vec<(String, Arc<Terminal>)> {
         self.entries
             .values()
             .filter(|e| e.info.state == State::Running)
-            .filter_map(|e| e.term.clone())
+            .filter_map(|e| Some((e.info.name.clone(), e.term.clone()?)))
             .collect()
     }
 
@@ -416,6 +481,15 @@ impl Registry {
             return Err(bad("label keys must be non-empty and have no '='"));
         }
         crate::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
+        if let Some(parent) = p.parent.as_ref().map(|p| &p.name) {
+            let gone = |_| {
+                RpcError::new(
+                    ErrorCode::NoSuchTerminal,
+                    format!("parent {parent} is not running"),
+                )
+            };
+            self.live(parent).map_err(gone)?;
+        }
         let name = match p.name {
             Some(name) if !valid_name(&name) => return Err(bad("name must match [A-Za-z0-9._-]+")),
             Some(name) if self.entries.contains_key(&name) => {
@@ -452,8 +526,9 @@ impl Registry {
             resources: None,
             acp: p.acp,
             session: None,
+            parent: p.parent,
         };
-        self.events.emit(&name, &info.labels, EventKind::Started);
+        self.events.emit(&info, EventKind::Started);
         let entry = Entry::new(info.clone(), Some(Arc::new(term)));
         self.entries.insert(name, entry);
         self.saved(info)
@@ -466,6 +541,10 @@ impl Registry {
                 p.labels
                     .iter()
                     .all(|(k, v)| e.info.labels.get(k) == Some(v))
+            })
+            .filter(|e| {
+                let parent = e.info.parent.as_ref().map(|p| &p.name);
+                p.parent.is_none() || parent == p.parent.as_ref()
             })
             .map(Entry::view)
             .collect()
@@ -583,8 +662,7 @@ impl Registry {
             EventKind::Session(s) => info.session.replace(s.clone()).is_none_or(|old| old != *s),
             _ => false,
         };
-        let labels = info.labels.clone();
-        self.events.emit_as(&p.name, &labels, p.kind, p.replay);
+        self.events.emit_as(info, p.kind, p.replay);
         if session {
             self.save().map_err(internal)?;
         }
@@ -624,9 +702,10 @@ impl Registry {
         if entry.info.state == State::Running
             && entry.term.as_ref().is_some_and(|t| Arc::ptr_eq(t, term))
         {
-            Self::exited(&mut self.events, entry, status);
+            let note = Self::exited(&mut self.events, entry, status);
+            self.deliver(note.into_iter().collect());
         }
-        let info = entry.view();
+        let info = self.entry(name)?.view();
         self.saved(info)
     }
 

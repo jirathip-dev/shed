@@ -188,8 +188,8 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
                         };
                         since = Some(e.seq);
                         let name = format!("{}/{}", machine.name, e.name);
-                        let mut reg = lock(registry);
-                        reg.events.emit_as(&name, &e.labels, e.kind, e.replay);
+                        let parent = e.parent.map(|p| format!("{}/{p}", machine.name));
+                        lock(registry).events.push(Event { name, parent, ..e });
                     }
                     *lock(&held.calls) = None;
                     held.set(LinkState::Reconnecting, None);
