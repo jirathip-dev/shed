@@ -234,10 +234,12 @@ fn write_line(s: &mut String, row: &[Cell]) {
         .map_or(0, |i| i + 1);
     s.clear();
     s.reserve(end);
-    row.iter()
-        .take(end)
-        .flat_map(|c| chars(&c.0))
-        .for_each(|c| s.push(c));
+    for (glyph, _) in row.iter().take(end) {
+        match glyph {
+            [c, '\0', ..] if *c != '\0' => s.push(*c),
+            _ => s.extend(chars(glyph)),
+        }
+    }
     s.truncate(s.trim_end().len());
 }
 
@@ -524,6 +526,9 @@ impl Grid {
         let Some(line) = self.cells.get_mut(self.row) else {
             return;
         };
+        if span == 1 && line.len() == col {
+            return line.push((glyph(c), pen));
+        }
         if line.get(col).is_some_and(|c| c.0 == TAIL)
             && let Some(head) = line.get_mut(col.saturating_sub(1))
         {

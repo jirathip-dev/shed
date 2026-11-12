@@ -139,8 +139,7 @@ impl Terminal {
             let watch = Arc::clone(&watcher);
             let (logs, logger) = stage(move |rx: Receiver<Vec<u8>>| {
                 let mut log = log;
-                rx.iter()
-                    .try_for_each(|bytes| log.as_mut()?.append(&bytes).ok())
+                batches(&rx).try_for_each(|bytes| log.as_mut()?.append(&bytes).ok())
             });
             let (chunks, feeder) =
                 stage(move |rx| feed_loop(&rx, &pty, &screen, &outputs, &watch, Some(logs)));
@@ -356,11 +355,22 @@ fn pty_size(size: Size) -> pty_process::Size {
     pty_process::Size::new(size.rows.max(1), size.cols.max(1))
 }
 
+const DEPTH: usize = 256;
+
 fn stage<T: Send + 'static, R: Send + 'static>(
     run: impl FnOnce(Receiver<T>) -> R + Send + 'static,
 ) -> (SyncSender<T>, std::thread::JoinHandle<R>) {
-    let (tx, rx) = std::sync::mpsc::sync_channel(16);
+    let (tx, rx) = std::sync::mpsc::sync_channel(DEPTH);
     (tx, std::thread::spawn(move || run(rx)))
+}
+
+fn batches(rx: &Receiver<Vec<u8>>) -> impl Iterator<Item = Vec<u8>> + '_ {
+    rx.iter().map(|mut chunk| {
+        for more in rx.try_iter().take(DEPTH) {
+            chunk.extend(more);
+        }
+        chunk
+    })
 }
 
 fn read_loop(pty: &pty_process::blocking::Pty, chunks: &SyncSender<Vec<u8>>) {
@@ -390,10 +400,7 @@ fn feed_loop(
     watch: &watch::Sender<Status>,
     mut log: Option<SyncSender<Vec<u8>>>,
 ) {
-    while let Ok(mut chunk) = chunks.recv() {
-        for more in chunks.try_iter() {
-            chunk.extend(more);
-        }
+    for chunk in batches(chunks) {
         let (relayed, replies) = {
             let mut screen = lock(screen);
             let relayed = screen.relay(&chunk);
