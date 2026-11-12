@@ -44,3 +44,8 @@ as_conversions = "deny"
 print_stdout = "deny"
 print_stderr = "deny"
 let_underscore_must_use = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
