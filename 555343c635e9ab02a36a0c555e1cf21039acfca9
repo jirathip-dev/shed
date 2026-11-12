@@ -1,0 +1,10 @@
+Decided: merged origin/staging 62e565a; read keeps the out-of-lock render with staging's size(None, None)
+Because: crates/shed-server/src/registry.rs:559
+Decided: trimmed this PR's own lines with no behaviour change so the total fits the cap (7832 -> 7797 / 7800)
+Because: "Every gate is green and the line cap holds."
+Decided: refresh returns the registry so rm and read lock, refresh and copy in one statement
+Because: crates/shed-server/src/lib.rs:553
+Rejected: asking for a cap raise first — the rule is trim first, and trimming fit
+Check: Terminal::write still reports BrokenPipe when the writer is gone: a failed send drops the reply sender, so recv_timeout is Disconnected
+Check: record_stats still refreshes before counting terminals (Registry::record calls refresh)
+Owner: keeps the branch current with staging and inside the code-size limit
