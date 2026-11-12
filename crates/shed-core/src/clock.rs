@@ -9,6 +9,12 @@ pub fn now() -> Instant {
     Instant::now()
 }
 
+/// Now, on tokio's clock, which a paused test runtime controls.
+#[must_use]
+pub fn tokio_now() -> tokio::time::Instant {
+    tokio::time::Instant::now()
+}
+
 /// Whole seconds since the Unix epoch; 0 for a clock set before it.
 #[must_use]
 pub fn unix_now() -> u64 {

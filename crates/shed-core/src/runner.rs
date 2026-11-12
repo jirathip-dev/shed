@@ -57,7 +57,7 @@ pub fn over<A: AsRef<OsStr>>(
         .spawn()
 }
 
-/// Starts `program` with `args` in `cwd` without the `unset` variable, stdin and stdout piped.
+/// Starts `program` with `args` in `cwd` without the `unset` variable, stdin, stdout and stderr piped.
 ///
 /// # Errors
 /// When `program` cannot start.
@@ -73,6 +73,7 @@ pub fn piped<A: AsRef<OsStr>>(
         .env_remove(unset)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
 }
 

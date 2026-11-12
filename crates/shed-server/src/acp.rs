@@ -15,7 +15,9 @@ use std::fs::{self, File};
 use std::io::{self, BufWriter, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
@@ -35,8 +37,11 @@ use serde_json::Value;
 use shed_proto::{
     AcpSession, ApprovalOption, EmitParams, EventKind, Method, Reported, StateParams,
 };
-use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{
+    AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader,
+};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::time::Instant;
 
 use crate::{Client, Error};
 
@@ -376,6 +381,8 @@ struct Session {
     reply: String,
     auth: &'static [&'static str],
     heard: Instant,
+    stirred: Arc<AtomicBool>,
+    idle: Duration,
     replay: bool,
     waking: bool,
     last: (String, Option<String>),
@@ -437,7 +444,7 @@ impl Session {
     }
 
     fn input(&mut self, input: Input) -> AcpResult<()> {
-        self.heard = shed_core::clock::now();
+        self.heard = shed_core::clock::tokio_now();
         let back = self.back.clone();
         match input {
             Input::Prompt(text) => {
@@ -509,7 +516,6 @@ impl Session {
     }
 
     fn message(&mut self, m: FromAgent) -> AcpResult<()> {
-        self.heard = shed_core::clock::now();
         match m {
             FromAgent::Update(Ok(u)) => self.update(*u),
             FromAgent::Update(Err(why)) => {
@@ -671,6 +677,12 @@ impl Session {
     }
 }
 
+fn turn_idle_timeout() -> Duration {
+    let secs =
+        crate::config::var("SHED_TURN_IDLE_TIMEOUT").map_or(1800, |s| s.parse().unwrap_or(1800));
+    Duration::from_secs(secs)
+}
+
 fn hibernate_after() -> Option<Duration> {
     let secs =
         crate::config::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
@@ -741,8 +753,6 @@ async fn drive(
         }
         s.input(input)?;
     }
-    let idle =
-        crate::config::var("SHED_TURN_IDLE_TIMEOUT").map_or(120, |s| s.parse().unwrap_or(120));
     let sleep_after = hibernate_after().filter(|_| init.agent_capabilities.load_session);
     let mut typing = true;
     loop {
@@ -755,9 +765,12 @@ async fn drive(
             },
             () = cx.incoming_closed() => return Ok(None),
             () = tokio::time::sleep(Duration::from_millis(100)) => {
+                if s.stirred.swap(false, Ordering::Relaxed) {
+                    s.heard = shed_core::clock::tokio_now();
+                }
                 let quiet = s.heard.elapsed();
                 if !s.asks.is_empty() {
-                } else if !s.prompts.is_empty() && quiet.as_secs() >= idle {
+                } else if !s.prompts.is_empty() && quiet >= s.idle {
                     s.fail("no response".to_owned())?;
                 } else if s.prompts.is_empty() && typing && (resumed || s.next > 0)
                     && sleep_after.is_some_and(|d| quiet >= d)
@@ -930,18 +943,32 @@ fn open_transcript(state: &Path, name: &str) -> io::Result<File> {
 }
 
 async fn connect(
-    child: &mut tokio::process::Child,
+    stdin: impl AsyncWrite + Send + Unpin + 'static,
+    stdout: impl AsyncRead + Send + Unpin + 'static,
+    stderr: impl AsyncRead + Send + Unpin + 'static,
     main: impl AsyncFnOnce(
         ConnectionTo<Agent>,
         UnboundedSender<FromAgent>,
         UnboundedReceiver<FromAgent>,
+        Arc<AtomicBool>,
     ) -> AcpResult<Option<Session>>,
 ) -> Result<Option<Session>, Error> {
-    let (Some(stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
-        return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
-    };
-    let incoming = stream::unfold(BufReader::new(stdout).lines(), async |mut lines| {
-        Some((lines.next_line().await.transpose()?, lines))
+    let stirred = Arc::new(AtomicBool::new(false));
+    let lines = (BufReader::new(stdout).lines(), stirred.clone());
+    let incoming = stream::unfold(lines, async |(mut lines, stirred)| {
+        let line = lines.next_line().await.transpose()?;
+        stirred.store(true, Ordering::Relaxed);
+        Some((line, (lines, stirred)))
+    });
+    let echo = stirred.clone();
+    tokio::spawn(async move {
+        let (mut from, mut to, mut line) =
+            (BufReader::new(stderr), tokio::io::stderr(), Vec::new());
+        while from.read_until(b'\n', &mut line).await.is_ok_and(|n| n > 0) {
+            echo.store(true, Ordering::Relaxed);
+            to.write_all(&line).await.ok();
+            line.clear();
+        }
     });
     let outgoing = sink::unfold(stdin, async |mut stdin, line: String| {
         stdin.write_all(format!("{line}\n").as_bytes()).await?;
@@ -971,7 +998,7 @@ async fn connect(
         )
         .connect_with(
             Lines::new(Box::pin(outgoing), Box::pin(incoming)),
-            async move |cx| main(cx, back, from_agent).await,
+            async move |cx| main(cx, back, from_agent, stirred).await,
         )
         .await
         .map_err(|e| Error::Acp(e.to_string()))
@@ -998,8 +1025,14 @@ fn run(
         preview: Preview::default(),
     };
     let (typed, mut inputs) = unbounded_channel();
-    let session = move |cx, back, kept: Option<Session>| match kept {
-        Some(s) => Session { cx, back, ..s },
+    let idle = turn_idle_timeout();
+    let session = move |cx, back, stirred, kept: Option<Session>| match kept {
+        Some(s) => Session {
+            cx,
+            back,
+            stirred,
+            ..s
+        },
         None => Session {
             cx,
             back,
@@ -1012,7 +1045,9 @@ fn run(
             titles: BTreeMap::new(),
             reply: String::new(),
             auth: crate::providers::auth_failures(agent_id),
-            heard: shed_core::clock::now(),
+            heard: shed_core::clock::tokio_now(),
+            stirred,
+            idle,
             replay: false,
             waking: false,
             last: ("idle".to_owned(), None),
@@ -1037,10 +1072,20 @@ fn run(
             let mut child = shed_core::runner::piped(program, args, cwd, "SHED_ACP_MCP")
                 .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
-            let slept = connect(&mut child, async |cx, back, from_agent| {
-                let s = session(cx, back, prev);
-                drive(s, from_agent, rx, cwd, loaded, first).await
-            })
+            let (Some(stdin), Some(stdout), Some(stderr)) =
+                (child.stdin.take(), child.stdout.take(), child.stderr.take())
+            else {
+                return Err(Error::Acp("the agent's stdio is not piped".to_owned()));
+            };
+            let slept = connect(
+                stdin,
+                stdout,
+                stderr,
+                async |cx, back, from_agent, stirred| {
+                    let s = session(cx, back, stirred, prev);
+                    drive(s, from_agent, rx, cwd, loaded, first).await
+                },
+            )
             .await?;
             let Some(mut s) = slept else {
                 return Ok(child.wait().await?.code().unwrap_or(1));
