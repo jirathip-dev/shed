@@ -27,6 +27,7 @@ fn info(state: State) -> TerminalInfo {
         exit: (state == State::Exited).then_some(0),
         pid: (state == State::Running).then_some(4242),
         reported: None,
+        records: Vec::new(),
         idle_after: None,
         resources: (state == State::Running).then_some(RESOURCES),
         acp: None,
@@ -172,7 +173,27 @@ fn done() -> Reported {
     Reported {
         state: "done".into(),
         note: Some("tests pass".into()),
-        state_source: None,
+        ..Reported::default()
+    }
+}
+
+fn asking() -> TerminalInfo {
+    TerminalInfo {
+        reported: Some(Reported {
+            state: "blocked".into(),
+            kind: Some("question".into()),
+            progress: Some(40),
+            app: Some("make".into()),
+            title: Some("Docs".into()),
+            msg: Some("Overwrite config.toml?".into()),
+            ..Reported::default()
+        }),
+        records: vec![Reported {
+            state: "working".into(),
+            id: Some("build/tests".into()),
+            ..Reported::default()
+        }],
+        ..info(State::Running)
     }
 }
 
@@ -307,16 +328,14 @@ fn example(method: Method) -> (Value, Value) {
             to_value(WaitParams {
                 name: "build".into(),
                 until: vec!["done".into(), "blocked".into()],
+                kind: Some("question".into()),
                 output: Some("^ok \\d+ tests$".into()),
                 timeout: Some(600.0),
             })
             .unwrap(),
             to_value(WaitResult {
                 outcome: WaitOutcome::Matched,
-                terminal: TerminalInfo {
-                    reported: Some(done()),
-                    ..info(State::Running)
-                },
+                terminal: asking(),
             })
             .unwrap(),
         ),
@@ -431,7 +450,8 @@ fn markdown() -> String {
          A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is\n\
          the exit status (128 + N for signal N), `null` while running or when the program was lost in a server\n\
          restart; `pid` is set while running; `reported` is the state the program last reported (absent until\n\
-         then); `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory\n\
+         then), with OSC 7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them; `records` are its\n\
+         OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory\n\
          (MiB) and CPU (percent of one core) at the last sample, while running; an ACP terminal's `session` is its\n\
          agent session (`id`, for `run`'s `resume`; the current `model` and the `models`, `[id, name]`; `run`'s\n\
          `mcp_servers` with each env and header value as `***`; the agent's slash `commands`, `[name, description,\n\

@@ -355,10 +355,10 @@ impl Method {
                 "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection."
             }
             Self::State => {
-                "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen."
+                "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen. The terminal also speaks the Program Status Protocol (OSC 7501, revision 0.4): `state=<s>[:<key>=<value>]…` with `idle` and `clear`, `id`, `kind`, `progress`, `app` and base64 `title` and `msg`, and answers the probe `ESC ] 7501 ; ?`. A report with an `id` is a record of its own (`records`); on exit `working` and `blocked` ones are dropped."
             }
             Self::Wait => {
-                "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls."
+                "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback; `blocked` only of `kind`, if given) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls."
             }
             Self::Events => {
                 "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes."
@@ -574,9 +574,9 @@ pub struct StateParams {
 }
 
 /// A state a terminal's program reported.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reported {
-    /// `working`, `blocked`, `done` or `error`; `idle` from the `idle_after` fallback.
+    /// `working`, `blocked`, `done` or `error`; `idle` from OSC 7501 or the `idle_after` fallback.
     pub state: String,
     /// A free-text note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -584,6 +584,24 @@ pub struct Reported {
     /// The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_source: Option<String>,
+    /// OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Why it is blocked: `permission`, `question` or `auth`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// Percent done, 0–100, while working or blocked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub progress: Option<u8>,
+    /// The program's stable name, e.g. `make`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
+    /// A short label (OSC 7501's `title`, decoded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// A one-line description (OSC 7501's `msg`, decoded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub msg: Option<String>,
 }
 
 /// `wait` params.
@@ -594,6 +612,9 @@ pub struct WaitParams {
     /// Reported states that end the wait.
     #[serde(default)]
     pub until: Vec<String>,
+    /// With `blocked` in `until`: only a block of this kind (`permission`, `question` or `auth`) ends the wait.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
     /// A pattern (`.`, `[…]`, `\d \w \s`, `* + ?`, `^ $`) that ends the wait when a screen line matches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
@@ -896,6 +917,9 @@ pub struct TerminalInfo {
     /// The state the program last reported, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported: Option<Reported>,
+    /// The OSC 7501 records the program reported with an `id`, least recently updated first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<Reported>,
     /// The `idle` fallback's silence, in seconds, if on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_after: Option<u64>,

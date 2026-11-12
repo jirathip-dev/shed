@@ -31,12 +31,40 @@ pub enum Wake {
 struct Status {
     changes: u64,
     closed: bool,
+    ended: bool,
     last_output: Instant,
     report: Option<Report>,
+    records: Vec<Report>,
     idle_after: Option<Duration>,
 }
 
 impl Status {
+    fn apply(&mut self, report: Report) {
+        match (report.state.as_str(), report.id.clone()) {
+            ("clear", None) => (self.report, self.records) = (None, Vec::new()),
+            ("clear", Some(id)) => self.records.retain(|r| {
+                r.id.as_ref()
+                    .is_some_and(|r| *r != id && !r.starts_with(&format!("{id}/")))
+            }),
+            (_, None) => self.report = Some(report),
+            (_, Some(id)) => {
+                self.records.retain(|r| r.id.as_ref() != Some(&id));
+                self.records.push(report);
+                if self.records.len() > 256 {
+                    self.records.remove(0);
+                }
+            }
+        }
+        self.end(self.ended);
+    }
+
+    fn end(&mut self, ended: bool) {
+        self.ended = ended;
+        let lasts = |r: &Report| !ended || !["working", "blocked"].contains(&r.state.as_str());
+        self.report = self.report.take().filter(lasts);
+        self.records.retain(lasts);
+    }
+
     fn idle_at(&self) -> Option<Instant> {
         match self.report {
             Some(_) => None,
@@ -125,8 +153,10 @@ impl Terminal {
         let watch = Arc::new(watch::Sender::new(Status {
             changes: 0,
             closed: false,
+            ended: false,
             last_output: crate::clock::now(),
             report: None,
+            records: Vec::new(),
             idle_after: None,
         }));
         let (reader, sink, subs) = (Arc::clone(&pty), Arc::clone(&screen), Arc::clone(&outputs));
@@ -134,7 +164,10 @@ impl Terminal {
         std::thread::spawn(move || {
             read_loop(&reader, &sink, &subs, &watcher, log);
             *lock(&subs) = None;
-            bump(&watcher, |s| s.closed = true);
+            bump(&watcher, |s| {
+                s.closed = true;
+                s.end(true);
+            });
         });
         Ok(Self {
             pty,
@@ -187,15 +220,20 @@ impl Terminal {
         status.report.clone().or_else(|| {
             idle.then(|| Report {
                 state: "idle".to_owned(),
-                note: None,
-                source: None,
+                ..Report::default()
             })
         })
     }
 
+    /// The records the program reported with an `id`, least recently updated first.
+    #[must_use]
+    pub fn records(&self) -> Vec<Report> {
+        self.watch.borrow().records.clone()
+    }
+
     /// Records a reported state, as if the program had sent the escape.
     pub fn set_report(&self, report: Report) {
-        bump(&self.watch, |s| s.report = Some(report));
+        bump(&self.watch, |s| s.apply(report));
     }
 
     /// Turns the silence fallback on (`Some`) or off: [`report`](Self::report) says `idle` after this
@@ -285,12 +323,16 @@ impl Terminal {
         Ok(())
     }
 
-    /// The program's exit status, if it has exited.
+    /// The program's exit status, if it has exited; once it has, its `working` and `blocked` reports are dropped.
     ///
     /// # Errors
     /// [`Error::Io`] when the status cannot be read.
     pub fn try_wait(&self) -> Result<Option<ExitStatus>, Error> {
-        Ok(lock(&self.child).try_wait()?)
+        let status = lock(&self.child).try_wait()?;
+        if status.is_some() && !self.watch.borrow().ended {
+            bump(&self.watch, |s| s.end(true));
+        }
+        Ok(status)
     }
 
     /// The live processes of the terminal's tree and their summed RSS and CPU time.
@@ -351,10 +393,12 @@ fn read_loop(
                 let replies = {
                     let mut screen = lock(screen);
                     screen.feed(chunk);
-                    let report = screen.take_report();
+                    let reports = screen.take_reports();
                     bump(watch, |s| {
                         s.last_output = crate::clock::now();
-                        s.report = report.or_else(|| s.report.take());
+                        for r in reports {
+                            s.apply(r);
+                        }
                     });
                     screen.take_replies()
                 };

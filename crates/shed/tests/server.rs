@@ -500,6 +500,30 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
     assert_eq!(read["text"], "ab\nc", "no escape reaches the screen");
 }
 
+#[test]
+fn osc_7501_state_events_carry_the_keys_and_each_id() {
+    let dir = temp_dir("osc7501-events");
+    let _server = Server::start(&dir);
+    let mut c = hello(&dir);
+    let mut live = Conn::events(&dir, &json!({}));
+    let script = "printf '\\033]7501;state=blocked:kind=auth:progress=7:app=gh:title=TG9naW4=\\007\
+                  \\033]7501;state=working:id=sub/a\\007'; read x";
+    c.result(
+        "run",
+        &json!({"name": "e", "cwd": dir, "cmd": ["sh", "-c", script]}),
+    );
+    assert_eq!(live.event()["event"], "started");
+    let keys = |e: Value| {
+        let mut e = e.as_object().cloned().expect("an object");
+        e.retain(|k, _| !["seq", "name", "labels", "time"].contains(&k.as_str()));
+        Value::Object(e)
+    };
+    let root = json!({"event": "state", "state": "blocked", "kind": "auth", "progress": 7, "app": "gh", "title": "Login"});
+    let sub = json!({"event": "state", "state": "working", "id": "sub/a"});
+    let got = [keys(live.event()), keys(live.event())];
+    assert_eq!(got, [root, sub]);
+}
+
 fn hello(dir: &Path) -> Conn {
     let mut c = Conn::open(dir);
     c.result("hello", &json!({"product": "shed", "version": VERSION}));

@@ -398,11 +398,10 @@ impl Session {
         if state != "hibernated" {
             self.last = (state.to_owned(), note.clone());
         }
-        let (state, state_source) = (state.to_owned(), None);
         self.send(Out::State(Reported {
-            state,
+            state: state.to_owned(),
             note,
-            state_source,
+            ..Reported::default()
         }))
         .ok();
     }
@@ -904,7 +903,7 @@ pub fn bridge(
         let report = Reported {
             state: "error".to_owned(),
             note: Some(e.to_string()),
-            state_source: None,
+            ..Reported::default()
         };
         let _: Option<serde_json::Value> = server
             .call(Method::State, &StateParams { name, report })

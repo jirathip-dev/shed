@@ -56,7 +56,7 @@ impl History {
             _ => {}
         }
         screen.take_replies();
-        screen.take_report();
+        screen.take_reports();
         Ok(screen)
     }
 }

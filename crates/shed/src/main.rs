@@ -326,6 +326,8 @@ struct WaitArgs {
     #[arg(long, num_args = 1.., value_name = "STATE",
           value_parser = ["working", "blocked", "done", "error", "idle", "hibernated"])]
     until: Vec<String>,
+    #[arg(long, value_parser = ["permission", "question", "auth"])]
+    kind: Option<String>,
     #[arg(long, value_name = "RE")]
     output: Option<String>,
     #[arg(long, value_name = "S")]
@@ -535,8 +537,7 @@ fn send(server: &Server, json: bool, name: String, text: String) -> anyhow::Resu
     let text = if info.acp.is_some() {
         let report = Reported {
             state: "working".to_owned(),
-            note: None,
-            state_source: None,
+            ..Reported::default()
         };
         let params = StateParams {
             name: name.clone(),
@@ -622,7 +623,7 @@ fn state(
         report: Reported {
             state,
             note,
-            state_source: None,
+            ..Reported::default()
         },
     };
     let info: TerminalInfo = server.connect(None)?.call(Method::State, &params)?;
@@ -633,6 +634,7 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     let params = WaitParams {
         name: args.name,
         until: args.until,
+        kind: args.kind,
         output: args.output,
         timeout: args.timeout,
     };
