@@ -483,7 +483,7 @@ async fn dispatch(
         session.hello = true;
         return json(&Hello::ours());
     }
-    if !session.hello {
+    if !session.hello && method != Method::Discover {
         return Err(RpcError::new(
             ErrorCode::NoHello,
             "send hello with your version first",
@@ -556,6 +556,7 @@ async fn dispatch(
         Method::State => json(&reg.state(params(request)?)?),
         Method::Emit => reg.emit(params(request)?).map(|()| empty()),
         Method::Model => reg.model(params(request)?).map(|()| empty()),
+        Method::Discover => Ok(proto::openrpc()),
         Method::Hello
         | Method::Kill
         | Method::Wait
