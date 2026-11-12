@@ -1,0 +1,8 @@
+Decided: rm removes the history log and transcript in spawn_blocking after the registry lock is released
+Because: "No PTY write, process wait, transcript render or file write runs while the registry lock is held."
+Decided: the lock tests' design is kept; the round-2 FAIL numbers (ls 2.09s, send 99.98s) match base 05f4d50, not this head
+Because: crates/shed/tests/common/mod.rs:49
+Rejected: a per-connection save generation for the reply flush — the snapshot is written whole, so a reply must wait for earlier snapshots anyway
+Check: cargo test -p shed --test lock passes at 9a3383d (5 of 5 runs here)
+Check: machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s also fails on origin/staging 05f4d50
+Owner: removing a terminal no longer deletes its files while holding up other requests
