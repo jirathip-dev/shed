@@ -1,0 +1,12 @@
+Decided: PTY read, screen feed and log write run on three threads joined by bounded queues of 16 chunks
+Because: crates/shed-core/src/terminal.rs:359
+Decided: log rotation streams the kept tail file to file; buffering 8 MiB per rotation was serve's RSS spike
+Because: crates/shed-core/src/history.rs:75
+Decided: scrollback is one VecDeque<u8> plus line lengths; rows keep only written cells, the rest read as blanks
+Because: "scrollback in one ring of bytes instead of a `String` per line"
+Rejected: alacritty_terminal behind a trait — the profile puts the head's limit in read(2) and thread wake-ups, not the VT parse
+Rejected: FIONREAD/poll batching in the reader — FIONREAD is always 0 on a macOS PTY master and poll halved raw throughput
+Check: on this shared M6 (load 7-12) plain drains at 107 MiB/s vs a raw ceiling of 229-246, so AC3 is not met here; see docs/bench.md
+Check: peak RSS during a 100 MiB burst is 5-6 MB (base 95-96 MB); serve-level goldens unchanged
+Check: machine_stats_..._within_5_s fails at base 97d4bc6 and head on this host (uptime_s 0); unrelated
+Owner: a big burst of output now drains about 2.5 times faster and serve no longer grows by about 90 MB while it does
