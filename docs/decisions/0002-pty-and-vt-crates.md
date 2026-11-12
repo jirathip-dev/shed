@@ -28,5 +28,5 @@ vetted crate. The screen model needs a VT parser.
 ## Consequences
 
 - No `unsafe` in shed; three new direct dependencies (`pty-process`, `rustix`, `vte`), small trees.
-- Each character takes one screen cell; wide and combining characters need `unicode-width` later.
+- Wide and combining characters are measured with `unicode-width` (#85).
 - `ps` is one process spawn per sample on macOS; fine for sampling, revisit if it shows up in profiles.

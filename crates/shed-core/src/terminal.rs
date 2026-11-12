@@ -4,7 +4,7 @@ use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
 use std::io::{Read as _, Write as _};
 use std::path::Path;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, kill_process_group};
@@ -86,7 +86,7 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 ///
 /// Its output feeds a [`Screen`] from a reader thread. Dropping the terminal SIGKILLs its process group.
 pub struct Terminal {
-    pty: Arc<pty_process::blocking::Pty>,
+    pty: Weak<pty_process::blocking::Pty>,
     child: Mutex<Child>,
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
@@ -148,7 +148,8 @@ impl Terminal {
         let child = crate::runner::pty(program, args, cwd, env, pts)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
-        let pty = Arc::new(pty);
+        let reader = Arc::new(pty);
+        let pty = Arc::downgrade(&reader);
         let outputs = Arc::new(Mutex::new(Some(Vec::new())));
         let watch = Arc::new(watch::Sender::new(Status {
             changes: 0,
@@ -159,10 +160,11 @@ impl Terminal {
             records: Vec::new(),
             idle_after: None,
         }));
-        let (reader, sink, subs) = (Arc::clone(&pty), Arc::clone(&screen), Arc::clone(&outputs));
+        let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
         std::thread::spawn(move || {
             read_loop(&reader, &sink, &subs, &watcher, log);
+            drop(reader);
             *lock(&subs) = None;
             bump(&watcher, |s| {
                 s.closed = true;
@@ -300,7 +302,11 @@ impl Terminal {
     /// # Errors
     /// [`Error::Io`] when the PTY is closed.
     pub fn write(&self, bytes: &[u8]) -> Result<(), Error> {
-        Ok((&*self.pty).write_all(bytes)?)
+        Ok((&*self.open_pty()?).write_all(bytes)?)
+    }
+
+    fn open_pty(&self) -> Result<Arc<pty_process::blocking::Pty>, Error> {
+        (self.pty.upgrade()).ok_or_else(|| Error::Io(std::io::ErrorKind::BrokenPipe.into()))
     }
 
     /// Sends one key by name (`enter`, `ctrl+c`, `up`, …); see [`keys::encode`].
@@ -314,10 +320,10 @@ impl Terminal {
     /// Resizes the PTY (the program gets SIGWINCH) and the screen.
     ///
     /// # Errors
-    /// [`Error::Pty`] when the PTY rejects the size.
+    /// [`Error::Pty`] when the PTY rejects the size; [`Error::Io`] when it is closed.
     pub fn resize(&self, size: Size) -> Result<(), Error> {
         let mut screen = lock(&self.screen);
-        self.pty.resize(pty_size(size))?;
+        self.open_pty()?.resize(pty_size(size))?;
         screen.resize(size);
         bump(&self.watch, |_| {});
         Ok(())
@@ -392,9 +398,9 @@ fn read_loop(
             Ok(0) => return,
             Ok(n) => {
                 let chunk = buf.get(..n).unwrap_or_default();
-                let replies = {
+                let (relayed, replies) = {
                     let mut screen = lock(screen);
-                    screen.feed(chunk);
+                    let relayed = screen.relay(chunk);
                     let reports = screen.take_reports();
                     bump(watch, |s| {
                         s.last_output = crate::clock::now();
@@ -402,12 +408,12 @@ fn read_loop(
                             s.apply(r);
                         }
                     });
-                    screen.take_replies()
+                    (relayed, screen.take_replies())
                 };
                 if let Some(subs) = lock(outputs).as_mut() {
-                    subs.retain(|tx| tx.send(chunk.to_vec()).is_ok());
+                    subs.retain(|tx| tx.send(relayed.clone()).is_ok());
                 }
-                if log.as_mut().is_some_and(|l| l.append(chunk).is_err()) {
+                if log.as_mut().is_some_and(|l| l.append(&relayed).is_err()) {
                     log = None;
                 }
                 if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {

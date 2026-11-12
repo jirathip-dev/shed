@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint arch lessons temp-left
+check: fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
 
 fmt:
     cargo fmt --all --check
@@ -47,6 +47,11 @@ comments:
 actionlint:
     actionlint
     ! actionlint ci/fixtures/actionlint-bad.yml
+
+# Self-hosted runners only for same-repo code (#93); the unguarded fixture proves the check bites.
+self-hosted:
+    scripts/self-hosted.py
+    ! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
 
 # Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
 # environment only in shed_server::config) and size limits in .herdsman/arch.toml; one fixture breaks each.
