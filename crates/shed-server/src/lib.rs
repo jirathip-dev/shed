@@ -466,7 +466,7 @@ async fn dispatch(
         session.hello = true;
         return json(&Hello::ours());
     }
-    if !session.hello {
+    if !session.hello && method != Method::Discover {
         return Err(RpcError::new(
             ErrorCode::NoHello,
             "send hello with your version first",
@@ -488,6 +488,7 @@ async fn dispatch(
             return input(registry, method, request).await;
         }
         Method::MachineStats => return machine_stats(registry, params(request)?).await,
+        Method::Discover => return Ok(proto::openrpc()),
         _ => {}
     }
     let mut reg = lock(registry);
