@@ -1,14 +1,16 @@
 //! `shed setup`: the hooks that make an installed agent report its state through `shed state`.
 
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 use crate::providers::{Hooks, hook_tables};
 
-const MARK: &str = "|| shed state ";
+const EMPTY: &str = "{}\n";
 
 /// One agent's config file and, when `shed setup` changes it, its new text.
 pub struct HookFile {
@@ -35,45 +37,94 @@ pub fn setup(home: &Path, agents: &[String], remove: bool, dry: bool) -> io::Res
     chosen.map(|h| edit(home, h, remove, dry)).collect()
 }
 
+type Object<'a> = HashMap<String, &'a RawValue>;
+
+fn group(state: &str) -> Value {
+    let command = format!("[ -z \"$SHED\" ] || shed state {state}");
+    json!({"hooks": [{"type": "command", "command": command}]})
+}
+
+fn member(event: &str, state: &str) -> String {
+    format!("{}:[ {}]", json!(event), group(state))
+}
+
+fn whole(h: &Hooks) -> String {
+    let members: Vec<String> = h.events.iter().map(|(e, s)| member(e, s)).collect();
+    format!("\"hooks\":{{ {}}}", members.join(","))
+}
+
+fn inside(text: &str, raw: &RawValue) -> usize {
+    raw.get()
+        .as_ptr()
+        .addr()
+        .saturating_sub(text.as_ptr().addr())
+        + 1
+}
+
+fn add(text: &str, h: &Hooks) -> serde_json::Result<String> {
+    let root: Object = serde_json::from_str(text)?;
+    let mut at: BTreeMap<usize, (Vec<String>, bool)> = BTreeMap::new();
+    if let Some(hooks) = root.get("hooks") {
+        let events: Object = serde_json::from_str(hooks.get())?;
+        for (event, state) in h.events {
+            let (raw, piece, len) = match events.get(*event) {
+                Some(list) => {
+                    let groups: Vec<Value> = serde_json::from_str(list.get())?;
+                    if groups.contains(&group(state)) {
+                        continue;
+                    }
+                    (*list, group(state).to_string(), groups.len())
+                }
+                None => (*hooks, member(event, state), events.len()),
+            };
+            let slot = at
+                .entry(inside(text, raw))
+                .or_insert((Vec::new(), len == 0));
+            slot.0.push(piece);
+        }
+    } else {
+        let raw: &RawValue = serde_json::from_str(text)?;
+        at.insert(inside(text, raw), (vec![whole(h)], root.is_empty()));
+    }
+    let mut out = text.to_owned();
+    for (pos, (pieces, empty)) in at.into_iter().rev() {
+        out.insert_str(pos, &(pieces.join(",") + if empty { "" } else { "," }));
+    }
+    Ok(out)
+}
+
+fn strip(text: &str, h: &Hooks) -> String {
+    let mut out = text.to_owned();
+    let members = h.events.iter().map(|(e, s)| member(e, s));
+    let groups = h.events.iter().map(|(_, s)| group(s).to_string());
+    for piece in std::iter::once(whole(h)).chain(members).chain(groups) {
+        while let Some(i) = out.find(&piece) {
+            let end = i + piece.len();
+            let comma = out.get(end..).is_some_and(|r| r.starts_with(','));
+            out.replace_range(i..end + usize::from(comma), "");
+        }
+    }
+    out
+}
+
 fn edit(home: &Path, h: &Hooks, remove: bool, dry: bool) -> io::Result<HookFile> {
     let file = home.join(h.file);
     let before = fs::read_to_string(&file).or_else(|e| match e.kind() {
-        ErrorKind::NotFound => Ok(String::new()),
+        ErrorKind::NotFound => Ok(EMPTY.to_owned()),
         _ => Err(e),
     })?;
-    let text = Some(before.trim()).filter(|t| !t.is_empty());
-    let mut root: Value = serde_json::from_str(text.unwrap_or("{}"))?;
-    let original = root.clone();
-    let bad = || io::Error::other(format!("{}: not JSON objects", file.display()));
-    let obj = root.as_object_mut().ok_or_else(bad)?;
-    let hooks = obj.entry("hooks").or_insert_with(|| json!({}));
-    let events = hooks.as_object_mut().ok_or_else(bad)?;
-    for (event, state) in h.events {
-        let list = events.entry(*event).or_insert_with(|| json!([]));
-        let groups = list.as_array_mut().ok_or_else(bad)?;
-        let ours = |g: &Value| g.to_string().contains(MARK);
-        if remove {
-            groups.retain(|g| !ours(g));
-        } else if !groups.iter().any(ours) {
-            let hook =
-                json!({"type": "command", "command": format!("[ -z \"$SHED\" ] {MARK}{state}")});
-            groups.push(json!({"hooks": [hook]}));
-        }
-        if groups.is_empty() {
-            events.shift_remove(*event);
-        }
+    let bad = |e| io::Error::other(format!("{}: not JSON objects: {e}", file.display()));
+    let after = if remove {
+        strip(&before, h)
+    } else {
+        add(&before, h).map_err(bad)?
+    };
+    let after = (after != before).then_some(after);
+    match (&after, dry) {
+        (Some(t), false) if t == EMPTY => fs::remove_file(&file)?,
+        (Some(t), false) => fs::write(&file, t)?,
+        _ => {}
     }
-    if events.is_empty() {
-        obj.shift_remove("hooks");
-    }
-    let after = serde_json::to_string_pretty(&root)? + "\n";
-    let empty = root.as_object().is_some_and(serde_json::Map::is_empty);
-    match (dry || root == original, empty) {
-        (true, _) => {}
-        (false, true) => fs::remove_file(&file)?,
-        (false, false) => fs::write(&file, &after)?,
-    }
-    let after = (root != original).then_some(after);
     Ok(HookFile {
         agent: h.agent,
         file,
@@ -88,25 +139,12 @@ mod tests {
 
     use super::setup;
 
-    const OTHERS: &str = r#"{
-  "model": "x",
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "say done"
-          }
-        ]
-      }
-    ],
-    "Other": []
-  },
-  "alpha": true
-}
-"#;
+    const OTHERS: &[&str] = &[
+        "{\"model\":\"x\",\n    \"permissions\": {\"allow\": [\"Bash(ls:*)\"]}, \"n\": 1.0}",
+        "{ \"hooks\" : {\"Stop\":[ {\"matcher\": \"\", \"hooks\": [{\"type\":\"command\",\n\t\"command\": \"say done\"}]} ], \"Other\": []},\n  \"alpha\": true }\n",
+        "{\"hooks\":{\"Prompt\":[],\"Stop\": [ ]},\"n\":2}",
+        "  {\"hooks\": {}}\n",
+    ];
 
     fn run(home: &Path, remove: bool, dry_run: bool) -> Option<String> {
         let fake = ["fake".to_owned()];
@@ -139,27 +177,34 @@ mod tests {
         run(&home, true, false);
         assert!(!file.exists(), "an absent config is absent again");
 
-        fs::write(&file, OTHERS).expect("config");
-        let preview = run(&home, false, true).expect("a preview");
-        assert_eq!(
-            fs::read_to_string(&file).expect("config"),
-            OTHERS,
-            "dry run writes nothing"
-        );
-        assert_eq!(run(&home, false, false), Some(preview.clone()));
-        assert!(preview.contains("say done") && preview.contains(r#""alpha": true"#));
-        assert!(
-            preview.find("say done") < preview.find("state done"),
-            "{preview}"
-        );
-        assert_eq!(
-            run(&home, false, false),
-            None,
-            "a second run changes nothing"
-        );
-        assert_eq!(fs::read_to_string(&file).expect("config"), preview);
-
-        run(&home, true, false);
-        assert_eq!(fs::read_to_string(&file).expect("config"), OTHERS);
+        for others in OTHERS {
+            fs::write(&file, others).expect("config");
+            let preview = run(&home, false, true).expect("a preview");
+            assert_eq!(
+                fs::read_to_string(&file).expect("config"),
+                *others,
+                "dry run"
+            );
+            assert_eq!(run(&home, false, false), Some(preview.clone()));
+            let value: serde_json::Value = serde_json::from_str(&preview).expect(&preview);
+            let hooks = &value["hooks"];
+            assert!(
+                hooks["Prompt"].to_string().contains("shed state working"),
+                "{preview}"
+            );
+            assert!(
+                hooks["Stop"].to_string().contains("shed state done"),
+                "{preview}"
+            );
+            assert!(!others.contains("say done") || preview.contains("say done"));
+            assert_eq!(
+                run(&home, false, false),
+                None,
+                "a second run changes nothing"
+            );
+            assert_eq!(fs::read_to_string(&file).expect("config"), preview);
+            run(&home, true, false);
+            assert_eq!(fs::read_to_string(&file).expect("config"), *others);
+        }
     }
 }

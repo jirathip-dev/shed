@@ -13,10 +13,11 @@ shed doctor             # one `hooks` line per installed agent: `ok`, or `--` wi
 ```
 
 Each hook runs `[ -z "$SHED" ] || shed state <state>`: a no-op that exits 0 when `$SHED` is unset, so the
-agent behaves the same outside shed. Setup adds only entries whose command holds `|| shed state `, never
-twice, and leaves every other key and hook where it was; `--remove` takes out exactly those entries (and an
-event list or `hooks` object it leaves empty), so setup then remove gives the file back byte for byte. A
-file that ends up an empty object is deleted.
+agent behaves the same outside shed. Setup edits the file as text: it inserts shed's entries, as compact JSON
+and never twice, right after the bracket that opens their list, and leaves every other byte where it
+was. `--remove` deletes exactly the text setup inserted, so setup then remove gives the file back byte for
+byte; entries the agent has since rewritten in its own layout are not recognised and stay. A file shed
+created is deleted again.
 
 ## The files each agent's setup touches
 
