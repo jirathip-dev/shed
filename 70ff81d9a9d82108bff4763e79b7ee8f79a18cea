@@ -1,0 +1,12 @@
+Decided: EventKind::State holds Box<Reported>, so the event enum is back to its base 120 bytes (it was 200)
+Because: crates/shed-proto/src/lib.rs:689
+Rejected: slimming Reported — the new fields are the issue's scope, and the box keeps the JSON as it is
+Decided: the probe reply goes through the screen's reply(), so #85's relay strips the answered probe for attached clients
+Because: crates/shed-core/src/screen.rs:705
+Decided: re-blessed program-status.txt only for the probe line, which #85's 200-column default no longer wraps
+Because: crates/shed-core/src/screen.rs:705
+Decided: no trim for the cap (7867/7800); #81 is blocked on #106, which raises the cap to 10000 for the queue
+Because: "Store `kind`, `progress`, `app`, `title` and `msg` on the report"
+Check: CI bench-fanout head/base under 110% (local run 87%, was 105% before the box)
+Check: machine_stats_..._within_5_s fails identically at staging 62e565a on this host (uptime_s 0); every other test passes
+Owner: the merge with staging is resolved and the status events no longer slow down event delivery; merging waits for the cap raise in #106
