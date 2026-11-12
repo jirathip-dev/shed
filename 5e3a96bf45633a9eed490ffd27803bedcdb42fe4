@@ -1,0 +1,11 @@
+Decided: concurrency groups PRs by ref and pushes by sha, so staging and main pushes are never cancelled
+Because: "keeping staging pushes uncancelled (group by sha there)"
+Decided: CI_RUNNER holds a JSON label list read with fromJSON; unset falls back to macos-latest
+Because: "falling back to `macos-latest` when the variable is unset"
+Decided: the same-repo check sits inside runs-on, so fork PRs still run their macOS leg on the hosted runner
+Because: "Fork PRs keep the hosted runner."
+Decided: scripts/self-hosted.py reads only a job's keys before steps, so step names cannot trip or satisfy it
+Rejected: a lesson check in rules.md — a grep line cannot tie the condition to the job's runs-on
+Check: just self-hosted exits 0 and its unguarded fixture fails; removing the clause from ci.yml fails it
+Check: msrv has no matrix and runs on ubuntu-latest only
+Owner: macOS CI runs on the mini for this repo's own branches, forks stay on hosted runners, and stale PR runs cancel.
