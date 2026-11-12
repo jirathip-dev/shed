@@ -1,0 +1,7 @@
+Decided: the meta test uses made-up keys (vendorX/opts/layers/strict/n), not any agent's option names
+Because: q1542
+Decided: docs/acp.md describes `--meta` without naming any agent's option keys
+Because: "shed never names a session option key or an agent for this passthrough"
+Rejected: keeping the claude example in docs as illustration — the amendment puts Claude only in the PR's live check
+Check: rg -i 'settingSources|strictMcpConfig|claudeCode' crates docs finds nothing
+Owner: the docs and tests for passing session options now stay agent-neutral; the real Claude run stays only in the PR.
