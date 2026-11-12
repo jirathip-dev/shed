@@ -434,8 +434,16 @@ impl Registry {
         let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
         let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
         let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
+        let meta = p.meta.as_ref().map(serde_json::to_string);
+        let meta = meta.transpose().map_err(internal)?;
+        let meta = meta.as_deref().map(|m| ("SHED_ACP_META", m));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
-        let acp: Vec<_> = resume.into_iter().chain(mcp).chain(awake).collect();
+        let acp: Vec<_> = resume
+            .into_iter()
+            .chain(mcp)
+            .chain(meta)
+            .chain(awake)
+            .collect();
         let term = spawn(&p.cmd, &p.cwd, &name, p.idle_after, &history, &acp)
             .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
         let info = TerminalInfo {

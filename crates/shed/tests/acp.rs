@@ -822,6 +822,47 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
 }
 
 #[test]
+fn meta_reaches_the_agent_unchanged_on_new_on_a_wake_and_on_resume() {
+    let dir = temp_dir("acp-meta");
+    let history = dir.join("history.jsonl");
+    let meta = json!({"claudeCode": {"options": {"settingSources": ["project", "local"],
+                                                 "strictMcpConfig": true}}});
+    let file = dir.join("meta.json");
+    std::fs::write(&file, meta.to_string()).expect("write the meta");
+    let _server = sleepy_server(&dir);
+    let (agent, meta) = (fake_agent(), meta.to_string());
+    let start = |name: &str, extra: &[&str]| {
+        let run = ["run", "--name", name, "--acp", "fake", "--meta", &meta];
+        let cmd = [
+            "--",
+            "python3",
+            agent.to_str().expect("utf-8"),
+            "--history",
+            history.to_str().expect("utf-8"),
+            "--meta",
+            file.to_str().expect("utf-8"),
+        ];
+        ok(&dir, &[&run[..], extra, &cmd].concat());
+    };
+    start("a", &[]);
+    first_turn(&dir, "a");
+    until(&dir, "a", "hibernated");
+    first_turn(&dir, "a");
+    start("b", &["--resume", "sess-1"]);
+    first_turn(&dir, "b");
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "b"])).expect("JSON");
+    assert_eq!(info["session"]["id"], "sess-1");
+    for bad in ["[1]", "{"] {
+        let out = shed(&dir, &["run", "--acp", "fake", "--meta", bad]);
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success() && err.contains("not a JSON object"),
+            "{bad}: {err}"
+        );
+    }
+}
+
+#[test]
 fn a_prompt_wakes_the_agent_and_its_history_is_not_repeated() {
     let dir = temp_dir("acp-wake");
     let history = dir.join("history.jsonl");

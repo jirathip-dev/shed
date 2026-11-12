@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
     AvailableCommandInput, CancelNotification, ContentBlock, ContentChunk, Implementation,
-    InitializeRequest, LoadSessionRequest, McpServer, McpServerHttp, McpServerSse,
+    InitializeRequest, LoadSessionRequest, McpServer, McpServerHttp, McpServerSse, Meta,
     NewSessionRequest, PromptRequest, PromptResponse, RequestPermissionOutcome,
     RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
     SessionConfigKind as Kind, SessionConfigOption, SessionConfigOptionCategory as Category,
@@ -382,6 +382,7 @@ struct Session {
     model: Option<String>,
     shown: AcpSession,
     mcp: Vec<McpServer>,
+    meta: Option<Meta>,
 }
 
 impl Session {
@@ -715,7 +716,9 @@ async fn drive(
         }
         Some(id) => {
             (s.id, s.replay, s.waking) = (SessionId::new(id), true, wake.is_some());
-            let load = LoadSessionRequest::new(s.id.clone(), cwd).mcp_servers(s.mcp.clone());
+            let load = LoadSessionRequest::new(s.id.clone(), cwd)
+                .mcp_servers(s.mcp.clone())
+                .meta(s.meta.clone());
             let loaded = cx.send_request(load).block_task().await.map_err(refused)?;
             while let Ok(m) = from_agent.try_recv() {
                 s.message(m)?;
@@ -725,7 +728,9 @@ async fn drive(
             loaded.config_options
         }
         None => {
-            let new = NewSessionRequest::new(cwd).mcp_servers(s.mcp.clone());
+            let new = NewSessionRequest::new(cwd)
+                .mcp_servers(s.mcp.clone())
+                .meta(s.meta.clone());
             let new = cx.send_request(new).block_task().await.map_err(refused)?;
             s.id = new.session_id;
             new.config_options
@@ -877,8 +882,8 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 
 /// Runs the ACP adapter `cmd` in `cwd` for terminal `$SHED` of the server on `socket` (state file
 /// `state`): `initialize`, then `session/load` of `$SHED_ACP_RESUME` (its history replayed) or
-/// `session/new`, both with the MCP servers in `$SHED_ACP_MCP`, then prompts, updates and permission
-/// requests until the agent exits. Returns the agent's exit code.
+/// `session/new`, both with the MCP servers in `$SHED_ACP_MCP` and the `_meta` in `$SHED_ACP_META`,
+/// then prompts, updates and permission requests until the agent exits. Returns the agent's exit code.
 ///
 /// After `$SHED_ACP_HIBERNATE_AFTER` idle seconds (default 600, `0` never) it stops the agent's process
 /// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
@@ -989,6 +994,10 @@ fn run(
     let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
     let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
     let mcp = mcp_servers(&mcp).map_err(Error::Acp)?;
+    let meta = crate::config::var("SHED_ACP_META")
+        .map(|m| serde_json::from_str::<Meta>(&m))
+        .transpose()
+        .map_err(|e| Error::Acp(format!("$SHED_ACP_META: {e}")))?;
     let (out, outs) = unbounded_channel();
     let writer = Writer {
         transcript: BufWriter::new(open_transcript(state, name)?),
@@ -1019,6 +1028,7 @@ fn run(
             model: None,
             shown: AcpSession::default(),
             mcp: mcp.clone(),
+            meta: meta.clone(),
         },
     };
     let mut resume = crate::config::var("SHED_ACP_RESUME");
@@ -1034,8 +1044,9 @@ fn run(
             .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
         let (mut kept, mut wake) = (None, None);
         loop {
-            let mut child = shed_core::runner::piped(program, args, cwd, "SHED_ACP_MCP")
-                .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
+            let mut child =
+                shed_core::runner::piped(program, args, cwd, &["SHED_ACP_MCP", "SHED_ACP_META"])
+                    .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
             let slept = connect(&mut child, async |cx, back, from_agent| {
                 let s = session(cx, back, prev);

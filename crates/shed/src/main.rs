@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
@@ -314,6 +314,8 @@ struct RunArgs {
     resume: Option<String>,
     #[arg(long, value_name = "FILE", requires = "acp")]
     mcp: Option<PathBuf>,
+    #[arg(long, value_name = "JSON", requires = "acp", value_parser = meta)]
+    meta: Option<Map<String, Value>>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
     #[arg(last = true, required_unless_present = "acp")]
@@ -335,6 +337,10 @@ struct WaitArgs {
 fn policy(s: &str) -> Result<Policy, String> {
     serde_json::from_value(Value::String(s.to_owned()))
         .map_err(|_| format!("{s:?}: allow, deny or ask"))
+}
+
+fn meta(s: &str) -> Result<Map<String, Value>, String> {
+    serde_json::from_str(s).map_err(|e| format!("not a JSON object: {e}"))
 }
 
 fn label(s: &str) -> Result<(String, String), String> {
@@ -490,6 +496,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         acp: args.acp,
         resume: args.resume,
         mcp_servers,
+        meta: args.meta,
         no_hibernate: args.no_hibernate,
         machine: server
             .on
