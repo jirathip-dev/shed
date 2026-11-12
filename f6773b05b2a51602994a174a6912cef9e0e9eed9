@@ -1,0 +1,5 @@
+Decided: merged origin/staging; the writer thread holds staging's weak PTY handle and upgrades it per write
+Because: crates/shed-core/src/terminal.rs:399
+Rejected: none
+Check: the PTY still closes when the reader exits (no strong Arc outside the reader thread)
+Owner: brings the branch up to date with staging; no behaviour change beyond both sides combined
