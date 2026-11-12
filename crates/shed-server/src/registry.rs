@@ -6,6 +6,7 @@ use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
@@ -90,11 +91,49 @@ impl Entry {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct Saver {
+    files: Sender<(u64, StateFile)>,
+    queued: Arc<AtomicU64>,
+    written: tokio::sync::watch::Receiver<u64>,
+}
+
+impl Saver {
+    fn start(path: &Path) -> Self {
+        let (files, queue) = std::sync::mpsc::channel::<(u64, StateFile)>();
+        let (done, written) = tokio::sync::watch::channel(0);
+        let at = path.to_owned();
+        std::thread::spawn(move || {
+            while let Ok(next) = queue.recv() {
+                let (generation, file) = queue.try_iter().last().unwrap_or(next);
+                write_state(&at, &file).ok();
+                done.send_replace(generation);
+            }
+        });
+        Self {
+            files,
+            queued: Arc::new(AtomicU64::new(0)),
+            written,
+        }
+    }
+
+    fn save(&self, file: StateFile) {
+        let generation = self.queued.fetch_add(1, Ordering::SeqCst) + 1;
+        self.files.send((generation, file)).ok();
+    }
+
+    pub(crate) async fn flushed(&self) {
+        let generation = self.queued.load(Ordering::SeqCst);
+        let mut written = self.written.clone();
+        written.wait_for(|w| *w >= generation).await.ok();
+    }
+}
+
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
     path: PathBuf,
     socket: PathBuf,
-    saver: Sender<StateFile>,
+    saver: Saver,
     pub(crate) events: Events,
     pub(crate) stats: Stats,
 }
@@ -211,14 +250,7 @@ impl Registry {
                 }
             }
         }
-        let (saver, files) = std::sync::mpsc::channel::<StateFile>();
-        let at = path.to_owned();
-        std::thread::spawn(move || {
-            while let Ok(file) = files.recv() {
-                let file = files.try_iter().last().unwrap_or(file);
-                write_state(&at, &file).ok();
-            }
-        });
+        let saver = Saver::start(path);
         let registry = Self {
             entries,
             path: path.to_owned(),
@@ -239,7 +271,11 @@ impl Registry {
     }
 
     fn save(&self) {
-        self.saver.send(self.state_file()).ok();
+        self.saver.save(self.state_file());
+    }
+
+    pub(crate) fn saver(&self) -> Saver {
+        self.saver.clone()
     }
 
     fn saved<T>(&self, value: T) -> T {

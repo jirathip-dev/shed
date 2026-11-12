@@ -273,6 +273,7 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         _ => {}
     }
     let listener = tokio::net::UnixListener::bind(&paths.socket)?;
+    let saver = lock(&registry).saver();
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
     writeln!(
         io::stdout(),
@@ -285,6 +286,7 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         tokio::spawn(connection(
             Arc::clone(&registry),
             Arc::clone(&links),
+            saver.clone(),
             stream,
         ));
     }
@@ -318,7 +320,12 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
     (named.into_iter().flatten()).find(|n| input && session.readonly.contains(*n))
 }
 
-async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
+async fn connection(
+    registry: Shared,
+    held: Arc<links::Links>,
+    saver: registry::Saver,
+    stream: tokio::net::UnixStream,
+) {
     let mut session = Session {
         links: held,
         ..Session::default()
@@ -331,6 +338,7 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
             continue;
         }
         let response = respond(&registry, &mut session, &line).await;
+        saver.flushed().await;
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
             bytes.push(b'\n');
