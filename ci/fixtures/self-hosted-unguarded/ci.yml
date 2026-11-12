@@ -1,0 +1,7 @@
+name: unguarded
+on: pull_request
+jobs:
+  test:
+    runs-on: ${{ vars.CI_RUNNER && fromJSON(vars.CI_RUNNER) || 'macos-latest' }}
+    steps:
+      - run: echo "${{ github.event.pull_request.head.repo.full_name == github.repository }}"

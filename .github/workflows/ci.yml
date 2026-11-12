@@ -5,17 +5,18 @@ on:
   pull_request:
     branches: [main, staging]
 
+# A new push to a PR cancels its older run; pushes to staging and main group by sha, so none is cancelled.
+concurrency:
+  group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Every gate on the MSRV toolchain (rust-toolchain.toml), on Linux and macOS.
+  # Every gate on the MSRV toolchain (rust-toolchain.toml), on Linux; macOS runs the stable tests.
   msrv:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.97.1
@@ -76,13 +77,20 @@ jobs:
         run: just arch
       - name: lesson checks (active fail, shadow report)
         run: just lessons
+      - name: self-hosted runners gated to same-repo code
+        run: just self-hosted
 
+  # macOS runs on the self-hosted runner in vars.CI_RUNNER (a JSON label list, docs/ci.md) for same-repo
+  # code only; fork PRs, or an unset variable, get macos-latest.
   stable:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+        os: [ubuntu, macos]
+    runs-on: >-
+      ${{ matrix.os == 'ubuntu' && 'ubuntu-latest'
+        || vars.CI_RUNNER && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNNER)
+        || 'macos-latest' }}
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
