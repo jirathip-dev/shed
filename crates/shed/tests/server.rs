@@ -391,6 +391,19 @@ fn a_version_mismatch_is_refused() {
 }
 
 #[test]
+fn rpc_discover_answers_the_openrpc_document_before_and_after_hello() {
+    let dir = temp_dir("discover");
+    let _server = Server::start(&dir);
+    let committed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/shed.openrpc.json");
+    let committed = std::fs::read_to_string(committed).expect("docs/shed.openrpc.json");
+    let committed: Value = serde_json::from_str(&committed).expect("the document is JSON");
+    let mut c = Conn::open(&dir);
+    assert_eq!(c.result("rpc.discover", &json!({})), committed);
+    c.result("hello", &json!({"product": "shed", "version": VERSION}));
+    assert_eq!(c.result("rpc.discover", &json!({})), committed);
+}
+
+#[test]
 fn events_stream_in_seq_order_filter_by_label_and_replay_since() {
     let dir = temp_dir("events");
     let _server = Server::start(&dir);
