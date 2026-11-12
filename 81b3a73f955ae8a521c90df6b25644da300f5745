@@ -1,0 +1,13 @@
+Decided: a cell holds [char; 4] (base plus up to three combining marks) and a wide character's second cell is an all-NUL tail
+Rejected: a String per cell — an allocation per printed character and cells no longer Copy
+Decided: Screen::relay feeds with vte's advance_until_terminated and cuts from the query's ESC to its final byte, only for a query the screen answered
+Because: "A query the screen answered is not passed on to attached clients."
+Decided: the history log gets the relayed bytes too, so a restore never replays an answered query
+Because: crates/shed-core/src/terminal.rs:370
+Decided: the double reply is real: the new attach test read replies=2 at base, so item 2 stays in scope
+Decided: the default size is $SHED_SIZE (RxC) in shed serve's environment, else 50x200; run takes rows and cols separately
+Because: "The default size becomes a setting, with a wider default (propose 200x50)"
+Decided: unicode-width =0.2.3 without default features (no cjk ambiguous-width table)
+Check: a query split across two PTY reads keeps its first half, since those bytes were already sent; only whole queries in one read are cut
+Check: machine_stats_..._within_5_s fails at base and head on this host (uptime_s is 0 here); unrelated to this change
+Owner: CJK, emoji and accents line up in reads and previews, programs get one answer to a terminal query while you are attached, and new terminals start at 50x200 or the size you pass
