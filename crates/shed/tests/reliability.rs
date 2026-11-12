@@ -492,3 +492,47 @@ fn sigterm_to_serve_ends_every_tree_even_one_that_ignores_sighup() {
     assert!(left.is_empty(), "alive 3 s after SIGTERM: {left:?}");
     server.0.wait().expect("serve exits");
 }
+
+#[test]
+fn a_program_gets_default_signals_from_a_serve_that_ignores_sighup() {
+    let dir = temp_dir("rel-sigdfl");
+    let _server = Serve::start(&dir, "trap '' HUP USR1;", Stdio::null());
+    let d = dir.to_str().expect("utf-8 dir");
+    let script = "import signal as s, time\n\
+        print('hup', s.getsignal(s.SIGHUP).name, 'usr1', s.getsignal(s.SIGUSR1).name, \
+        'blocked', len(s.pthread_sigmask(s.SIG_BLOCK, [])), flush=True)\n\
+        time.sleep(60)";
+    ok(
+        &dir,
+        &[
+            "run", "--name", "p", "--cwd", d, "--", "python3", "-c", script,
+        ],
+    );
+    let mut line = String::new();
+    eventually("the program's dispositions", || {
+        let screen = ok(&dir, &["read", "p"]);
+        let found = screen.lines().find(|l| l.starts_with("hup "));
+        found.unwrap_or_default().clone_into(&mut line);
+        !line.is_empty()
+    });
+    assert_eq!(line.trim_end(), "hup SIG_DFL usr1 SIG_DFL blocked 0");
+}
+
+#[test]
+fn the_next_start_ends_a_tree_a_killed_serve_left_behind() {
+    let dir = temp_dir("rel-left");
+    let first = Serve::start(&dir, "", Stdio::null());
+    run_sh(&dir, "deaf", "trap '' HUP; sleep 100 & echo child=$!; wait");
+    let tree = pids(&dir, "deaf");
+    drop(first);
+    assert!(alive(&tree.0) && alive(&tree.1), "left behind: {tree:?}");
+    let log = dir.join("serve.log");
+    let err = std::fs::File::create(&log).expect("log file");
+    let _second = Serve::start(&dir, "", Stdio::from(err));
+    let left = survivors(std::slice::from_ref(&tree), Duration::from_secs(3));
+    assert!(left.is_empty(), "alive after the next start: {left:?}");
+    let text = std::fs::read_to_string(&log).expect("log");
+    let named: Vec<&str> = text.lines().filter(|l| l.contains("deaf")).collect();
+    assert_eq!(named.len(), 1, "{text}");
+    assert!(named.iter().all(|l| l.contains(&tree.0)), "{text}");
+}
