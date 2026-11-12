@@ -216,6 +216,8 @@ fn run_params() -> Value {
         no_hibernate: false,
         machine: None,
         parent: Some(lead()),
+        rows: None,
+        cols: None,
     })
     .unwrap()
 }

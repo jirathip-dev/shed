@@ -34,7 +34,7 @@ The handshake; must come first on every connection. Another product or version i
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true}}}

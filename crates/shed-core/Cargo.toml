@@ -14,6 +14,7 @@ rustix.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "process", "sync", "time"] }
+unicode-width.workspace = true
 vte.workspace = true
 
 [lints]
