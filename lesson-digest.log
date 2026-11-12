@@ -1,0 +1,640 @@
+# Lessons digest: berth, last 7 days
+
+## Review FAIL findings (blocking, with proof)
+
+#34 round 1:
+- blocking [correctness] crates/shed-server/src/lib.rs:738: the read-only check resolves the terminal with `target()`, which prefers a `terminal` field over `name`, but `resize` (ResizeParams has no `terminal` alias, so an extra `terminal` key is ignored) acts on `name`. A read-only client can resize a terminal it marked read-only by sending `{"name":"w","terminal":"<any other terminal>"}`.
+  Proof: run
+  ```
+  python3 -I t2.py  (conn A: terminal.readonly{terminal:w}; A: resize{name:w, terminal:free, rows:7, cols:33}; conn B: send "stty size", read w)
+  ```
+  ```
+  {"id":2,"result":{}}                      <- terminal.readonly w
+  {"id":3,"result":{}}                      <- resize of w by the read-only connection: accepted
+  {"text":"sh-3.2$ stty size\n7 33\nsh-3.2$"}  <- w really is 7x33
+  ```
+  Required by the issue: "a terminal can be marked `readonly` for a given client, and input from such a client is refused" and the PR's own claim that `resize` to it "fails with READONLY". Without the extra key the same call returns `READONLY: w` (-32006).
+
+
+#42 round 1:
+- blocking [design-deviation] crates/shed-server/src/acp.rs:788: the bridge builds `new_multi_thread().worker_threads(1)`, but the approved design (docs/design/tokio-server/tokio-server.html, approved in q706, "design 9b9e28a ... approved") fixes it as current-thread.
+  Proof: spec
+  > "The runtime stays current-thread." (design §1, ACP bridge row)
+  > "Bridge: current-thread, as in #40." (design §3)
+  > "An approved design under `docs/design/` on the branch is part of the spec: an impl that deviates from it is a FAIL." (brief output contract)
+  Breaking line: crates/shed-server/src/acp.rs:788-791. PR#48 commit 6 admits "This departs from the design's 'bridge stays current-thread'". The design's own risk path (§4) says: if the head does not beat base, pull the reserve lever, tune the batch size, "before filing an ask". The author pulled the lever (no gain), then changed the runtime flavour without an ask. The fix is an `herdsman ask` for the owner's OK to this one deviation, or a return to the design's flavour. Recording it in decision 0004 after the fact is not approval.
+
+
+#42 round 2:
+- blocking [correctness] crates/shed-server/src/events.rs:93: a subscriber with `since` beyond the current seq (e.g. a client resuming with its old last seq against a restarted server, seq back at 0) silently loses every new event up to that seq. `subscribe` sets the cursor to `since` (`s.max(oldest)`), and `take()` only lowers it when the log is non-empty (`events.back().map_or(cursor, ..)`), so on an empty log the cursor stays at `since` and `emit`s numbered <= since are skipped. The base (`origin/staging:crates/shed-server/src/events.rs`, `subscribe`/`emit_as`) sent every new event to the subscriber regardless of `since`. This is a client-visible change on the socket protocol.
+  Proof: run
+  ```
+  # scratch checkout of the head with this test added to events.rs tests:
+  #   let mut events = Events::default();
+  #   let mut sub = events.subscribe(EventsParams { labels: Labels::new(), since: Some(5) });
+  #   assert!(sub.take().is_empty());
+  #   for _ in 0..3 { events.emit("t", &Labels::new(), EventKind::Started); }
+  #   assert_eq!(sub.take().len(), 3);
+  CARGO_TARGET_DIR="$HERDSMAN_SCRATCH_TARGET/target" cargo test -q -p shed-server --lib since_beyond
+  ```
+  ```
+  thread 'events::tests::since_beyond_seq_still_gets_new_events' panicked at crates/shed-server/src/events.rs:172:9:
+  assertion `left == right` failed
+    left: 0
+   right: 3
+  test result: FAILED. 0 passed; 1 failed
+  ```
+  Required: > "All existing tests pass. The CLI and socket protocol (`shed-proto`) don't change for clients." Fix: clamp the cursor to `self.seq` in `subscribe` (`s.max(oldest).min(self.seq)`), and add that test.
+
+
+#57 round 1:
+- blocking [ci] crates/shed-server/src/lib.rs:459: acceptance 1 is "CI green", but `bench-acp` is red at this head. The ACP `shed_only` median is 17% slower than base, over the 10% limit. Every request now passes through `linked()` first. That calls `links::remote()` (links.rs:41), which clones `request.params` for every method, remote or not. The hot-path cost looks like the likely cause, not just noise. Head was higher than base in 8 of the last 9 pairs.
+  Proof: run
+  ```
+  gh pr checks 58 | rg -v pass; gh run view 42779861882 --log-failed | tail -4
+  ```
+  ```
+  bench-acp	fail	2m47s	https://github.com/jirathip-dev/shed/actions/runs/42779861882/job/129707021941
+  acp shed_only median of 9: base 4533 ns, head 5317 ns (head/base 117%)
+  FAIL: shed_only: the head is more than 10% slower
+  ```
+
+
+#67 round 1:
+- blocking [correctness] crates/shed-core/src/proctree.rs:46: the Linux-only `Procfs` code still has `rustix::param::page_size() as u64`, so `as_conversions` fails clippy on ubuntu. The fix missed the code under `#[cfg(target_os = "linux")]`, which the macOS-only local runs never compile.
+Proof: run
+```
+gh run view 42892793783 --job 130097987956 --log-failed   (msrv (ubuntu-latest), head 286cdf8)
+```
+```
+error: using a potentially dangerous silent `as` conversion
+  --> crates/shed-core/src/proctree.rs:46:20
+46 |         let page = rustix::param::page_size() as u64;
+   = note: requested on the command line with `-D clippy::as-conversions`
+error: recipe `clippy` failed on line 8 with exit code 101
+```
+
+#67 round 1:
+- blocking [regression] crates/shed-server/src/acp.rs: the `bench-acp` job is red at the head. The rewrite from indexing to `get`/`try_from` and the clock indirection made the ACP hot path 16% slower than base. The CI gate fails on more than 10%. The issue requires "Behaviour unchanged; tests pass."
+Proof: run
+```
+gh run view 42892793783 --job 130097987917 --log-failed   (bench-acp, head 286cdf8)
+```
+```
+acp shed_only median of 9: base 4638 ns, head 5403 ns (head/base 116%)
+FAIL: shed_only: the head is more than 10% slower
+##[error]Process completed with exit code 1.
+```
+
+#72 round 1:
+- blocking [correctness] crates/shed-server/src/registry.rs:214: state.json saves moved to an unflushed saver thread, so a server stopped right after a change loses it; the resume test now fails intermittently (the session id is missing after a restart).
+
+Proof: run
+
+```
+for i in 1 2 3 4 5 6; do cargo test -p shed --test acp 2>&1 | rg "test result|panicked"; done
+```
+
+```
+thread 'resume_replays_the_history_once_marked_replay' (76663376) panicked at crates/shed/tests/acp.rs:483:5:
+test result: FAILED. 20 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.68s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.68s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.65s
+thread 'resume_replays_the_history_once_marked_replay' (76727212) panicked at crates/shed/tests/acp.rs:483:5:
+test result: FAILED. 20 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.68s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.77s
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.68s
+```
+
+
+#72 round 2:
+- blocking [correctness] crates/shed/tests/lock.rs:100: AC3 not met at this head. A `list` issued while `kill` of a SIGTERM-ignoring process runs is delayed about 2 s (the kill grace), and the AC2 test hangs on `send` for ~100 s. Both lock tests the PR adds are red here, solo and in the full workspace run.
+
+Proof: run
+
+```
+cargo test -p shed --test lock killing
+```
+```
+test killing_a_program_that_ignores_sigterm_holds_up_no_list ... FAILED
+ls took 2.094235833s
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 2.43s
+```
+
+#94 round 1:
+- blocking [spec] crates/shed/tests/acp.rs:828: the test (and docs) name Claude's session option keys and agent, which the owner's amendment forbids.
+  Proof: spec
+  > **Amendment (q1542)**: Agent-neutral (q1542): shed never names a session option key or an agent for this passthrough; the fake-agent test uses made-up keys (not settingSources/strictMcpConfig); Claude appears only in the PR's one live check.
+  crates/shed/tests/acp.rs:828-829 builds `{"claudeCode": {"options": {"settingSources": [...], "strictMcpConfig": true}}}`; docs/acp.md:36 and docs/acp.md:101-102 also name `claude-acp`, `claudeCode`, `settingSources`, `strictMcpConfig` in the shipped docs. Fix: use made-up keys in the test and keep the claude example out of docs (it belongs only in the PR's live check).
+
+
+#81 round 1:
+- blocking [correctness] crates/shed-server/src/registry.rs:648: `killed` marks the entry exited but never drops its `working`/`blocked` report, so `kill` returns an exited terminal still carrying `reported: working`. This breaks the existing golden test, and scope item 6 ("On exit, working and blocked are dropped").
+Proof: run
+```
+cargo test -p shed --test server run_ls_read_kill
+```
+```
+test run_ls_read_kill_over_the_socket_match_the_goldens ... FAILED
+assertion `left == right` failed: .../crates/shed/tests/golden/kill.jsonl differs
+  left:  ..."state":"exited","exit":143,"pid":null,"reported":{"state":"working","note":"step 1"}}}
+ right: ..."state":"exited","exit":143,"pid":null}}
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 9 filtered out
+```
+
+## The owner in orchestrator threads
+
+- t20: Discuss issue 40 more
+  
+- t20: How do we get best performance as much as possible? Why no tokio? Should we tokio?
+- t20: But with these and tokio too? How much line would it cost?
+- t20: Buffered and shared event and ACP tokio then full tokio final? For future proof?
+  
+  Grill me
+- t20: DECISION q595: Lock it in now: file all 3, step 3 starts design-first
+- t20: DECISION q596: #40 becomes step 2: ACP on the tokio SDK, plus session/load + set_model, all in one
+- t20: DECISION q597: Raise to 7,000 now, once, in step 1's issue
+- t20: DECISION q598: A bench test in CI per step (event fan-out to N clients, 1,000-update ACP replay), fails if over 10% slower than the baseline
+- t20: And it should aim to be faster too
+- t20: Make is hard gate for faster
+- t20: Now ideas on general skill and MCP from another agents
+  
+  I read the pinned shed source first. It decides the order of work.
+  
+  ## What blocks this today
+  
+  At cooee's pinned shed rev (`8bac04f`), shed's ACP bridge sends `session/new` with `{"cwd": cwd, "mcpServers": []}` (`shed-server/src/acp.rs:551`). The comment above it says "no MCP servers". Cooee never talks ACP itself. It asks shed to run the agent, and shed is the ACP client. So MCP support starts with a **shed change**: accept a list of MCP servers per session and pass them through. My earlier question about `available_commands_update` also has an answer now: I found no trace of it in shed, so the slash-menu idea needs a shed change too.
+  
+  ## Proposed design
+  
+  **1. Shed passes servers through.** `shed run --acp` and the API take `mcp_servers`: stdio entries (command, args, env) and HTTP entries (url, headers). Stdio is the safe default. Every ACP agent must support it, and HTTP depends on an agent capability.
+  
+  **2. A registry in cooee.** Named servers in config and Settings, each with a type, command or URL, enabled flag, and env values taken from references (env var names or a 0600 file) so cooee doesn't hold secrets in its store. MCP tool calls already arrive as ordinary tool calls, so the existing tool rows and approval cards work unchanged.
+  
+  **3. Per-profile selection.** A profile lists the servers it uses, with an optional tool allowlist. Starting a thread resolves it to:
+  - the account's config-folder variable;
+  - the folder;
+  - the `mcpServers` list;
+  - the instructions.
+  
+  ACP has no system-prompt field, so instructions would go in as a first-turn prefix or through an agent flag. I haven't checked which flags the agents offer. Writing `AGENTS.md` into your repo would be wrong, so I'd avoid that.
+  
+  **4. Cooee's own MCP server.** `cooee mcp --profile P --thread T` is a stdio subprocess that the agent spawns. It talks to the running cooee server using a per-thread token that is revoked when the thread ends. It exposes `list_skills`, `load_skill` and `read_skill_file`, plus later `search_threads` (FTS over stored threads), `save_note` and `propose_skill`. Stdio keeps this working for every provider.
+  
+  ## Skills as MCP
+  
+  There are two ways to do it:
+  - **MCP prompts.** Each skill becomes an MCP prompt, which is basically a slash command. Support for MCP prompts varies by agent, so it isn't portable.
+  - **Tool-based disclosure (my pick).** The server offers `load_skill(name)` and `read_skill_file(name, path)`. The index of names and one-line descriptions sits in the `load_skill` tool's own description, so it is always in context, as a native skill index would be. A skill's scripts come back as text for the agent to run in its own shell.
+  
+  The skills would live in one library in the `SKILL.md` format, shared with Hermes if you choose. Each skill has a delivery setting: `native` links it into the provider's skills folder, `mcp` serves it through the tool, and `auto` picks native where supported, which is better on Claude, and MCP elsewhere. Third-party skill servers are just more registry entries.
+  
+  A drover plugin could also declare an MCP endpoint, so agents could call `queue` or `ask` tools. That ties into the plugin seam. I haven't checked whether the plugin format can carry it.
+  
+  ## Security
+  
+  An MCP server is code running as you, and tool results are a prompt-injection path.
+  - Adding a stdio command must be host-side or go through an approval card that shows the exact command. It never comes from an agent message, and a paired phone can toggle but not add.
+  - Thread tokens are scoped, and each profile has a tool allowlist.
+  - `propose_skill` writes nothing until you approve the diff.
+  
+  ## Order and rough size
+  
+  1. Shed pass-through of `mcp_servers`, about 100 lines. Do this first. I'd also check which agents support HTTP servers.
+  2. Registry plus profile resolve in cooee, about 400 lines.
+  3. `cooee mcp` with the skills tools, about 500 lines.
+  4. Settings UI, about 300 lines.
+  5. `search_threads`, then `propose_skill` with its approval card.
+  
+  Grill these
+- t20: DECISION q600: New issue right after #40 (blocked on it), small on the SDK types
+- t20: DECISION q601: stdio + HTTP + SSE (all ACP defines)
+- t20: DECISION q603: Take values over the local socket; never persist or log them; redact them in agent state and events
+- t20: DECISION q604: Same issue as MCP pass-through (both small, both after #40)
+- t20: Handoff to cooee new thread but its limit byte
+- t20: Oh it worked
+- t33: Lets make aure the shed fleet still going
+  
+  And also checkout infinity again “ Infinity
+  A Rust framework for building massively concurrent agentic systems, light enough to fit 75k agents in the memory of a Raspberry Pi.
+  
+  Infinity does for agents what async did for threads. Instead of blocking on slow tools, Infinity agents run them concurrently, yield while they wait, and cost nothing until the next event arrives”
+  
+  https://github.com/hydro-project/infinity
+  
+  How close are we? And since we moving to fully async we should aim to be even more efficient than infinity look at their architecture too
+- t33: ✗ not delivered: REFUSED KEYCHAIN_LOCKED: approve herdsman in the Keychain dialog on Jirathips-Mac-Mini: Always Allow for herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_C, once (it lasts while herdsman is signed by "herdsman-local")
+- t33: ✗ not delivered: REFUSED KEYCHAIN_LOCKED: approve herdsman in the Keychain dialog on Jirathips-Mac-Mini: Always Allow for herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_C, once (it lasts while herdsman is signed by "herdsman-local")
+- t33: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t33: Continue
+- t33: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t33: Maybe kill them and respawn instead? I unstuck keychain issue this morning already
+  
+  And continue the research
+- t33: ✗ not delivered: herdr agent start failed: named agent conductor-t33 no longer owns the target terminal
+- t33: …
+- t33: ✗ not delivered: t33's previous message is still being delivered after 30 s
+- t33: ✗ not delivered: t33's previous message is still being delivered after 30 s
+- t33: ✗ not delivered: t33's previous message is still being delivered after 30 s
+- t33: ✗ not delivered: t33's previous message is still being delivered after 30 s
+- t33: ✗ not delivered: t33's previous message is still being delivered after 30 s
+- t33: ✗ not delivered: t33's previous message is still being delivered after 30 s
+- t33: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t35: Lets make aure the shed fleet still going
+  
+  And also checkout infinity again “ Infinity
+  A Rust framework for building massively concurrent agentic systems, light enough to fit 75k agents in the memory of a Raspberry Pi.
+  
+  Infinity does for agents what async did for threads. Instead of blocking on slow tools, Infinity agents run them concurrently, yield while they wait, and cost nothing until the next event arrives”
+  
+  https://github.com/hydro-project/infinity
+  
+  How close are we? And since we moving to fully async we should aim to be even more efficient than infinity look at their architecture too
+  
+  I asked in T33 but T33 chat is broken
+- t35: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t35: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t35: config c11 applied by owner, backup kept, doctor ✓
+- t35: Continue
+- t35: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t35: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t35: lane ask q705 on #43 from berth-impl-43 (owner): Issue #43 (MCP pass-through + slash commands) needs about +85 non-test lines; the repo is at 6,989/7,000, so the PR would put it at ~7,080. Already trimmed to the minimum (SDK types, no new structs). Raise line_cap? [1] Raise line_cap to 7,100 in this PR (record in docs/cap-history) (recommended) [2] Raise to an exact 7,085 [3] Hold: trim unrelated code instead (tell me where). Answer it only if the issue spec or a past decision settles it: `herdsman answer berth q705 <n> --basis "<verbatim spec quote | q<id>>"`; else run it without --basis and it goes to the owner.
+- t35: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t20: Show me first
+- t20: So you cannot send? Handoff it but show me where to look then
+- t20: Ok but show me actually i meant
+  
+  q706Design for #42 is ready (9b9e28a): approve, revise (type a note) or reject?
+- t35: Please continue what happened here
+- t35: ✗ not delivered: herdr agent start failed: timed out waiting for agent startup
+- t20: DECISION q706: approve
+- t20: Also
+  
+  
+  
+  Lets make sure the shed fleet still going
+  
+  And also checkout infinity again “ Infinity
+  A Rust framework for building massively concurrent agentic systems, light enough to fit 75k agents in the memory of a Raspberry Pi.
+  
+  Infinity does for agents what async did for threads. Instead of blocking on slow tools, Infinity agents run them concurrently, yield while they wait, and cost nothing until the next event arrives”
+  
+  https://github.com/hydro-project/infinity
+  
+  How close are we? And since we moving to fully async we should aim to be even more efficient than infinity look at their architecture too
+  
+  I asked in T33 and T35 but show how those chat broken
+- t20: DECISION q708: File it and queue after #42; it must beat today's idle memory and report wake time
+- t20: Yes
+- t20: lane ask q746 on #42 from berth-impl-42 (owner): #42 rev FAIL: the ACP bridge runtime is multi-thread with 1 worker (writer task on the worker, session on the bridge thread), but the approved design says current-thread. With current-thread the ACP bench lost to base (local median 9037us vs 7087us, after the batch-size reserve lever was tried); with 1 worker it beats base (local median 10367 vs 11396us; CI 17585 vs 18188us). Also, shed-core uses the tokio 'macros' feature (for select!), beyond the design's 'sync, time' only. Approve both deviations? [1] Approve both: bridge multi-thread with 1 worker, shed-core tokio macros (PR #48 as is) (recommended) [2] Revert the bridge to current-thread and accept that ACP is not faster than base (breaks the faster gate) [3] Revise: keep current-thread and look for another ACP speedup (note what to try). Answer it only if the issue spec or a past decision settles it: `herdsman answer berth q746 <n> --basis "<verbatim spec quote | q<id>>"`; else run it without --basis and it goes to the owner.
+- t20: lane ask q750 on #42 from berth-impl-42 (owner): #42, more detail on q746. WHAT THE BRIDGE IS: every ACP agent session (e.g. Claude in shed) runs a small bridge process. It talks to the agent, and it sends each agent update to the shed server and the terminal. Before #42 it had 2 helper threads (keyboard input, sending to the server). The design said to make these tasks on ONE thread (current-thread). WHAT HAPPENED: on one thread, talking to the agent and sending updates take turns, so they never overlap. The 1,000-update ACP bench then ran 27% SLOWER than base (median 9.0ms vs 7.1ms). The design's fallback (batch tuning, skipping a refresh) did not close the gap. WHAT I DID: I gave that runtime 1 extra worker thread (one line in acp.rs), so sending runs beside the agent session as the old helper thread did. ACP is now FASTER than base (local median 10.4 vs 11.4ms; CI 17.6 vs 18.2ms). The bridge has 2 threads instead of 3, the glue is gone, and the server itself is unchanged by this. The reviewer failed it only because the design says current-thread and I did not ask first. SECOND, smaller deviation: shed-core turns on tokio's 'macros' feature (no new crate, same tokio) for one select! that waits on 'status changed OR timeout' in terminal wait. The design listed only 'sync, time'. Writing that by hand costs extra lines, and the repo is at the 7,100 cap. Approve? [1] Approve both deviations and keep PR #48 as is (ACP faster, 1 extra bridge thread) (recommended) [2] Revert to current-thread: the bridge matches the design but ACP is ~27% slower than base (fails your faster gate) [3] Revise: keep current-thread and try another ACP speedup (say what). Answer it only if the issue spec or a past decision settles it: `herdsman answer berth q750 <n> --basis "<verbatim spec quote | q<id>>"`; else run it without --basis and it goes to the owner.
+- t20: ✓ herdsman — installed
+  herdsman: boat1: log in in pane w2:p1 there (herdr or the board), then bootstrap again
+- t20: How to attach to herdr from Air? And can Air see?
+  
+  Also 29 keep asking as it end with no push?
+- t20: ❯ herdr machine add boat1 --label boat1
+  herdr --remote boat1
+  ssh: Could not resolve hostname boat1: nodename nor servname provided, or not known
+  error: remote platform detection failed: ssh: Could not resolve hostname boat1: nodename nor servname provided, or not known; machine was not saved
+  ssh: Could not resolve hostname boat1: nodename nor servname provided, or not known
+  error: remote platform detection failed: ssh: Could not resolve hostname boat1: nodename nor servname provided, or not known
+  
+  From the Air
+  
+  
+  ❯ herdsman hosts bootstrap boat1
+  herdsman: can't reach boat1
+  
+  From the Mini
+  
+- t20: ❯ boat resume bx_tu68gs6y
+  herdsman hosts bootstrap boat1
+  Error: Something went wrong
+- t20:  boat resume bx_tu68gs6y --json
+  {"code":"sandbox_resuming","error":"A resume for this sandbox is already in progress. Wait for it to finish.","event":"error","status":409}
+  
+- t20: I tried the UI it keep back to stop when pressing resume??
+- t20: DECISION q784: Delete boat1 and create it fresh, then bootstrap and log in right away
+- t20: 󰀵   /.ssh  󰔟 13s  
+  ❯ boat new --type default --name boat1 --no-auto-stop
+  herdsman hosts bootstrap boat1
+  
+  sandbox id: bx_y83692bp
+  billing: personal
+  
+  ready
+  
+  ssh:     boat ssh bx_y83692bp
+  desktop: boat desktop bx_y83692bp
+  ip:      2001:41d0:a:731a:100::22
+  
+  you can refer to it also as "current" instead of ID
+  as long as you stay in this shell and it remains the
+  last created sandbox in there
+  herdsman: can't reach boat1
+  
+  Also the coo 29 terminal issues maybe file to herdsman not cooee? But can we unstuck it now?
+  
+- t20: user@5.196.82.26: Permission denied (publickey).
+- t20: Ok herd remote works now
+- t20: claude is signed out (account C): sign in
+- t20: On Mini I have to login on C again? But it 1 year token? and for shed raise for 47?
+  
+  Also in boat 
+  
+   herdsman hosts bootstrap boat1
+  ✓ herdr — there
+  ✓ git — there
+  ✓ gh — there
+  ✓ claude — there
+  ✓ rust — there
+  ✓ herdsman — installed
+  herdsman: herdr workspace create --cwd /tmp --label herdsman-setup --no-focus failed (2): error: machine label 'boat1' is ambiguous; use its profile ID
+  
+- t20: DECISION q787: Accept it: ACP time is the Python fake agent's, not shed's; move on to #47
+- t20: Actually for 42 file follow for faster if there is still room for improvement
+- t20: DECISION q788: Raise to 7,350 in #47's PR, with a cap-history note
+- t20: Invalid OAuth request
+  Unknown scope: user:mc
+  
+  When login in boat1
+  
+  And also account C is still have usage and there is no 5 hourly limit???
+- t20: And I seems to have these Is this from boat1 in herdr? but anyway it seems not interactable and I ssh into to do it and got the oauth error
+- t20: sudo npm i -g @anthropic-ai/claude-code@2.1.311
+  claude /login
+  
+  added 2 packages in 2s
+  npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+  npm warn install-scripts   @anthropic-ai/claude-code@2.1.311 (postinstall: node install.cjs)
+  npm warn install-scripts
+  npm warn install-scripts Run `npm install -g --allow-scripts=@anthropic-ai/claude-code` to allow these scripts once, or `npm config set allow-scripts=@anthropic-ai/claude-code --location=user` to allow them for all global installs.
+  npm notice
+  npm notice New major version of npm available! 11.19.1 -> 12.2.2
+  npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.2
+  npm notice To update run: npm install -g npm@12.2.2
+  npm notice
+   ▐▛███▛█   Claude Code v2.1.311
+  ▝▜██████▀  Opus 5.5 · API Usage Billing
+   ▝▝   ▝▝   /home/user
+  
+  
+  ❯ /login
+    ⎿  Login interrupted
+  
+  ❯ /login
+  
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    Login
+  
+    Browser didn't open? Use the url below to sign in (c to copy)
+  
+  https://claude.com/cai/oau
+  
+  Then I copy the link but open in Air
+  
+  And its "Invalid OAuth request
+  Unknown scope: user:mc"
+- t20: Invalid OAuth request
+  Invalid code_challenge_method: missing. Expected: ‘S256’
+- t20: Ok yes that's true I just claude /login successfully
+- t20: It seems freeze after ✓ herdr — there
+  ✓ git — there
+  ✓ gh — there
+  ✓ claude — there
+  ✓ rust — there
+  ✓ herdsman — there
+  ✓ git over https — installed
+  ✓ clone jirathip-dev/shed — installed
+  ✓ clone jirathip-dev/cooee — installed
+  ✓ clone jirathip-dev/cooee-drover — installed
+- t20: wait why herdsman is 3.5GB??? Later on we should clean up our repos
+  
+  herdsman hosts bootstrap boat1
+  ✓ herdr — there
+  ✓ git — there
+  ✓ gh — there
+  ✓ claude — there
+  ✓ rust — there
+  ✓ herdsman — there
+  ✓ git over https — installed
+  ✓ clone jirathip-dev/shed — installed
+  ✓ clone jirathip-dev/cooee — installed
+  ✓ clone jirathip-dev/cooee-drover — installed
+  ✓ clone jirathip-dev/herdsman — installed
+  ✓ clone jirathip-dev/sendmeter — installed
+  herdsman: boat1: clone synergy-services-cooling-tower/synergy-apps installed, `test -d '/home/user/Projects/synergy-apps/.git'` fails: fatal: unable to access 'https://github.com/synergy-services-cooling-tower/synergy-apps.git/': The requested URL returned error: 403
+  
+  But no need for synergy here I think I only enabled Jirathip-dev in boat
+- t20: config c14 applied by owner, backup kept, doctor ✗ (run herdsman doctor)
+- t20: Check cooee, cooee-drover, and shed to keep the repo clean too
+  
+  Also
+  
+    herdsman hosts bootstrap boat1
+  ✓ herdr — there
+  ✓ git — there
+  ✓ gh — there
+  ✓ claude — there
+  ✓ rust — there
+  ✓ herdsman — there
+  ✓ git over https — there
+  ✓ clone jirathip-dev/shed — there
+  ✓ clone jirathip-dev/cooee — there
+  ✓ clone jirathip-dev/cooee-drover — there
+  ✓ clone jirathip-dev/herdsman — there
+  ✓ clone jirathip-dev/sendmeter — there
+  herdsman: boat1: profiles sync installed, `'/home/user/.local/bin/herdsman' profiles sync >/dev/null` fails:
+- t20: So lane on boat still not possible? or we can fix it to text out?
+- t20:   ssh boat1 'mv ~/.config/herdsman/fleet.toml ~/.config/herdsman/fleet.toml.bak'\nherdsman hosts bootstrap boat1\nherdsman doctor | grep boat1
+  ✓ herdr — there
+  ✓ git — there
+  ✓ gh — there
+  ✓ claude — there
+  ✓ rust — there
+  ✓ herdsman — installed
+  ✓ git over https — there
+  ✓ clone jirathip-dev/shed — there
+  ✓ clone jirathip-dev/cooee — there
+  ✓ clone jirathip-dev/cooee-drover — there
+  ✓ clone jirathip-dev/herdsman — there
+  ✓ clone jirathip-dev/sendmeter — there
+  ✓ profiles sync — there
+  boat1: bootstrapped (next: doctor, snapshot)
+  ! host boat1 shed: shed connect failed (127): bash: line 1: shed: command not found
+- t20: go
+- t20: DECISION q790: Move #49 to boat1 now (supersede: its 14 min of work is saved to a wip branch first)
+- t20: clean up air disk and move 47 to boat1 too
+- t20: why was the clean up off? can it be on?
+- t20: 22 lesson what to do?
+- t20: DECISION q792: Close #22 now as 'no repeated class' (I close it on GitHub; nothing else changes)
+- t20: Shed fully done? Rename the local to shed too? And Pause shed
+- t20: 47 49 merged right?
+- t20: config c16 applied by owner, backup kept, doctor ✗ (run herdsman doctor)
+- t20: Ok done but the lesson even with close it kept getting drive? Does herdsman handle the closed issue?
+- t20: How to stop boat for now
+- t56: how to open up shed watch/board for live agents?
+- t56: lane ask q942 on #52 from berth-impl-52 (owner): Line cap: #52 needs ~+215 non-test lines (structured read, tool kind, the styled preview renderer, the bridge redraw) after trimming; staging is at 7,190 / 7,350, so this PR would put the total at ~7,405, about 55 over. No other open PRs or queued issues add src lines (queue holds only #52; herdsman cap fails here: 'no ci/cap.toml line_cap at origin/staging in the main checkout'). Raise the cap or cut the feature? [1] Raise line_cap to 7,500 (projected 7,405 plus margin) in one conductor-filed issue; #52 waits on it (recommended) (recommended) [2] Trim: drop the reply markdown styling (headings, lists, fenced code, inline code) to fit under 7,350; prompt, tool lines, approvals and plan still styled. Answer it only if the issue spec or a past decision settles it: `herdsman answer berth q942 <n> --basis "<verbatim spec quote | q<id>>"`; else run it without --basis and it goes to the owner.
+- t56: the conductor does not start: REFUSED ACP_UNGUARDED: profile lane-conductor has no herdsman PreToolUse hook; run `herdsman profiles sync`; the lane does not start
+- t33: lane ask q1082 on #57 from berth-impl-57 (owner): Line cap: PR #58 (#57, S1 held SSH links, size L), merged onto staging, puts crates/*/src at 7707 against line_cap 7500 (+207 over). Queue-wide view (herdsman cap berth errored: 'scripts/line-cap.sh printed no N / cap M line at origin/staging', so by hand): integration 7414/7500 (headroom 86); open PRs: #58 src/ net +293, dependabot #9 (actions only) +0; queued issues with no PR: none; projected total 7707. Already trimmed: deleted the client-side events --on reconnect loop (events_on + machines::keep_up, -95) that the held link replaces. The rest is the link module, routing and the machine.links method the spec asks for. [1] Raise line_cap to 7800 (projected 7707 + margin) in one conductor-filed issue; I block #57 on it (recommended) (recommended) [2] Trim #58 further (drop the machine ls link column and text output, merge helpers): saves maybe 30-40 lines, still over the cap. Answer it only if the issue spec or a past decision settles it: `herdsman answer berth q1082 <n> --basis "<verbatim spec quote | q<id>>"`; else run it without --basis and it goes to the owner.
+- t90: check all the unquote shed issues and queue them
+- t90: and some queue are in ready and seems stuck?
+- t90: DECISION q1522: 1 but why shed has macOs job? can it all be ubuntu?
+- t90: shed is paused now can we rename the local directory name here to shed now?
+- t90: DECISION q1528: File a herdsman issue for 'herdsman fleet rename berth shed' (moves the queue, history, asks and secrets, then renames the config key); run it while shed is paused
+- t90: Check shed new issues 94 and make this priority 
+- t90: Also check out the architecture from Cooee issues and Drover(herdsman) that make everything core agent agnostic and handle each agents generically so 94 dont hard coded claude
+- t90: Need file and AArchitecture or not?
+- t90: DECISION q1542: No architect. Amend #94: shed never names a key or an agent for this; the test uses made-up keys on the fake agent; Claude appears only in the PR's one live check. Also file a shed issue for a CI neutral-core check like herdsman's (agent names only in agents.rs and the registry)
+- t90: DECISION q1542: No architect. Amend #94: shed never names a key or an agent for this; the test uses made-up keys on the fake agent; Claude appears only in the PR's one live check. Also file a shed issue for a CI neutral-core check like herdsman's (agent names only in agents.rs and the registry)
+- t90: Hows the fleet still stuck on MacOS?
+- t90: Canceled
+- t90: So is shed async yet? Seems like its not fully async? We did have issues file for async?
+- t90: run r101 approved by owner, running in /Users/jkmacmini…
+- t90: run r101 approved by owner, running in /Users/jkmacmini…
+- t90: run r101 approved by owner, ran in /Users/jkmacmini: exit 128
+  ```
+  Preparing worktree (detached HEAD 02fcf97)
+  HEAD is now at 02fcf97 acp: any agent traffic keeps a turn alive; idle timeout default 1800 s (#90) (#97)
+  scripts/install.sh: line 12: cargo: command not found
+   first
+  shed 0.0.0
+  ```
+- t90: run r101 approved by owner, ran in /Users/jkmacmini: exit 127
+  ```
+  Preparing worktree (detached HEAD 02fcf97)
+  HEAD is now at 02fcf97 acp: any agent traffic keeps a turn alive; idle timeout default 1800 s (#90) (#97)
+  scripts/install.sh: line 12: cargo: command not found
+  shed 0.0.0
+   0.0.0
+  ```
+- t90: run r102 approved by owner, running in /Users/jkmacmini…
+- t90: run r102 approved by owner, ran in /Users/jkmacmini: exit 0
+  ```
+     Compiling tracing v0.1.44
+     Compiling futures-concurrency v7.7.1
+     Compiling clap v4.6.7
+     Compiling derive_more v2.1.1
+     Compiling strum v0.28.0
+     Compiling darling_macro v0.24.1
+     Compiling darling v0.24.1
+     Compiling serde_with_macros v3.24.0
+     Compiling shed-proto v0.0.0 (/private/tmp/shed-install-02fcf97/crates/shed-proto)
+     Compiling serde_with v3.24.0
+     Compiling futures v0.3.34
+     Compiling shed-core v0.0.0 (/private/tmp/shed-install-02fcf97/crates/shed-core)
+     Compiling agent-client-protocol-schema v1.15.1
+     Compiling agent-client-protocol v5.0.0
+     Compiling shed-server v0.0.0 (/private/tmp/shed-install-02fcf97/crates/shed-server)
+     Compiling shed v0.0.0 (/private/tmp/shed-install-02fcf97/crates/shed)
+      Finished `release` profile [optimized] target(s) in 1m 22s
+  /Users/jkmacmini/.cargo/bin/shed.new: replacing existing signature
+  shed install: /Users/jkmacmini/.cargo/bin/shed
+  -rwxr-xr-x  1 jkmacmini  staff  4009024 Nov 12 21:45 /Users/jkmacmini/.cargo/bin/shed
+  ```
+- t90: lane ask q1548 on #84 from berth-impl-84 (owner): Line cap: #84 merged onto staging 62e565a puts crates/*/src at 7911 / cap 7800 (staging 7668, headroom 132; #84 src/ net +243). The merged PR needs ~+243 for parent links, wait --children, the kill cascade and notes; trimming 111 lines means cutting scope. herdsman cap berth: open PRs #72/#94/#81 unknown (conflicts), queued no PR #73 #74 #75 #79 #86 #87 #88 #89 #80 #83; projected 7668/7800; options 1. raise to 8168 in one orchestrator-filed issue (recommended) 2. trim. [1] Raise line_cap to 8168 (herdsman cap's projected total + margin) in one orchestrator-filed issue; #84 waits on it (recommended) [2] Trim #84 to fit the 132-line headroom (drop features: e.g. notes or wait --children). Answer it only if the issue spec or a past decision settles it: `herdsman answer berth q1548 <n> --basis "<verbatim spec quote | q<id>>"`; else run it without --basis and it goes to the owner.
+
+## By the owner (overrides, extends, parks, answers against the recommendation)
+
+- decision: berth decision q601 by owner: stdio + HTTP + SSE (all ACP defines)
+- round-extended: berth #41 round-extended
+- extend-failed: berth #41 extend-failed: REFUSED HOST_BUSY: air: load/cpu 4.29 > 2.5; retry later or pass --force
+- extend-failed: berth #41 extend-failed: REFUSED HOST_BUSY: air: load/cpu 3.14 > 2.5; retry later or pass --force
+- extend-failed: berth #41 extend-failed: REFUSED HOST_BUSY: air: load/cpu 3.58 > 2.5; retry later or pass --force
+- round-extended: berth #41 round-extended
+- round-extended: berth #41 round-extended
+- round-extended: berth #41 round-extended
+- round-extended: berth #41 round-extended
+- design-approved: berth #42 design-approved
+- decision: berth #42 decision q746 by owner: Explain more
+- round-extended: berth #42 round-extended
+- decision: berth decision q772 by owner: git-cliff + cliff.toml (new dev dep), release note on each promotion
+- parked: berth #22 parked
+- decision: berth decision q808 by owner: Concretely how to link why? And this is similar to https://github.com/orhun/git-cliff?
+- decision: berth decision q809 by owner: What’s advantage and disadvantages of this? Discuss more make it useful for both agent and user
+- decision: berth decision q810 by owner: These store in git note and herdsman retrieve it?
+- decision: berth decision q812 by owner: 1 for synergy but moving to boat hosted help a lot compare to before 2,3 would be nice especially the Air disk limiting
+- decision: berth decision q818 by owner: Check the existing issues on herdsman too
+- decision: berth decision q822 by owner: Leave it as is
+- decision: berth decision q868 by owner: So this 3 parts its Drover own UI? Or its also in Cooee?
+- decision: berth decision q891 by owner: For persona use other word than SOUL
+- decision: berth decision q893 by owner: how about for Grokbot and Codync what do they use? and for looks don't cut but improve in terms of responsiveness and interaction to make it feel nicer and more native when in PWA? currently there is the header with Cooee in top etc. most app just full screen
+- decision: berth decision q906 by owner: Erase it: nothing on it I need
+- decision: berth decision q913 by owner: 1 and I think we disable comments across all repos? comments and doc are usually stale how do we deal with this? and any other enforcement?
+- decision: berth decision q915 by owner: would this get transfer as plugin in cooee anyway?
+- decision: berth decision q916 by owner:  I meant it will get used in Workflow/plugin engine or not?
+- decision: berth decision q923 by owner: Where was the rebuild? Can we refacto to make it share?
+- decision: berth decision q924 by owner: 2 and remove cooee-drover as planned and make it parity to current board
+- decision: berth decision q930 by owner: This herdsman serve keep them but Cooee plugin only the chosen plugin part?
+- decision: berth decision q932 by owner: Yes but some are not tabs?
+- decision: berth decision q934 by owner: how is cooee own fleet activity? What's the shape the not confusing and best UX?
+- decision: berth decision q937 by owner: 1 and make sure everything in harness and provider agnostic
+- decision: berth decision q938 by owner: Spike now, in parallel with #118
+- decision: berth decision q939 by owner: Install Xcode on the Mini (you, via App Store; ~15 GB on disk)
+- decision: berth decision q941 by owner: Ok the Plugins describe screen as data is nice for potential users build their own plugin easily too?
+- decision: berth decision q947 by owner: 1 but allow theme colors? the modern become apple native and terminal mode more terminal like like current but make it nicer and scene mode and all scene kept and kept all the sprites
+- decision: berth decision q951 by owner: lets rethink a bit so without plugin its Chat and Workflow? And where is Terminal? Maybe Queue and Ask inside Workflow better (No tabs for plugin?, and actually with Native app how can user develop their own plugin then?)
+- decision: berth decision q952 by owner: Is there like a way for no tabs? Like most chat app doesn't have tabs like Grokbot? But put workflow and terminal somewhere? Maybe its plugin tie to Agent profile?  Only conductor use Drover plugin And currently we only have Queue and lanes (issues inside Queue) make it this way? and then event maybe?) and ask just show up as cards no tabs of its own  But for other user build own plugin I mean the App deploy to App Store? and then user cannot modify the app?
+- round-extended: berth #52 round-extended
+- extend-failed: berth #52 extend-failed: REFUSED HOST_BUSY: mini: load/cpu 3.94 > 2.5; stays on mini: its worktree there has unpushed work; retry later or pass --force
+- round-extended: berth #52 round-extended
+- round-extended: berth #52 round-extended
+- round-extended: berth #52 round-extended
+- decision: berth decision q959 by owner: 5,000 (tight, v1 only, raise later)
+- decision: berth decision q962 by owner: 1 but allow CLI only on Mac too?
+- round-extended: berth #52 round-extended
+- decision: berth decision q1000 by owner: File all 6 and queue all of them, 6 included
+- decision: berth decision q1014 by owner: 1 + SwiftLint?
+- decision: berth decision q1017 by owner: The same layers, plus The Composable Architecture (TCA) for state: stricter and well tested, but a big new dependency
+- decision: berth decision q1019 by owner: Maximum: file 250, type 150, function 25, complexity 8, nesting 2; no Any; explicit access control
+- decision: berth decision q1021 by owner: At least 95% on those layers, plus Periphery
+- decision: berth decision q1057 by owner: 2 and make the rename easy later (In case says we have two conductors in Cooee for maybe have them work together? Grill more on this? Actually maybe this is like "Role" But name is another thing?
+- decision: berth decision q1060 by owner: Explain and discuss more? Does Xcode needed for iOS dev? or Swift CLI ok? and maybe the problem we have like Always Allow keychain thing can it be solve by agent? Or maybe adhocs things?
+- decision: berth decision q1062 by owner: But how is accounts made? Do I have to sign up their own emails etc.? And when I what to says read my emails?  Maybe mix?
+- decision: berth decision q1066 by owner: I think we have talk about never keychain? Should we bring keychain back? Each tools handle its own login etc.? Are these related?  And maybe with always allow problem maybe solved? we should use keychain? Or how about 1Password?
+- decision: berth decision q1067 by owner: So is keychain actually better than 0600 file? Maybe we fix at the root cause make herdsman and drover signed? Then Cooee handle all the secrets in Keychain?
+- decision: berth decision q1072 by owner: Explain more about seatbelt
+- decision: berth decision q1074 by owner: Is there more general way? Like more supported on Mac and Linux?
+- decision: berth decision q1075 by owner: Is this provider agnostic?
+- decision: berth decision q1076 by owner: Whats T3 code use? Lets compare
+- decision: berth decision q1077 by owner: srt wrap only
+- decision: berth decision q1078 by owner: What's Grokbot do? Should we able to steer?
+- decision: berth decision q1080 by owner: A then B then C
+- decision: berth decision q1088 by owner: Keep A; I dig into why the adapter hangs on A first (lanes stay stuck meanwhile)
+- decision: berth decision q1089 by owner: 1 ok deleted it
+- decision: berth decision q1092 by owner: 1 but how does this works for herdsman standalone? and cooee agent chats and workflow lane? and currently A is 0% usage but it still 88% in here?
+- decision: berth decision q1095 by owner: 1 but also nicer way to add/delete repo/pause unpause and all the configs too? allow both proposal and manual edit
+- decision: berth decision q1273 by owner: No check Cooee issues again
+- decision: berth decision q1274 by owner: Can we just make the herdsman fixed list editable? and add in config and its check when send message? it should be small? just quick add?
+- decision: berth decision q1277 by owner: 1 but need to TestFlight cooee? Merge to main and TestFlight and test out?
+- decision: berth decision q1294 by owner: Reread all the issues and design whether it should be like this? I though we group by agents? And conductor only have the drover workflow etc?  So maybe show agents defined and its chats only? Other lanes just hide under others in chat but also drover workflow  And do we have all the iOS functions, UX niceness such as haptics and so on yet? Explore all the iOS Native what it can do for me and also chats cannot be swipe left to right to go back to home
+- decision: berth decision q1297 by owner: Everything: feel pass + #80 (Live Activity, widgets, Siri/Action button) + #81 voice, design first
+- decision: berth decision q1301 by owner: 1 and the … should have the those and workflows, routines etc as those are attach to persona and double check all the design for me again I thought we had it?
+- decision: berth decision q1313 by owner: I thought we already had this issues in herdsman check it
+- decision: berth decision q1373 by owner: B, then C, then A
+- decision: berth decision q1417 by owner: for 2 can we do it safely? And the theme (Terminal, Scene) now become default plugins etc too
+- decision: berth decision q1420 by owner (typed): Keep the current designs as defaults and refactor them into layout everything served as blocks
+- decision: berth decision q1421 by owner: Keep the locked minimal maybe just reset layout? and would everything as block lose any UX/UI functionality and performance?
+- decision: berth decision q1423 by owner: should be 1 or 3 if more a bit secure?
+- decision: berth decision q1427 by owner: Two repos: public app repo + private config repo (token for config only)
+- decision: berth decision q1434 by owner: Beacon (beacon / beacon-config)
+- decision: berth decision q1437 by owner: Actually if no healthcheck at all is there way for no these external API?
+- decision: berth decision q1440 by owner: And no Kuma at all? This is standalone?
+- decision: berth decision q1442 by owner: So beacon maybe allow both way? From the host and to the host
+- decision: berth decision q1448 by owner: Config outside but the implement in beacon is on fleet
+- decision: berth decision q1522 by owner: 1 but why shed has macOs job? can it all be ubuntu?
+- run-settled: berth run-settled
+- run-settled: berth run-settled
+- run-done: berth run-done
+- run-done: berth run-done
+- run-settled: berth run-settled
+- run-done: berth run-done
+- round-extended: berth #79 round-extended
+- round-extended: berth #80 round-extended
+- round-extended: berth #79 round-extended
+- round-extended: berth #80 round-extended
+- round-extended: berth #84 round-extended
+
+## Reverts on integration
+
