@@ -37,7 +37,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -170,6 +170,21 @@
           }
         },
         {
+          "name": "parent",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Parent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terminal that started it (`shed run` sends `$SHED`)."
+          }
+        },
+        {
           "name": "rows",
           "required": false,
           "schema": {
@@ -207,7 +222,7 @@
     },
     {
       "name": "ls",
-      "description": "List terminals, by name; `labels` keeps those that carry every given label.",
+      "description": "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -220,6 +235,17 @@
             },
             "description": "Only terminals carrying every one of these labels.",
             "default": {}
+          }
+        },
+        {
+          "name": "parent",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only the children of this terminal."
           }
         }
       ],
@@ -551,7 +577,7 @@
     },
     {
       "name": "wait",
-      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls.",
+      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -559,7 +585,22 @@
           "required": true,
           "schema": {
             "type": "string",
-            "description": "The terminal's name."
+            "description": "The terminal's name; with `children`, the parent's."
+          }
+        },
+        {
+          "name": "children",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Children"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wait on the terminal's children instead of the terminal."
           }
         },
         {
@@ -1244,6 +1285,27 @@
         ],
         "description": "How an ACP bridge answers the agent's permission requests."
       },
+      "Parent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The parent terminal's name."
+          },
+          "outlive": {
+            "type": "boolean",
+            "description": "Keep running when the parent's program ends; otherwise the child is killed with it."
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Type a `[shed]` note into the parent when the child blocks, errors or ends, while the parent is not\nworking."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "description": "A child's link to the terminal that started it."
+      },
       "TerminalInfo": {
         "type": "object",
         "properties": {
@@ -1341,6 +1403,17 @@
               }
             ],
             "description": "The ACP agent session, from the bridge's last `session` event."
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Parent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terminal that started it."
           }
         },
         "required": [
@@ -1794,6 +1867,21 @@
         "type": "object",
         "additionalProperties": false
       },
+      "Children": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "all",
+            "description": "No child is working: each has exited or reports something other than `working`."
+          },
+          {
+            "type": "string",
+            "const": "any",
+            "description": "The next child that reports `done`, `blocked` or `error`, or exits; the result names it."
+          }
+        ],
+        "description": "Which children end a `wait`."
+      },
       "WaitResult": {
         "type": "object",
         "properties": {
@@ -1851,6 +1939,13 @@
               "type": "string"
             },
             "description": "The terminal's labels."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal's parent, if it has one."
           },
           "replay": {
             "type": "boolean",

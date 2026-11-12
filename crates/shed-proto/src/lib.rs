@@ -494,7 +494,7 @@ pub struct RunParams {
 }
 
 /// A child's link to the terminal that started it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Parent {
     /// The parent terminal's name.
     pub name: String,
@@ -641,7 +641,7 @@ pub struct WaitParams {
 }
 
 /// Which children end a `wait`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Children {
     /// No child is working: each has exited or reports something other than `working`.
