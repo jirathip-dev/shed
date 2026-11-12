@@ -1,0 +1,6 @@
+Decided: the leftovers test waits for the state saver to flush before it returns, so its temp folder is removed after the last write
+Because: crates/shed-server/src/registry.rs:141
+Rejected: making the saver stop recreating the state folder — startup relies on it creating the state dir
+Rejected: joining the saver thread on Registry drop — production code added only for a test
+Check: 100 runs of the leftovers test with a fresh TMPDIR leave 3 folders without the fix and 0 with it
+Owner: fixes a test that sometimes left a temp folder behind and turned CI red
