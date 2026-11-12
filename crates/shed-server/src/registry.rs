@@ -24,7 +24,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use crate::events::{Events, Subscriber};
 use crate::stats::Stats;
 
-const SIZE: Size = Size { rows: 24, cols: 80 };
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
 const FILE_VERSION: u32 = 1;
 
@@ -118,7 +117,16 @@ fn history(state: &Path, name: &str) -> History {
     }
 }
 
+fn size(rows: Option<u16>, cols: Option<u16>) -> Size {
+    let (r, c) = crate::config::default_size();
+    Size {
+        rows: rows.unwrap_or(r),
+        cols: cols.unwrap_or(c),
+    }
+}
+
 fn spawn(
+    size: Size,
     cmd: &[String],
     cwd: &Path,
     name: &str,
@@ -127,7 +135,7 @@ fn spawn(
     acp: &[(&str, &str)],
 ) -> Result<Terminal, shed_core::Error> {
     let env = [("SHED", name)].into_iter().chain(acp.iter().copied());
-    let term = Terminal::spawn_with(cmd, cwd, env, SIZE, history)?;
+    let term = Terminal::spawn_with(cmd, cwd, env, size, history)?;
     term.set_idle_after(idle_after.map(Duration::from_secs));
     Ok(term)
 }
@@ -158,9 +166,17 @@ impl Registry {
                 if info.keep {
                     let cmd = vec![shell.clone()];
                     let history = history(path, &info.name);
-                    term = spawn(&cmd, &info.cwd, &info.name, info.idle_after, &history, &[])
-                        .ok()
-                        .map(Arc::new);
+                    term = spawn(
+                        size(None, None),
+                        &cmd,
+                        &info.cwd,
+                        &info.name,
+                        info.idle_after,
+                        &history,
+                        &[],
+                    )
+                    .ok()
+                    .map(Arc::new);
                     if term.is_some() {
                         info.cmd = cmd;
                     }
@@ -412,6 +428,9 @@ impl Registry {
         if !p.cwd.is_absolute() {
             return Err(bad("cwd must be absolute"));
         }
+        if p.rows == Some(0) || p.cols == Some(0) {
+            return Err(bad("rows and cols must be at least 1"));
+        }
         if p.labels.keys().any(|k| k.is_empty() || k.contains('=')) {
             return Err(bad("label keys must be non-empty and have no '='"));
         }
@@ -436,8 +455,16 @@ impl Registry {
         let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
         let acp: Vec<_> = resume.into_iter().chain(mcp).chain(awake).collect();
-        let term = spawn(&p.cmd, &p.cwd, &name, p.idle_after, &history, &acp)
-            .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
+        let term = spawn(
+            size(p.rows, p.cols),
+            &p.cmd,
+            &p.cwd,
+            &name,
+            p.idle_after,
+            &history,
+            &acp,
+        )
+        .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
         let info = TerminalInfo {
             name: name.clone(),
             labels: p.labels,
@@ -495,7 +522,7 @@ impl Registry {
             Some(term) => term.screen(),
             None => {
                 let screen = history(&self.path, &p.name)
-                    .restore(SIZE)
+                    .restore(size(None, None))
                     .map_err(internal)?;
                 if p.history {
                     screen.history(n)
