@@ -22,6 +22,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Release builds use fat LTO, one codegen unit and a stripped binary: 4.0 MB instead of 8.0 MB on macOS arm64.
+
 - `shed events --on M` with no held link is one plain stream over `ssh`: the client-side reconnect and its
   `machine: reconnecting` / `machine: connected` lines are gone; the server's held link does the reconnecting.
 

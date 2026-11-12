@@ -3,7 +3,8 @@
 A small runtime that keeps coding-agent terminals alive, reads their screens and reports their state.
 Every lane docks in a shed and keeps running there, across restarts and machines.
 
-> **Status: spec only.** No code yet. Experimental; built to be one runtime option for
+> **Status: experimental, unreleased (0.0.0).** The v0.1 commands below work; build and install from source with
+> `scripts/install.sh`. Built to be one runtime option for
 > [herdsman](https://github.com/jirathip-dev/herdsman) (`runtime = "shed"`) next to herdr.
 
 ## Why
