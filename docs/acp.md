@@ -45,8 +45,11 @@ The state is `working` from `send` until the turn ends, `blocked` while a permis
 (note: the stop reason, e.g. `end_turn` or `cancelled`) after; an agent error is `error`. A turn also
 ends as `error` when the agent's login failed (note `auth: <the line>`, see [Accounts](#accounts)) or when
 it hears nothing from the agent for `$SHED_TURN_IDLE_TIMEOUT` seconds in the environment of `shed serve`
-(default 120; note `no response`). Any update counts, so a long tool call that reports progress goes on;
-a permission request waiting for `approve` does not time out. `shed events`
+(default 1800; note `no response`). Anything the agent sends counts: every update (thought chunks, plans,
+usage, tool-call progress), any request, and each line it writes to stderr; a permission request waiting for
+`approve` does not time out. The default is long because a model thinking at high effort can send nothing
+for minutes on a healthy turn; an expired login is caught at once by its reply, so the watchdog is only a
+backstop for an agent that really hangs. `shed events`
 streams `turn`, `text` (reply chunks), `tool_call` (each status change), `plan`, `mode`, `approval_request`,
 `approved`, `reply` (the whole reply and its `stop_reason`) and `session` (its id, the current `model` and the
 `models`, also kept as the terminal's `session`) next to the usual `started`, `state` and `exited`; see

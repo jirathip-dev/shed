@@ -32,6 +32,7 @@ use proto::{
     WatchParams,
 };
 use registry::{Registry, Stream};
+use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -234,6 +235,7 @@ pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         }
         locked => locked.map_err(io::Error::from)?,
     }
+    raise_open_files();
     let workers = std::thread::available_parallelism().map_or(1, |n| n.get().min(4));
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(workers)
@@ -277,12 +279,51 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     )
     .ok();
     loop {
-        let (stream, _) = listener.accept().await?;
-        tokio::spawn(connection(
-            Arc::clone(&registry),
-            Arc::clone(&links),
-            stream,
-        ));
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                tokio::spawn(connection(
+                    Arc::clone(&registry),
+                    Arc::clone(&links),
+                    stream,
+                ));
+            }
+            Err(e) => {
+                writeln!(io::stderr(), "shed serve: accept: {e}").ok();
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+        }
+    }
+}
+
+fn raise_open_files() {
+    let old = getrlimit(Resource::Nofile);
+    let cap = if cfg!(target_os = "macos") {
+        runner::output("/usr/sbin/sysctl", ["-n", "kern.maxfilesperproc"], &[])
+            .ok()
+            .and_then(|out| String::from_utf8(out.stdout).ok()?.trim().parse().ok())
+    } else {
+        None
+    };
+    let target = match (old.maximum, cap) {
+        (Some(hard), Some(cap)) => Some(hard.min(cap)),
+        (hard, None) => hard,
+        (None, cap) => cap,
+    };
+    if (old.current).is_none_or(|soft| target.is_some_and(|target| soft >= target)) {
+        return;
+    }
+    let new = Rlimit {
+        current: target,
+        ..old
+    };
+    if let Err(e) = setrlimit(Resource::Nofile, new) {
+        let show = |n: Option<u64>| n.map_or_else(|| "unlimited".to_owned(), |n| n.to_string());
+        let (from, to) = (show(old.current), show(new.current));
+        writeln!(
+            io::stderr(),
+            "shed serve: open-file limit {from} -> {to}: {e}"
+        )
+        .ok();
     }
 }
 
@@ -423,7 +464,7 @@ async fn dispatch(
         session.hello = true;
         return json(&Hello::ours());
     }
-    if !session.hello {
+    if !session.hello && method != Method::Discover {
         return Err(RpcError::new(
             ErrorCode::NoHello,
             "send hello with your version first",
@@ -503,6 +544,7 @@ async fn dispatch(
         Method::State => json(&reg.state(params(request)?)?),
         Method::Emit => reg.emit(params(request)?).map(|()| empty()),
         Method::Model => reg.model(params(request)?).map(|()| empty()),
+        Method::Discover => Ok(proto::openrpc()),
         Method::Hello
         | Method::Kill
         | Method::Wait

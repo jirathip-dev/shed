@@ -57,7 +57,7 @@ pub fn over<A: AsRef<OsStr>>(
         .spawn()
 }
 
-/// Starts `program` with `args` in `cwd` without the `unset` variables, stdin and stdout piped.
+/// Starts `program` with `args` in `cwd` without the `unset` variables, stdin, stdout and stderr piped.
 ///
 /// # Errors
 /// When `program` cannot start.
@@ -76,6 +76,7 @@ pub fn piped<A: AsRef<OsStr>>(
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
 }
 

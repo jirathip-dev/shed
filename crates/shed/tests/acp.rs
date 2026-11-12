@@ -855,7 +855,7 @@ fn meta_reaches_the_agent_unchanged_on_new_on_a_wake_and_on_resume() {
         let out = shed(&dir, &["run", "--acp", "fake", "--meta", bad]);
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(
-            !out.status.success() && err.contains("not a JSON object"),
+            !out.status.success() && err.contains("invalid value") && err.contains("--meta"),
             "{bad}: {err}"
         );
     }
