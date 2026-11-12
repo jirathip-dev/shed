@@ -1,0 +1,14 @@
+Decided: rm starts the removed terminal's agent once (initialize, then session/close only when it advertises sessionCapabilities.close, 30 s limit) and stops it
+Because: "`rm` of an ACP terminal closes its session (`session/close`) when the agent supports it"
+Because: crates/shed-server/src/registry.rs:666
+Rejected: closing on kill — kill signals the bridge and the agent together, so no live agent is left to answer a close
+Decided: the v2 refusal is the SDK's own (it rejects a negotiated version other than 1 before shed sees the reply); docs/acp.md names the error
+Because: "The bridge refuses a v2-only agent with a clear message until v2 is supported."
+Rejected: a shed-worded version check — dead code: with the fake agent's --v2 the SDK errored first
+Decided: usage lives on the session in the bridge and the server (each session event carries it); a usage update does not rewrite the state file
+Because: "`usage_update` is stored on the session and shown in `get` (`session.usage`), with a `usage` event."
+Decided: the TOKENS column is in top only; ls keeps its columns
+Because: "`shed top` gains a tokens column for ACP terminals."
+Check: rm_closes_the_session_once_and_only_when_the_agent_can: the fake records any close it gets, so the no-capability case would show one
+Check: session.usage is boxed so every event grows 8 bytes, not ~56: the shed-only bench went 111% -> 96% of base
+Owner: ACP terminals now show token use, list an agent's past sessions to resume, and close the session when removed.
