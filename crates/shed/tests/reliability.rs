@@ -187,6 +187,7 @@ fn two_autostarts_at_once_share_one_server() {
     let killed = Command::new("kill").arg(&servers[0]).status();
     assert_eq!(servers[0], servers[1], "one server");
     assert!(killed.expect("kill").success());
+    eventually("the server to exit", || !alive(&servers[0]));
 }
 
 #[test]

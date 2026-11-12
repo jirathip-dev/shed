@@ -438,6 +438,14 @@ fn run_autostart_starts_a_detached_server() {
         killed.success(),
         "the server ({server}) is the program's parent"
     );
+    eventually("the server to exit", || {
+        !Command::new("kill")
+            .args(["-0", &server])
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill -0")
+            .success()
+    });
 }
 
 #[test]
