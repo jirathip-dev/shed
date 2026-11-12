@@ -205,10 +205,14 @@ async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     let Ok(sample) = blocking(move || stats::system(&dir)).await else {
         return Duration::from_secs(1);
     };
-    let mut reg = lock(registry);
-    reg.refresh().ok();
-    reg.record(sample);
-    Duration::from_secs(reg.stats.until_due(shed_core::clock::unix_now()).max(1))
+    let (save, wait) = {
+        let mut reg = lock(registry);
+        reg.refresh().ok();
+        let save = reg.record(sample);
+        (save, reg.stats.until_due(shed_core::clock::unix_now()))
+    };
+    blocking(save).await.ok();
+    Duration::from_secs(wait.max(1))
 }
 
 /// Loads the state, binds the socket (mode 0600, its directory 0700), prints `shed ready <version>
@@ -435,22 +439,16 @@ async fn dispatch(
     if let Some(answer) = linked(registry, &session.links, method, request).await {
         return answer;
     }
-    if method == Method::Kill {
-        let Target { name } = params(request)?;
-        let term = lock(registry).mark_kill(&name)?;
-        let Some(term) = term else {
-            return json(&lock(registry).get(&name)?);
-        };
-        let killing = Arc::clone(&term);
-        let status = blocking(move || killing.kill(registry::GRACE)).await?;
-        let status = status.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
-        return json(&lock(registry).killed(&name, &term, status)?);
-    }
-    if method == Method::Wait {
-        return json(&wait(registry, &params(request)?).await?);
-    }
-    if method == Method::MachineStats {
-        return machine_stats(registry, params(request)?).await;
+    match method {
+        Method::Kill => return kill(registry, params(request)?).await,
+        Method::Wait => return json(&wait(registry, &params(request)?).await?),
+        Method::Emit => return lock(registry).emit(params(request)?).map(|()| empty()),
+        Method::Read => return read(registry, params(request)?).await,
+        Method::Send | Method::Input | Method::Keys | Method::TerminalKeys | Method::Model => {
+            return input(registry, method, request).await;
+        }
+        Method::MachineStats => return machine_stats(registry, params(request)?).await,
+        _ => {}
     }
     let mut reg = lock(registry);
     reg.refresh()?;
@@ -463,9 +461,6 @@ async fn dispatch(
             json(&info)
         }
         Method::Get => json(&reg.get(&params::<Target>(request)?.name)?),
-        Method::Read => json(&reg.read(&params(request)?)?),
-        Method::Send | Method::Input => reg.send(&params(request)?).map(|()| empty()),
-        Method::Keys | Method::TerminalKeys => reg.keys(&params(request)?).map(|()| empty()),
         Method::Rm => json(&reg.rm(&params::<Target>(request)?.name)?),
         Method::Resize => reg.resize(&params(request)?).map(|()| empty()),
         Method::Attach => {
@@ -501,15 +496,43 @@ async fn dispatch(
             Ok(empty())
         }
         Method::State => json(&reg.state(params(request)?)?),
-        Method::Emit => reg.emit(params(request)?).map(|()| empty()),
-        Method::Model => reg.model(params(request)?).map(|()| empty()),
-        Method::Hello
-        | Method::Kill
-        | Method::Wait
-        | Method::MachineStats
-        | Method::Ls
-        | Method::MachineLinks => Err(RpcError::new(ErrorCode::Internal, "handled above")),
+        _ => Err(RpcError::new(ErrorCode::Internal, "handled above")),
     }
+}
+
+async fn kill(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
+    let term = lock(registry).mark_kill(&name)?;
+    let Some(term) = term else {
+        return json(&lock(registry).get(&name)?);
+    };
+    let killing = Arc::clone(&term);
+    let status = blocking(move || killing.kill(registry::GRACE)).await?;
+    let status = status.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
+    json(&lock(registry).killed(&name, &term, status)?)
+}
+
+async fn read(registry: &Shared, p: proto::ReadParams) -> Result<Value, RpcError> {
+    let read = {
+        let mut reg = lock(registry);
+        reg.refresh()?;
+        reg.read(p)?
+    };
+    json(&blocking(read).await??)
+}
+
+async fn input(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
+    let (term, bytes) = {
+        let mut reg = lock(registry);
+        reg.refresh()?;
+        match method {
+            Method::Keys | Method::TerminalKeys => reg.keys(&params(request)?)?,
+            Method::Model => reg.model(params(request)?)?,
+            _ => reg.send(params(request)?)?,
+        }
+    };
+    let wrote = blocking(move || term.write(&bytes)).await?;
+    wrote.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
+    Ok(empty())
 }
 
 async fn machine_stats(registry: &Shared, p: StatsParams) -> Result<Value, RpcError> {
