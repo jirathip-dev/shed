@@ -1,0 +1,5 @@
+Decided: merged origin/staging b5a69b2 instead of rebasing; it only raises the line cap, so no conflict and no code change
+Because: q1554
+Rejected: rebase onto staging — this lane never rewrites history or force-pushes
+Check: just cap at a7c7af1 reports 7924 / 10000
+Owner: the branch is current with staging and now fits the raised code-size limit
