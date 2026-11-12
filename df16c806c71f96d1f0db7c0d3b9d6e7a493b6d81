@@ -1,0 +1,13 @@
+Decided: every stdout line and every stderr line from the agent sets a flag the watchdog tick reads; message() no longer resets the clock itself
+Because: "Any message from the agent resets the idle clock."
+Rejected: a FromAgent message per line — doubles channel traffic on the flood bench; one atomic flag per 100 ms tick is enough
+Decided: stderr is piped and echoed unchanged to the bridge's stderr, read as raw bytes so non-UTF-8 output never stops the reader
+Because: "and lines the agent process writes to stderr."
+Decided: SHED_TURN_IDLE_TIMEOUT defaults to 1800 s, read once in run() and kept in Session
+Because: "Raise the default** for `SHED_TURN_IDLE_TIMEOUT` from 120 s to 1800 s"
+Decided: the turn clock is tokio's Instant via shed_core::clock::tokio_now, and connect takes the three streams, so a paused-time test drives a fake agent in-process
+Because: "use tokio paused time or an injectable clock, not a real wait"
+Rejected: a runtime-failing commit 1 on base — base reads the std clock, so only a real 120 s wait could trip it; commit 1 fails to compile instead (exit 101)
+Check: setting the default back to 120 fails the_default_watchdog test; storing false in the stderr echo fails the stderr case
+Check: the #25 e2e tests in crates/shed/tests/acp.rs pass unchanged at head
+Owner: agents that think silently for minutes keep working; only a 30-minute total silence counts as hung.
