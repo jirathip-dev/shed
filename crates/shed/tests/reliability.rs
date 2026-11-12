@@ -426,3 +426,69 @@ fn exited_sessions_release_their_fds() {
     }
     eventually("the fd count back to its baseline", || count() == baseline);
 }
+
+struct Serve(Child);
+
+impl Serve {
+    fn start(dir: &Path, prelude: &str, stderr: Stdio) -> Self {
+        let script = format!("{prelude} exec \"$0\" serve --sample 3600 --dir \"$1\"");
+        let child = Command::new("sh")
+            .args(["-c", &script, SHED])
+            .arg(dir)
+            .env("SHELL", "/bin/sh")
+            .stdout(Stdio::null())
+            .stderr(stderr)
+            .spawn()
+            .expect("shed serve");
+        let server = Self(child);
+        let socket = Paths::in_dir(dir).socket;
+        eventually("the socket", || UnixStream::connect(&socket).is_ok());
+        server
+    }
+
+    fn signal(&self, sig: &str) {
+        let pid = self.0.id().to_string();
+        let sent = Command::new("kill").args([sig, &pid]).status();
+        assert!(sent.expect("kill").success());
+    }
+}
+
+impl Drop for Serve {
+    fn drop(&mut self) {
+        self.0.kill().ok();
+        self.0.wait().ok();
+    }
+}
+
+fn survivors(trees: &[(String, String)], within: Duration) -> Vec<String> {
+    let deadline = Instant::now() + within;
+    loop {
+        let live: Vec<String> = trees
+            .iter()
+            .flat_map(|(pid, child)| [pid, child])
+            .filter(|p| alive(p))
+            .cloned()
+            .collect();
+        if live.is_empty() || Instant::now() > deadline {
+            for pid in &live {
+                Command::new("kill").args(["-KILL", pid]).status().ok();
+            }
+            return live;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn sigterm_to_serve_ends_every_tree_even_one_that_ignores_sighup() {
+    let dir = temp_dir("rel-sigterm");
+    let mut server = Serve::start(&dir, "", Stdio::null());
+    run_sh(&dir, "a", "sleep 100 & echo child=$!; wait");
+    run_sh(&dir, "b", "sleep 100 & echo child=$!; wait");
+    run_sh(&dir, "deaf", "trap '' HUP; sleep 100 & echo child=$!; wait");
+    let trees = ["a", "b", "deaf"].map(|n| pids(&dir, n));
+    server.signal("-TERM");
+    let left = survivors(&trees, Duration::from_secs(3));
+    assert!(left.is_empty(), "alive 3 s after SIGTERM: {left:?}");
+    server.0.wait().expect("serve exits");
+}
