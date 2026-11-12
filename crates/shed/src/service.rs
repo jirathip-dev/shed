@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use shed_server::{Client, Error, Paths};
@@ -156,6 +156,13 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
             Err(v) => ("FAIL", v),
         };
         crate::out::line(format_args!("{mark:<5} {what:<8} {v}"));
+    }
+    let home = shed_server::config::var("HOME").unwrap_or_default();
+    for f in shed_server::hooks::setup(Path::new(&home), &[], false, true).unwrap_or_default() {
+        let (agent, file) = (f.agent, f.file.display());
+        let fix = f.after.map_or("", |_| " lacks them; fix: shed setup");
+        let mark = if fix.is_empty() { "ok" } else { "--" };
+        crate::out::line(format_args!("{mark:<5} hooks    {agent}: {file}{fix}"));
     }
     Ok(checks.iter().all(|(_, r)| r.is_ok()))
 }

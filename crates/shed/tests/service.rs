@@ -148,3 +148,54 @@ fn doctor_reports_a_missing_job_and_server_with_their_fix_lines() {
     let version = format!("ok    version  shed {}\n", env!("CARGO_PKG_VERSION"));
     assert!(report.contains(&version), "{report}");
 }
+
+#[test]
+fn setup_hooks_report_nothing_outside_shed_and_doctor_lists_them() {
+    let home = temp_dir("setup");
+    let d = home.to_str().expect("utf-8 dir");
+    std::fs::create_dir(home.join(".claude")).expect("agent dir");
+    let file = home.join(".claude/settings.json");
+    let missing = format!(
+        "--    hooks    claude: {} lacks them; fix: shed setup\n",
+        file.display()
+    );
+    assert!(text(&shed(&home, &["--dir", d, "doctor"])).contains(&missing));
+
+    let out = shed(&home, &["setup"]);
+    assert!(out.status.success(), "{out:?}");
+    let settings: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).expect("settings")).expect("json");
+    let command = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+        .as_str()
+        .expect("hook");
+    assert_eq!(command, r#"[ -z "$SHED" ] || shed state done"#);
+
+    let bin = Path::new(SHED)
+        .parent()
+        .expect("bin dir")
+        .display()
+        .to_string();
+    let path = format!("{bin}:{}", std::env::var("PATH").unwrap_or_default());
+    let hook = |shed_var: Option<&str>| {
+        let mut sh = Command::new("sh");
+        sh.args(["-c", command])
+            .env("HOME", &home)
+            .env("PATH", &path)
+            .env_remove("SHED");
+        shed_var.map(|t| sh.env("SHED", t));
+        sh.output().expect("hook runs")
+    };
+    let outside = hook(None);
+    assert_eq!(outside.status.code(), Some(0), "{outside:?}");
+    assert!(
+        outside.stdout.is_empty() && outside.stderr.is_empty(),
+        "{outside:?}"
+    );
+    assert!(
+        !hook(Some("t")).status.success(),
+        "inside shed it reports, here to no server"
+    );
+
+    let installed = format!("ok    hooks    claude: {}\n", file.display());
+    assert!(text(&shed(&home, &["--dir", d, "doctor"])).contains(&installed));
+}
