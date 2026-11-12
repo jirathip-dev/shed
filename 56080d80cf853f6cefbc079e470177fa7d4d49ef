@@ -1,0 +1,15 @@
+Decided: the canonical spec is Rex's Program Status Protocol revision 0.4; where it differs from the issue, it wins
+Because: "Where it differs from the list above, the spec wins and this issue is amended."
+Decided: the probe reply is ?:states=…:kinds=… in the query's own terminator (BEL or ST)
+Because: crates/shed-core/src/screen.rs:668
+Decided: a report with an id lives in the terminal's records (max 256); clear drops that id and those under it, plain clear drops all
+Because: "Reports with an `id` are kept per id. The terminal's own state is the root's; `get` lists the others."
+Decided: working and blocked are dropped once try_wait sees the exit or the PTY closes; late reports after that are pruned too
+Because: crates/shed-core/src/terminal.rs:66
+Decided: base64 for title and msg is a 20-line decoder in core, not the base64 crate
+Rejected: adding base64 as a direct dependency — new dependencies need the owner's approval
+Decided: refresh calls try_wait before reading the report, so a get after exit never shows a dropped working
+Because: crates/shed-server/src/registry.rs:250
+Check: program-status.txt golden: probe reply, every key, three ids, clear, wait --kind, exit working vs done
+Check: machine_stats_..._within_5_s fails identically at base 05f4d50 on this host; every other test passes
+Owner: agents speaking the status protocol now show why they are blocked, progress and sub-tasks, and stale working states vanish on exit
