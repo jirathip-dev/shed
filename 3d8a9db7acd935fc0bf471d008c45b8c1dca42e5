@@ -1,0 +1,10 @@
+Decided: Terminal::kill ends the report after reaping the child, so kill drops working and blocked like try_wait does
+Because: crates/shed-core/src/terminal.rs:361
+Decided: exited copies the terminal's report and records, so the kill reply carries the dropped state at once
+Because: crates/shed-server/src/registry.rs:286
+Decided: the kill and rm goldens now expect no reported after a kill; the old golden recorded the stale working
+Because: "On exit, `working` and `blocked` are dropped and `done` and `error` are kept."
+Check: cargo test -p shed --test server run_ls_read_kill passes; the kill.jsonl and rm.jsonl diffs drop only reported
+Check: machine_stats_..._within_5_s re-run at base 05f4d50 this round: same uptime_s 0 failure, exit 101
+Rejected: only re-blessing the goldens — the kill reply could still race the report, so the fix ends it in kill itself
+Owner: killing a program that reported working or blocked no longer leaves that stale state on it
