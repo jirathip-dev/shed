@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json, to_value};
 use shed_proto::{
     AcpSession, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind, EventsParams,
-    Hello, KeysParams, Line, Link, LinkState, LsParams, MachineStats, Method, ModelParams,
-    ReadParams, ReadResult, Reported, Request, ResizeParams, Resources, Response, RpcError, Run,
-    RunParams, Sample, ScreenUpdate, SendParams, State, StateParams, StatsParams, Target,
-    TerminalInfo, TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams,
-    WaitResult, WatchParams, openrpc,
+    ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState, LsParams,
+    MachineStats, Method, ModelParams, ReadParams, ReadResult, Reported, Request, ResizeParams,
+    Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams, State,
+    StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams, VERSION,
+    WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
 };
 
 fn info(state: State) -> TerminalInfo {
@@ -340,6 +340,7 @@ fn example(method: Method) -> (Value, Value) {
             json!({}),
         ),
         Method::MachineLinks => links_example(),
+        Method::Exec | Method::FileRead | Method::FileWrite => exec_example(method),
         Method::Discover => {
             let doc = openrpc();
             (
@@ -347,6 +348,46 @@ fn example(method: Method) -> (Value, Value) {
                 json!({"openrpc": doc["openrpc"], "info": doc["info"]}),
             )
         }
+    }
+}
+
+fn exec_example(method: Method) -> (Value, Value) {
+    match method {
+        Method::Exec => (
+            to_value(ExecParams {
+                cmd: vec!["git".into(), "status".into(), "--short".into()],
+                cwd: Some(PathBuf::from("/home/user/project")),
+                timeout: Some(30.0),
+                stdin: Vec::new(),
+                machine: Some("box".into()),
+            })
+            .unwrap(),
+            to_value(ExecResult {
+                code: 0,
+                stdout: b" M src/lib.rs\n".to_vec(),
+                stderr: Vec::new(),
+            })
+            .unwrap(),
+        ),
+        Method::FileRead => (
+            to_value(FileParams {
+                path: PathBuf::from("/home/user/project/VERSION"),
+                data: None,
+                machine: None,
+            })
+            .unwrap(),
+            json!(b"1.2.0\n"),
+        ),
+        Method::FileWrite => (
+            to_value(FileParams {
+                path: PathBuf::from("/home/user/project/VERSION"),
+                data: Some(b"1.3.0\n".to_vec()),
+                machine: None,
+            })
+            .unwrap(),
+            json!({}),
+        ),
+        _ => unreachable!("{method:?}"),
     }
 }
 

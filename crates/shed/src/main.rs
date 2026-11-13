@@ -10,7 +10,7 @@ use shed_server::runner::ExitCode;
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as _;
-use std::io::{self, BufRead as _, Write as _};
+use std::io::{self, BufRead as _, Read as _, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -24,9 +24,9 @@ use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
 use shed_server::proto::{
-    Event, EventsParams, KeysParams, Link, LinkState, LsParams, MachineStats, Method, ModelParams,
-    ReadParams, ReadResult, Reported, RunParams, SendParams, State, StateParams, StatsParams,
-    Target, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
+    Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState, LsParams,
+    MachineStats, Method, ModelParams, ReadParams, ReadResult, Reported, RunParams, SendParams,
+    State, StateParams, StatsParams, Target, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
 };
 use shed_server::{Client, Paths};
 
@@ -141,6 +141,12 @@ enum Command {
     },
     #[command(subcommand)]
     Machine(MachineCommand),
+    Exec(ExecArgs),
+    File {
+        #[arg(value_parser = ["read", "write"])]
+        action: String,
+        path: PathBuf,
+    },
     Install {
         #[arg(long)]
         force: bool,
@@ -248,6 +254,8 @@ impl Server<'_> {
                 | Command::Cancel { .. }
                 | Command::Events { .. }
                 | Command::Wait(_)
+                | Command::Exec(_)
+                | Command::File { .. }
         );
         let up = |m: &Machine| links(paths).get(&m.name).map(|l| l.state) == Some(LinkState::Up);
         let linked = linkable && on.as_ref().is_some_and(up);
@@ -267,6 +275,25 @@ impl Server<'_> {
         match &self.on {
             Some(m) if self.linked => format!("{}/{name}", m.name),
             _ => name,
+        }
+    }
+
+    fn machine(&self) -> Option<String> {
+        let on = self.on.as_ref().filter(|_| self.linked);
+        on.map(|m| m.name.clone())
+    }
+
+    fn resolve(&self, path: PathBuf) -> anyhow::Result<PathBuf> {
+        match &self.on {
+            None => Ok(std::env::current_dir()
+                .context("current directory")?
+                .join(path)),
+            Some(_) if path.is_absolute() => Ok(path),
+            Some(m) => bail!(
+                "with --on, pass {} as an absolute path on {}",
+                path.display(),
+                m.name
+            ),
         }
     }
 
@@ -331,6 +358,18 @@ struct SendArgs {
     no_paste: bool,
     #[arg(long, value_name = "SECONDS")]
     draft_wait: Option<u64>,
+}
+
+#[derive(Args)]
+struct ExecArgs {
+    #[arg(long)]
+    cwd: Option<PathBuf>,
+    #[arg(long, value_name = "S")]
+    timeout: Option<f64>,
+    #[arg(short = 'i')]
+    stdin: bool,
+    #[arg(last = true, required = true)]
+    cmd: Vec<String>,
 }
 
 #[derive(Args)]
@@ -406,14 +445,13 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             before,
             ..
         } => {
-            let n = lines.filter(|_| events);
             let params = ReadParams {
                 name,
                 lines,
                 history,
                 events,
                 before,
-                n,
+                n: lines.filter(|_| events),
             };
             read(&server, json, &params)?;
         }
@@ -464,6 +502,8 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Watch { labels } => watch::watch(&server, labels.into_iter().collect())?,
         Command::Connect { autostart } => relay(&paths, cli.dir.as_deref(), autostart)?,
         Command::Machine(command) => return machine(&server, json, command),
+        Command::Exec(args) => return exec(&server, json, args),
+        Command::File { action, path } => file(&server, json, &action, path)?,
         Command::Install { force } => service::install(force)?,
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
@@ -509,11 +549,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         resume: args.resume,
         mcp_servers,
         no_hibernate: args.no_hibernate,
-        machine: server
-            .on
-            .as_ref()
-            .filter(|_| server.linked)
-            .map(|m| m.name.clone()),
+        machine: server.machine(),
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
     };
@@ -801,6 +837,56 @@ fn print<T: Serialize>(json: bool, value: &T, text: impl FnOnce() -> String) -> 
     } else {
         out::text(text());
     }
+    Ok(())
+}
+
+fn exec(server: &Server, json: bool, args: ExecArgs) -> anyhow::Result<ExitCode> {
+    let here = server.on.is_none().then(PathBuf::new);
+    let params = ExecParams {
+        cwd: args.cwd.or(here).map(|d| server.resolve(d)).transpose()?,
+        timeout: args.timeout,
+        stdin: args
+            .stdin
+            .then(stdin_bytes)
+            .transpose()?
+            .unwrap_or_default(),
+        machine: server.machine(),
+        cmd: args.cmd,
+    };
+    let done: ExecResult = server.connect(None)?.call(Method::Exec, &params)?;
+    raw(json, &done, &done.stdout, &done.stderr)?;
+    Ok(ExitCode::from(u8::try_from(done.code).unwrap_or(1)))
+}
+
+fn file(server: &Server, json: bool, action: &str, path: PathBuf) -> anyhow::Result<()> {
+    let params = FileParams {
+        path: server.resolve(path)?,
+        data: (action == "write").then(stdin_bytes).transpose()?,
+        machine: server.machine(),
+    };
+    let method = match params.data {
+        Some(_) => Method::FileWrite,
+        None => Method::FileRead,
+    };
+    let done: Value = server.connect(None)?.call(method, &params)?;
+    let bytes: Vec<u8> = serde_json::from_value(done.clone()).unwrap_or_default();
+    raw(json, &done, &bytes, &[])
+}
+
+fn stdin_bytes() -> anyhow::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    io::stdin().read_to_end(&mut bytes).context("stdin")?;
+    Ok(bytes)
+}
+
+fn raw<T: Serialize>(json: bool, value: &T, stdout: &[u8], stderr: &[u8]) -> anyhow::Result<()> {
+    if json {
+        out::line(serde_json::to_string(value)?);
+        return Ok(());
+    }
+    io::stdout().write_all(stdout)?;
+    io::stdout().flush()?;
+    io::stderr().write_all(stderr)?;
     Ok(())
 }
 

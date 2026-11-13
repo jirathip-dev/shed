@@ -151,13 +151,15 @@ pub enum ErrorCode {
     ReadOnly,
     /// The machine a `<machine>/<name>` names has no link up (`machine.links` says why).
     NoLink,
+    /// `exec` or a file call failed: not found, denied, timed out, or its reply over [`REPLY_LIMIT`].
+    Io,
     /// A person's unsent line held the `send` past `draft_wait`; nothing was written.
     DraftHeld,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -171,6 +173,7 @@ impl ErrorCode {
         Self::SpawnFailed,
         Self::ReadOnly,
         Self::NoLink,
+        Self::Io,
         Self::DraftHeld,
     ];
 
@@ -191,7 +194,8 @@ impl ErrorCode {
             Self::SpawnFailed => -32005,
             Self::ReadOnly => -32006,
             Self::NoLink => -32007,
-            Self::DraftHeld => -32008,
+            Self::Io => -32008,
+            Self::DraftHeld => -32009,
         }
     }
 
@@ -212,6 +216,7 @@ impl ErrorCode {
             Self::SpawnFailed => "SPAWN_FAILED",
             Self::ReadOnly => "READONLY",
             Self::NoLink => "NO_LINK",
+            Self::Io => "IO",
             Self::DraftHeld => "DRAFT_HELD",
         }
     }
@@ -266,13 +271,19 @@ pub enum Method {
     Model,
     /// The held links to the machines: `{}` → `{machine: Link}`.
     MachineLinks,
+    /// Run a program without a terminal: [`ExecParams`] → [`ExecResult`].
+    Exec,
+    /// Read a file: [`FileParams`] → its bytes.
+    FileRead,
+    /// Write a file: [`FileParams`] with `data` → `{}`.
+    FileWrite,
     /// The API as an `OpenRPC` document: `{}` → [`openrpc`].
     Discover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 27] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -296,6 +307,9 @@ impl Method {
         Self::MachineStats,
         Self::Model,
         Self::MachineLinks,
+        Self::Exec,
+        Self::FileRead,
+        Self::FileWrite,
         Self::Discover,
     ];
 
@@ -326,6 +340,9 @@ impl Method {
             Self::MachineStats => "machine.stats",
             Self::Model => "acp.model",
             Self::MachineLinks => "machine.links",
+            Self::Exec => "exec",
+            Self::FileRead => "file.read",
+            Self::FileWrite => "file.write",
             Self::Discover => "rpc.discover",
         }
     }
@@ -402,6 +419,15 @@ impl Method {
             }
             Self::MachineLinks => {
                 "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since."
+            }
+            Self::Exec => {
+                "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link."
+            }
+            Self::FileRead => {
+                "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there."
+            }
+            Self::FileWrite => {
+                "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there."
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
@@ -826,6 +852,52 @@ pub struct ModelParams {
     pub model: String,
 }
 
+/// The most bytes one `exec` or `file.read` reply carries: 8 MiB.
+pub const REPLY_LIMIT: u64 = 8 << 20;
+
+/// `exec` params.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExecParams {
+    /// The program and its arguments.
+    pub cmd: Vec<String>,
+    /// Its working directory; default the server's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    /// End it after this many seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<f64>,
+    /// Bytes fed to its stdin, then closed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stdin: Vec<u8>,
+    /// Run it on this machine, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// `exec` result.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ExecResult {
+    /// The exit code, or 128 + the signal that ended it.
+    pub code: i32,
+    /// What it wrote to stdout.
+    pub stdout: Vec<u8>,
+    /// What it wrote to stderr.
+    pub stderr: Vec<u8>,
+}
+
+/// `file.read` and `file.write` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileParams {
+    /// The file.
+    pub path: PathBuf,
+    /// `file.write`: its new bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<u8>>,
+    /// The machine it is on, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
 /// `machine.stats` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct StatsParams {
@@ -1061,6 +1133,9 @@ impl Method {
             Self::MachineStats => pair::<StatsParams, MachineStats>(g),
             Self::Model => pair::<ModelParams, Empty>(g),
             Self::MachineLinks => pair::<Empty, BTreeMap<String, Link>>(g),
+            Self::Exec => pair::<ExecParams, ExecResult>(g),
+            Self::FileRead => pair::<FileParams, Vec<u8>>(g),
+            Self::FileWrite => pair::<FileParams, Empty>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
         }
     }

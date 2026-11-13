@@ -53,6 +53,7 @@ around lanes:
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed --on <machine> …` / `shed machine add\|ls\|rm` | The same commands on another host over SSH (key login only). The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `wait`, `approve` and `cancel`, and `--on <machine> run --acp` starts an agent installed there; `machine ls --json` shows each link. |
 | `shed machine stats [--on M] [--since T]` | Load per CPU, memory pressure, swap, free disk, uptime and terminals by state; one sample a minute kept 24 h. An unreachable machine answers offline (last seen) within 5 s. |
+| `shed exec [--on M] [--cwd D] [--timeout S] [-i] -- CMD…` / `shed file read\|write [--on M] PATH` | Run a program without a terminal and get exactly the bytes it wrote to stdout and stderr and its exit code; nothing it started outlives it. `-i` feeds it stdin. `file read` prints a file, `file write` replaces it with stdin (temp file and rename, mode kept). A reply over 8 MiB is an error, never cut. |
 
 **Persistence:** the server keeps PTYs alive while it runs. On server restart, kept terminals come back as shells in
 their last cwd (never re-running a task). State and labels are saved to a small JSON file (atomic writes).

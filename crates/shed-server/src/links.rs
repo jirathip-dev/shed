@@ -34,7 +34,7 @@ impl Held {
 
 pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value)> {
     let field = match method {
-        Method::Run => "machine",
+        Method::Run | Method::Exec | Method::FileRead | Method::FileWrite => "machine",
         Method::Get
         | Method::Read
         | Method::Send
@@ -47,8 +47,8 @@ pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value
         _ => return None,
     };
     let value = request.params.get(field)?.as_str()?;
-    let (machine, name) = match method {
-        Method::Run => (value, None),
+    let (machine, name) = match field {
+        "machine" => (value, None),
         _ => value.split_once('/').map(|(m, n)| (m, Some(n)))?,
     };
     let mut params = request.params.clone();
