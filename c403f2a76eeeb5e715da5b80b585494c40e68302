@@ -1,0 +1,15 @@
+Decided: this PR builds slices 1 and 2 only; slices 3 to 5 are follow-up issues queued refactor and serial
+Because: docs/architecture/hotspots-by-domain/adr.md:81
+Decided: the existing Unreleased bullets moved verbatim into changelog.d/*-116-unreleased.md; only the duplicate Added heading merged
+Decided: generate is a no-cd recipe and the changelog script works in the current folder, so the stale-changelog fixture bites
+Because: scripts/changelog.py:2
+Rejected: plain cd-to-root generate — arch-check runs generate in the checked folder, so a fixture's stale file would never differ
+Decided: arch takes its base from ARCH_BASE, set by CI on pull requests
+Because: .github/workflows/ci.yml:81
+Rejected: an `arch *ARGS` recipe — it swallows the recipe names after it on a just command line
+Decided: comment-rule treats Cargo's tests/<name>/main.rs as a crate root, so the split doc test keeps its //! crate doc
+Because: scripts/comment-rule.py:17
+Decided: the doc test reads the three prose sections back from openrpc() component descriptions
+Because: crates/shed-proto/tests/protocol_doc/render.rs:27
+Check: the word-diff of docs/protocol.md is empty (only rewrapping), and editing a /// sentence without just generate fails the doc test
+Owner: changelog and protocol docs are now generated, so parallel PRs stop conflicting on them; the docs read the same
