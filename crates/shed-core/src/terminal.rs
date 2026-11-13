@@ -2,8 +2,9 @@
 
 use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
-use std::io::{Read as _, Write as _};
+use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
 use std::path::Path;
+use std::sync::mpsc::{RecvTimeoutError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,7 @@ use crate::screen::{Report, Screen, Size, Snapshot};
 use crate::{Error, keys};
 
 const REAP: Duration = Duration::from_millis(20);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Why [`Terminal::wait_until`] returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,12 +32,13 @@ pub enum Wake {
 
 struct Status {
     changes: u64,
-    closed: bool,
     ended: bool,
     last_output: Instant,
     report: Option<Report>,
     records: Vec<Report>,
     idle_after: Option<Duration>,
+    stuck: bool,
+    exit: Option<Result<ExitStatus, std::io::ErrorKind>>,
 }
 
 impl Status {
@@ -87,7 +90,7 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 /// Its output feeds a [`Screen`] from a reader thread. Dropping the terminal SIGKILLs its process group.
 pub struct Terminal {
     pty: Weak<pty_process::blocking::Pty>,
-    child: Mutex<Child>,
+    input: Sender<Input>,
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
     watch: Arc<watch::Sender<Status>>,
@@ -95,6 +98,7 @@ pub struct Terminal {
 }
 
 type Outputs = Mutex<Option<Vec<mpsc::UnboundedSender<Vec<u8>>>>>;
+type Input = (Vec<u8>, SyncSender<std::io::Result<()>>);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -153,12 +157,13 @@ impl Terminal {
         let outputs = Arc::new(Mutex::new(Some(Vec::new())));
         let watch = Arc::new(watch::Sender::new(Status {
             changes: 0,
-            closed: false,
             ended: false,
             last_output: crate::clock::now(),
             report: None,
             records: Vec::new(),
             idle_after: None,
+            stuck: false,
+            exit: None,
         }));
         let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
@@ -166,14 +171,16 @@ impl Terminal {
             read_loop(&reader, &sink, &subs, &watcher, log);
             drop(reader);
             *lock(&subs) = None;
-            bump(&watcher, |s| {
-                s.closed = true;
-                s.end(true);
-            });
+            bump(&watcher, |s| s.end(true));
         });
+        let exits = Arc::clone(&watch);
+        std::thread::spawn(move || reap(child, &exits));
+        let (input, inputs) = std::sync::mpsc::channel();
+        let (writer, watcher) = (Weak::clone(&pty), Arc::clone(&watch));
+        std::thread::spawn(move || write_loop(&writer, &inputs, &watcher));
         Ok(Self {
             pty,
-            child: Mutex::new(child),
+            input,
             screen,
             outputs,
             watch,
@@ -214,10 +221,17 @@ impl Terminal {
     }
 
     /// The state the program last reported (`shed state`, the OSC 7501 escape or another agent's). Without one, `idle`
-    /// once the program has been silent for the [`set_idle_after`](Self::set_idle_after) time.
+    /// once silent for the [`set_idle_after`](Self::set_idle_after) time; `stuck` while a [`write`](Self::write) waits.
     #[must_use]
     pub fn report(&self) -> Option<Report> {
         let status = self.watch.borrow();
+        if status.stuck {
+            return Some(Report {
+                state: "stuck".to_owned(),
+                note: Some("its input is not drained".to_owned()),
+                ..Report::default()
+            });
+        }
         let idle = status.idle_at().is_some_and(|at| crate::clock::now() >= at);
         status.report.clone().or_else(|| {
             idle.then(|| Report {
@@ -268,12 +282,8 @@ impl Terminal {
             if deadline.is_some_and(|d| now >= d) {
                 return Ok(Wake::Timeout);
             }
-            let (idle, closed) = {
-                let status = changed.borrow();
-                (status.idle_at().filter(|at| *at > now), status.closed)
-            };
-            let reap = closed.then(|| now + REAP);
-            let wake = [deadline, idle, reap].into_iter().flatten().min();
+            let idle = changed.borrow().idle_at().filter(|at| *at > now);
+            let wake = [deadline, idle].into_iter().flatten().min();
             let sleep = async {
                 match wake {
                     Some(at) => tokio::time::sleep_until(at.into()).await,
@@ -297,12 +307,25 @@ impl Terminal {
         rx
     }
 
-    /// Writes raw bytes to the program's input.
+    /// Writes raw bytes to the program's input, waiting at most a second for the program to take them.
     ///
     /// # Errors
-    /// [`Error::Io`] when the PTY is closed.
+    /// [`Error::Stuck`] when the program has not taken them in time (they stay queued); [`Error::Io`] when closed.
     pub fn write(&self, bytes: &[u8]) -> Result<(), Error> {
-        Ok((&*self.open_pty()?).write_all(bytes)?)
+        let (done, wrote) = sync_channel(1);
+        self.input.send((bytes.to_vec(), done)).ok();
+        match wrote.recv_timeout(WRITE_TIMEOUT) {
+            Ok(wrote) => Ok(wrote?),
+            Err(RecvTimeoutError::Disconnected) => Err(Error::Io(BrokenPipe.into())),
+            Err(RecvTimeoutError::Timeout) => {
+                let mut late = None;
+                bump(&self.watch, |s| {
+                    late = wrote.try_recv().ok();
+                    s.stuck |= late.is_none();
+                });
+                Ok(late.ok_or(Error::Stuck)??)
+            }
+        }
     }
 
     fn open_pty(&self) -> Result<Arc<pty_process::blocking::Pty>, Error> {
@@ -329,16 +352,13 @@ impl Terminal {
         Ok(())
     }
 
-    /// The program's exit status, if it has exited; once it has, its `working` and `blocked` reports are dropped.
+    /// The program's exit status, if it has exited, as the reaper thread recorded it (never blocks).
     ///
     /// # Errors
-    /// [`Error::Io`] when the status cannot be read.
+    /// [`Error::Io`] when the status could not be read.
     pub fn try_wait(&self) -> Result<Option<ExitStatus>, Error> {
-        let status = lock(&self.child).try_wait()?;
-        if status.is_some() && !self.watch.borrow().ended {
-            bump(&self.watch, |s| s.end(true));
-        }
-        Ok(status)
+        let exit = self.watch.borrow().exit;
+        Ok(exit.transpose().map_err(std::io::Error::from)?)
     }
 
     /// The live processes of the terminal's tree and their summed RSS and CPU time.
@@ -359,24 +379,46 @@ impl Terminal {
     /// # Errors
     /// [`Error::Io`] when the process table or the exit status cannot be read.
     pub fn kill(&self, grace: Duration) -> Result<ExitStatus, Error> {
-        let mut child = lock(&self.child);
-        proctree::kill_tree(&proctree::system(), self.pid, grace, || {
-            child.try_wait().ok();
-        })?;
-        let status = child.wait()?;
-        bump(&self.watch, |s| s.end(true));
-        Ok(status)
+        proctree::kill_tree(&proctree::system(), self.pid, grace, || {})?;
+        loop {
+            if let Some(status) = self.try_wait()? {
+                return Ok(status);
+            }
+            crate::clock::sleep(REAP);
+        }
     }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        let child = self.child.get_mut().unwrap_or_else(PoisonError::into_inner);
-        if matches!(child.try_wait(), Ok(None))
+        if matches!(self.try_wait(), Ok(None))
             && let Some(group) = Pid::from_raw(self.pid)
         {
             kill_process_group(group, Signal::KILL).ok();
-            child.wait().ok();
+        }
+    }
+}
+
+fn reap(mut child: Child, watch: &watch::Sender<Status>) {
+    let exit = child.wait().map_err(|e| e.kind());
+    bump(watch, |s| {
+        s.exit = Some(exit);
+        s.end(true);
+    });
+}
+
+fn write_loop(
+    pty: &Weak<pty_process::blocking::Pty>,
+    inputs: &std::sync::mpsc::Receiver<Input>,
+    watch: &watch::Sender<Status>,
+) {
+    for (bytes, done) in inputs {
+        let wrote = pty
+            .upgrade()
+            .map_or_else(|| Err(BrokenPipe.into()), |pty| (&*pty).write_all(&bytes));
+        done.send(wrote).ok();
+        if watch.borrow().stuck {
+            bump(watch, |s| s.stuck = false);
         }
     }
 }
