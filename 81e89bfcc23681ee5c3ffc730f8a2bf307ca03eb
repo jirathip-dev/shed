@@ -1,0 +1,12 @@
+Decided: the queue is #76's per-terminal writer thread; send puts paste, text and enter in one queued write, and held sends take a FIFO lock so they go in in order
+Because: crates/shed-core/src/terminal.rs:378
+Rejected: a second writer task in the server — two queues in front of one PTY, the thing to avoid
+Decided: a person is terminal.input and terminal.keys (attach now sends terminal.input); send and keys stay agent input and never hold a draft
+Because: crates/shed-server/src/lib.rs:614
+Decided: a draft whose last key is already over draft_wait old when a send arrives no longer holds it; only a send that waited and saw the hold run out fails
+Because: crates/shed-server/src/input.rs:35
+Rejected: failing every send while a stale half line sits there — one walked-away person would block the terminal for good
+Decided: the timeout is a new DRAFT_HELD error (-32009, after staging's IO at -32008), so the CLI exits non-zero
+Because: "A send that times out says so in its reply and writes nothing"
+Check: tests that sent "\n" to press enter now send "" (send presses enter itself); the cli and state goldens lose one line each
+Owner: send now pastes whole and presses enter for you; it waits while someone attached has a half-typed line and gives up after 60 s without typing anything
