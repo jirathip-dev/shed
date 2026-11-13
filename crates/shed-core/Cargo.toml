@@ -10,7 +10,7 @@ publish.workspace = true
 
 [dependencies]
 pty-process.workspace = true
-rustix.workspace = true
+rustix = { workspace = true, features = ["termios"] }
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "process", "sync", "time"] }

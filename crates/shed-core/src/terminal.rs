@@ -2,13 +2,18 @@
 
 use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
+use std::fs::File;
 use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
+use std::os::fd::OwnedFd;
+use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use rustix::process::{Pid, Signal, kill_process_group};
+use rustix::termios::{Winsize, tcgetwinsize, tcsetwinsize};
 use tokio::sync::{mpsc, watch};
 
 use crate::history::{History, Log};
@@ -88,14 +93,16 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 
 /// A program running on a PTY, in its own session and process group.
 ///
-/// Its output feeds a [`Screen`] from a reader thread. Dropping the terminal SIGKILLs its process group.
+/// Its output feeds a [`Screen`] from a reader thread. Dropping the terminal SIGKILLs its process group,
+/// unless it was [`release`](Self::release)d.
 pub struct Terminal {
-    pty: Weak<pty_process::blocking::Pty>,
+    pty: Weak<File>,
     input: Sender<Input>,
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
     watch: Arc<watch::Sender<Status>>,
     pid: i32,
+    released: AtomicBool,
 }
 
 type Outputs = Mutex<Option<Vec<mpsc::Sender<Arc<[u8]>>>>>;
@@ -125,11 +132,12 @@ impl Terminal {
         K: AsRef<OsStr>,
         V: AsRef<OsStr>,
     {
-        Self::spawn_with(cmd, cwd, env, size, &History::default())
+        Self::spawn_with(cmd, cwd, env, size, &History::default(), None)
     }
 
     /// [`spawn`](Self::spawn) keeping `history`: its caps bound the scrollback, the screen starts from
-    /// the tail of its log, and the output is appended to the log.
+    /// the tail of its log, and the output is appended to the log. With `stderr`, the program's stderr
+    /// is that file instead of the PTY.
     ///
     /// # Errors
     /// As [`spawn`](Self::spawn); [`Error::Io`] when the log cannot be read or opened.
@@ -139,6 +147,7 @@ impl Terminal {
         env: impl IntoIterator<Item = (K, V)>,
         size: Size,
         history: &History,
+        stderr: Option<OwnedFd>,
     ) -> Result<Self, Error>
     where
         S: AsRef<OsStr>,
@@ -146,14 +155,48 @@ impl Terminal {
         V: AsRef<OsStr>,
     {
         let (program, args) = cmd.split_first().ok_or(Error::EmptyCommand)?;
-        let screen = Arc::new(Mutex::new(history.restore(size)?));
+        let screen = history.restore(size)?;
         let log = Log::open(history)?;
         let (pty, pts) = pty_process::blocking::open()?;
-        pty.resize(pty_size(size))?;
-        let child = crate::runner::pty(program, args, cwd, env, pts)?;
+        pty.resize(pty_process::Size::new(size.rows.max(1), size.cols.max(1)))?;
+        let child = crate::runner::pty(program, args, cwd, env, pts, stderr)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
-        let reader = Arc::new(pty);
+        Ok(Self::start(
+            OwnedFd::from(pty).into(),
+            pid,
+            Some(child),
+            screen,
+            log,
+        ))
+    }
+
+    /// Takes over a terminal that another process started: `master` is its PTY's master, `pid` its program,
+    /// which leads its session. The screen starts from `history` as in [`spawn_with`](Self::spawn_with).
+    /// Not being its parent, the terminal learns of the program's end when the PTY closes, as exit 0.
+    ///
+    /// # Errors
+    /// [`Error::Io`] when the PTY's size or the log cannot be read.
+    pub fn adopt(master: OwnedFd, pid: i32, history: &History) -> Result<Self, Error> {
+        let ws = tcgetwinsize(&master).map_err(std::io::Error::from)?;
+        let size = Size {
+            rows: ws.ws_row,
+            cols: ws.ws_col,
+        };
+        let screen = history.restore(size)?;
+        let log = Log::open(history)?;
+        Ok(Self::start(master.into(), pid, None, screen, log))
+    }
+
+    fn start(
+        master: File,
+        pid: i32,
+        child: Option<Child>,
+        screen: Screen,
+        log: Option<Log>,
+    ) -> Self {
+        let screen = Arc::new(Mutex::new(screen));
+        let reader = Arc::new(master);
         let pty = Arc::downgrade(&reader);
         let outputs = Arc::new(Mutex::new(Some(Vec::new())));
         let watch = Arc::new(watch::Sender::new(Status {
@@ -168,6 +211,7 @@ impl Terminal {
         }));
         let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
+        let adopted = child.is_none();
         std::thread::spawn(move || {
             let (pty, screen, outputs) =
                 (Arc::clone(&reader), Arc::clone(&sink), Arc::clone(&subs));
@@ -184,21 +228,42 @@ impl Terminal {
             logger.join().ok();
             drop(reader);
             *lock(&subs) = None;
-            bump(&watcher, |s| s.end(true));
+            bump(&watcher, |s| {
+                if adopted {
+                    s.exit.get_or_insert(Ok(ExitStatus::from_raw(0)));
+                }
+                s.end(true);
+            });
         });
-        let exits = Arc::clone(&watch);
-        std::thread::spawn(move || reap(child, &exits));
+        if let Some(child) = child {
+            let exits = Arc::clone(&watch);
+            std::thread::spawn(move || reap(child, &exits));
+        }
         let (input, inputs) = std::sync::mpsc::channel();
         let (writer, watcher) = (Weak::clone(&pty), Arc::clone(&watch));
         std::thread::spawn(move || write_loop(&writer, &inputs, &watcher));
-        Ok(Self {
+        Self {
             pty,
             input,
             screen,
             outputs,
             watch,
             pid,
-        })
+            released: AtomicBool::new(false),
+        }
+    }
+
+    /// A duplicate of the PTY's master, for a process that is to keep the terminal open.
+    ///
+    /// # Errors
+    /// [`Error::Io`] when the PTY is closed or cannot be duplicated.
+    pub fn master(&self) -> Result<OwnedFd, Error> {
+        Ok(self.open_pty()?.try_clone()?.into())
+    }
+
+    /// Leaves the program running when the terminal is dropped.
+    pub fn release(&self) {
+        self.released.store(true, Ordering::Relaxed);
     }
 
     /// The program's process id; it also leads the terminal's session and process group.
@@ -348,7 +413,7 @@ impl Terminal {
         }
     }
 
-    fn open_pty(&self) -> Result<Arc<pty_process::blocking::Pty>, Error> {
+    fn open_pty(&self) -> Result<Arc<File>, Error> {
         (self.pty.upgrade()).ok_or_else(|| Error::Io(std::io::ErrorKind::BrokenPipe.into()))
     }
 
@@ -366,7 +431,13 @@ impl Terminal {
     /// [`Error::Pty`] when the PTY rejects the size; [`Error::Io`] when it is closed.
     pub fn resize(&self, size: Size) -> Result<(), Error> {
         let mut screen = lock(&self.screen);
-        self.open_pty()?.resize(pty_size(size))?;
+        let ws = Winsize {
+            ws_row: size.rows.max(1),
+            ws_col: size.cols.max(1),
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        tcsetwinsize(&*self.open_pty()?, ws).map_err(std::io::Error::from)?;
         screen.resize(size);
         bump(&self.watch, |_| {});
         Ok(())
@@ -411,7 +482,8 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        if matches!(self.try_wait(), Ok(None))
+        if !self.released.load(Ordering::Relaxed)
+            && matches!(self.try_wait(), Ok(None))
             && let Some(group) = Pid::from_raw(self.pid)
         {
             kill_process_group(group, Signal::KILL).ok();
@@ -428,7 +500,7 @@ fn reap(mut child: Child, watch: &watch::Sender<Status>) {
 }
 
 fn write_loop(
-    pty: &Weak<pty_process::blocking::Pty>,
+    pty: &Weak<File>,
     inputs: &std::sync::mpsc::Receiver<Input>,
     watch: &watch::Sender<Status>,
 ) {
@@ -441,10 +513,6 @@ fn write_loop(
             bump(watch, |s| s.stuck = false);
         }
     }
-}
-
-fn pty_size(size: Size) -> pty_process::Size {
-    pty_process::Size::new(size.rows.max(1), size.cols.max(1))
 }
 
 const DEPTH: usize = 256;
@@ -465,7 +533,7 @@ fn batches(rx: &Receiver<Vec<u8>>) -> impl Iterator<Item = Vec<u8>> + '_ {
     })
 }
 
-fn read_loop(pty: &pty_process::blocking::Pty, chunks: &SyncSender<Vec<u8>>) {
+fn read_loop(pty: &File, chunks: &SyncSender<Vec<u8>>) {
     let mut buf = vec![0u8; 1 << 16];
     loop {
         match (&*pty).read(&mut buf) {
@@ -486,7 +554,7 @@ fn read_loop(pty: &pty_process::blocking::Pty, chunks: &SyncSender<Vec<u8>>) {
 
 fn feed_loop(
     chunks: &Receiver<Vec<u8>>,
-    pty: &pty_process::blocking::Pty,
+    pty: &File,
     screen: &Mutex<Screen>,
     outputs: &Outputs,
     watch: &watch::Sender<Status>,

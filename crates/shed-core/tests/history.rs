@@ -50,6 +50,7 @@ fn a_terminal_starts_from_its_log() {
         [("A", "b")],
         size,
         &history,
+        None,
     )
     .expect("spawn");
     let deadline = Instant::now() + std::time::Duration::from_secs(10);

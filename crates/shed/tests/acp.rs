@@ -464,7 +464,7 @@ fn start_with_history(dir: &Path, name: &str, history: &Path, extra: &[&str]) {
 fn resume_replays_the_history_once_marked_replay() {
     let dir = temp_dir("acp-resume");
     let history = dir.join("history.jsonl");
-    let server = Server::start(&dir);
+    let mut server = Server::start(&dir);
     start_with_history(&dir, "r1", &history, &[]);
     ok(
         &dir,
@@ -481,13 +481,14 @@ fn resume_replays_the_history_once_marked_replay() {
         ok(&dir, &["send", "r1", prompt]);
         ok(&dir, &["wait", "r1", "--until", "done", "--timeout", "10"]);
     }
-    drop(server);
+    stop(&mut server);
     let _server = Server::start(&dir);
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "r1"])).expect("JSON");
     assert_eq!(
         (&info["state"], &info["session"]["id"]),
-        (&json!("exited"), &json!("sess-1"))
+        (&json!("running"), &json!("sess-1"))
     );
+    ok(&dir, &["kill", "r1"]);
 
     start_with_history(&dir, "r2", &history, &["--resume", "sess-1"]);
     ok(
@@ -1310,4 +1311,35 @@ fn a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches() {
     until(&dir, "r", "done");
     assert!(ok(&dir, &["read", "r"]).ends_with("> hi\nyou said: hi\n"));
     ok(&dir, &["kill", "r"]);
+}
+
+#[test]
+fn a_lane_whose_bridge_died_while_serve_was_down_comes_back_exited() {
+    let dir = temp_dir("acp-gone");
+    let mut server = Server::start(&dir);
+    start_fake(&dir, "gone", "fake");
+    start_fake(&dir, "live", "fake");
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "gone"])).expect("JSON");
+    let pid = info["pid"].to_string();
+    stop(&mut server);
+    let killed = Command::new("kill").args(["-KILL", &pid]).status();
+    assert!(killed.expect("kill runs").success());
+    common::eventually("the bridge to end", || {
+        !Command::new("kill")
+            .args(["-0", &pid])
+            .output()
+            .expect("kill runs")
+            .status
+            .success()
+    });
+    let _server = Server::start(&dir);
+    let state = |name| {
+        let info: Value = serde_json::from_str(&ok(&dir, &["get", name])).expect("JSON");
+        info["state"].clone()
+    };
+    assert_eq!(
+        (state("gone"), state("live")),
+        (json!("exited"), json!("running"))
+    );
+    ok(&dir, &["kill", "live"]);
 }
