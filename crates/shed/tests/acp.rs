@@ -1277,3 +1277,37 @@ fn shape(events: &[Logged]) -> Vec<String> {
     }
     shape
 }
+
+fn stop(server: &mut Server) {
+    let pid = server.0.id().to_string();
+    let sent = Command::new("kill").args(["-TERM", &pid]).status();
+    assert!(sent.expect("kill runs").success());
+    server.0.wait().expect("shed serve stops");
+}
+
+#[test]
+fn a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches() {
+    let dir = temp_dir("acp-restart");
+    let mut server = Server::start(&dir);
+    start_fake(&dir, "r", "fake");
+    let before: Value = serde_json::from_str(&ok(&dir, &["get", "r"])).expect("JSON");
+    ok(&dir, &["send", "r", "busy"]);
+    until(&dir, "r", "working");
+    stop(&mut server);
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    let _server = Server::start(&dir);
+    let after: Value = serde_json::from_str(&ok(&dir, &["get", "r"])).expect("JSON");
+    assert_eq!(
+        (&after["state"], &after["pid"]),
+        (&json!("running"), &before["pid"])
+    );
+    until(&dir, "r", "done");
+    assert_eq!(
+        ok(&dir, &["read", "r"]),
+        "> busy\n[tool] Build (completed)\nbusy done\n"
+    );
+    ok(&dir, &["send", "r", "hi"]);
+    until(&dir, "r", "done");
+    assert!(ok(&dir, &["read", "r"]).ends_with("> hi\nyou said: hi\n"));
+    ok(&dir, &["kill", "r"]);
+}
