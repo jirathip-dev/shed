@@ -1,0 +1,4 @@
+Decided: merge origin/staging; Entry keeps both the draft and staging's exited_at, and the draft test drops its final state flush
+Because: crates/shed-server/src/registry.rs:117
+Rejected: none
+Owner: this branch is now up to date with staging again; nothing about send changed
