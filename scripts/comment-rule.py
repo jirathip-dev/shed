@@ -14,7 +14,7 @@ import sys
 ALLOWED = re.compile(r"// (SAFETY: |TODO\(#\d+\))")
 IMPLICIT = re.compile(r"pub (enum|trait) ")
 CONTAINER = re.compile(r"(pub (mod|struct|union|enum|trait) |impl\b)")
-CRATE_ROOT = re.compile(r"crates/[^/]+/(src/(lib|main)|src/bin/[^/]+|(tests|benches|examples)/[^/]+|build)\.rs")
+CRATE_ROOT = re.compile(r"crates/[^/]+/(src/(lib|main)|src/bin/[^/]+|(tests|benches|examples)/[^/]+(/main)?|build)\.rs")
 KEYWORD = re.compile(r"(pub\b|fn |mod |enum |struct |trait |union |impl\b|const |static |type |let |match |if |for |while |loop\b|unsafe |async |macro_rules!)")
 
 
