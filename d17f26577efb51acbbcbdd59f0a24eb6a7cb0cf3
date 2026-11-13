@@ -1,0 +1,7 @@
+Decided: merged origin/staging afc2107 (#76); the reaper thread and the PTY reader each end the report on exit
+Because: crates/shed-core/src/terminal.rs:402
+Rejected: keeping this branch's closed flag and child mutex — #76 replaced both with the reaper's recorded exit
+Decided: the stuck report fills the new fields with defaults; the protocol doc sentence carries both sides
+Because: crates/shed-core/src/terminal.rs:229
+Check: cargo test --workspace --no-fail-fast fails only machine_stats_..._within_5_s, the known host uptime 0 failure
+Owner: the branch is current with staging again; exiting or killed programs still drop stale working states
