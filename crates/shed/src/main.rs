@@ -156,6 +156,16 @@ enum Command {
     },
     Uninstall,
     Doctor,
+    Setup(SetupArgs),
+}
+
+#[derive(Args)]
+struct SetupArgs {
+    agents: Vec<String>,
+    #[arg(long)]
+    remove: bool,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 impl Command {
@@ -234,6 +244,7 @@ impl Server<'_> {
                 | Command::Install { .. }
                 | Command::Uninstall
                 | Command::Doctor
+                | Command::Setup(_)
         );
         if local && on.is_some() {
             bail!(
@@ -529,6 +540,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
         Command::Doctor => {}
+        Command::Setup(args) => setup(&args)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -732,6 +744,23 @@ fn state(
     };
     let info: TerminalInfo = server.connect(None)?.call(Method::State, &params)?;
     print(json, &info, String::new)
+}
+
+fn setup(a: &SetupArgs) -> anyhow::Result<()> {
+    let home = shed_server::config::var("HOME").context("HOME is not set")?;
+    let files = shed_server::hooks::setup(Path::new(&home), &a.agents, a.remove, a.dry_run)?;
+    if files.is_empty() {
+        bail!("no installed agent has hooks shed can set up");
+    }
+    for f in files {
+        let (agent, file) = (f.agent, f.file.display());
+        match (f.after, a.dry_run) {
+            (None, _) => out::line(format_args!("{agent}: {file} unchanged")),
+            (Some(t), true) => out::text(format_args!("{agent}: {file} would become:\n{t}")),
+            (Some(_), false) => out::line(format_args!("{agent}: {file} updated")),
+        }
+    }
+    Ok(())
 }
 
 fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode> {

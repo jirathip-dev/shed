@@ -8,6 +8,7 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 mod events;
+pub mod hooks;
 mod input;
 mod links;
 pub mod machines;
