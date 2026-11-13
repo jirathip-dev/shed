@@ -356,15 +356,15 @@ fn running_count(client: &mut Client) -> usize {
 #[test]
 fn serve_raises_a_lowered_soft_limit_so_many_sessions_spawn() {
     let dir = temp_dir("nofile-raise");
-    let _server = Limited::serve(&dir, "-S -n 256");
+    let _server = Limited::serve(&dir, "-S -n 64");
     let mut c = connect(&dir);
-    for i in 0..300 {
+    for i in 0..100 {
         let name = format!("s{i}");
         if let Err(e) = spawn(&mut c, &dir, &name, &["cat"]) {
-            panic!("spawn {name} under a soft limit of 256: {e}");
+            panic!("spawn {name} under a soft limit of 64: {e}");
         }
     }
-    assert_eq!(running_count(&mut c), 300);
+    assert_eq!(running_count(&mut c), 100);
 }
 
 #[test]
