@@ -1,0 +1,6 @@
+Decided: merge origin/staging and push; keep both module lines in the lib.rs conflict
+Because: crates/shed-server/src/lib.rs:11
+Rejected: none
+Check: just cap 9075/10000 and fmt, clippy, neutral, arch, comments pass at the head
+Check: machine_stats fails on the base too; the reliability fd test passes alone
+Owner: the branch is up to date with staging again, with no change to what setup does.
