@@ -4,9 +4,10 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixListener;
 
 use shed_server::Client;
+use shed_server::proto::{BUILD, PROTOCOL};
 
 #[test]
-fn a_server_of_another_version_is_refused_by_the_client() {
+fn a_server_without_a_protocol_is_refused_by_the_client() {
     let dir = std::env::temp_dir().join(format!("shed-client-{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
     std::fs::create_dir_all(&dir).expect("temp dir");
@@ -25,8 +26,7 @@ fn a_server_of_another_version_is_refused_by_the_client() {
     assert_eq!(
         err.to_string(),
         format!(
-            "SHED_VERSION: client shed {}, server unnamed 9.9.9; restart the server",
-            env!("CARGO_PKG_VERSION")
+            "SHED_VERSION: client {BUILD} / server unnamed unknown: protocol {PROTOCOL} vs 0; restart shed serve"
         )
     );
     std::fs::remove_dir_all(dir).expect("clean");
