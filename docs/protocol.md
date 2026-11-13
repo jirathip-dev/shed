@@ -15,14 +15,15 @@ restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `prot
 A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is
 the exit status (128 + N for signal N), `null` while running or when the program was lost in a server
 restart; `pid` is set while running; `reported` is the state the program last reported (absent until
-then), or `stuck` while the program has left input unread for over a second (`send`, `keys` and
-`acp.model` then fail, their input queued); `idle_after` is set when the `idle` fallback is on;
-`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while
-running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`
-and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
-slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
-tokens, and the `cost` when sent); `parent` names the terminal that started it (absent
-without one), with `outlive` and `notify` as `run` set them.
+then), with OSC 7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the
+program has left input unread for over a second (`send`, `keys` and `acp.model` then fail, their input
+queued); `records` are its OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle`
+fallback is on; `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last
+sample, while running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the
+current `model` and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as
+`***`; the agent's slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the
+context window in tokens, and the `cost` when sent); `parent` names the terminal that
+started it (absent without one), with `outlive` and `notify` as `run` set them.
 
 ## Methods
 
@@ -127,7 +128,7 @@ Take over the terminal. After the response the server writes a redraw (clear, th
 
 ### `state`
 
-Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen.
+Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen. The terminal also speaks the Program Status Protocol (OSC 7501, revision 0.4): `state=<s>[:<key>=<value>]…` with `idle` and `clear`, `id`, `kind`, `progress`, `app` and base64 `title` and `msg`, and answers the probe `ESC ] 7501 ; ?`. A report with an `id` is a record of its own (`records`); on exit `working` and `blocked` ones are dropped.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"state","params":{"name":"build","note":"tests pass","state":"done"}}
@@ -136,11 +137,11 @@ Report the terminal's state (`working`, `blocked`, `done` or `error`) with an op
 
 ### `wait`
 
-Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).
+Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback; `blocked` only of `kind`, if given) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"wait","params":{"name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
-{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
+{"jsonrpc":"2.0","id":1,"method":"wait","params":{"kind":"question","name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
+{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"records":[{"id":"build/tests","state":"working"}],"reported":{"app":"make","kind":"question","msg":"Overwrite config.toml?","progress":40,"state":"blocked","title":"Docs"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
 ```
 
 ### `events`

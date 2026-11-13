@@ -87,14 +87,26 @@ pub struct Snapshot {
 }
 
 /// A state a program reported, with an optional note.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Report {
-    /// One of [`STATES`], or `idle` from the silence fallback.
+    /// One of [`STATES`], `idle`, or `clear` (drops the record and those under it) from OSC 7501.
     pub state: String,
     /// A free-text note.
     pub note: Option<String>,
     /// The foreign escape it came from (e.g. `jan-osc9999`); `None` for shed's own.
     pub source: Option<String>,
+    /// The record's path (`build/tests`); `None` for the terminal's own.
+    pub id: Option<String>,
+    /// Why it is blocked: `permission`, `question` or `auth`.
+    pub kind: Option<String>,
+    /// Percent done, 0–100, while working or blocked.
+    pub progress: Option<u8>,
+    /// The program's stable name, e.g. `make`.
+    pub app: Option<String>,
+    /// A short label.
+    pub title: Option<String>,
+    /// A one-line description.
+    pub msg: Option<String>,
 }
 
 /// A VT screen: feed it the program's output and read back plain text.
@@ -149,10 +161,11 @@ impl Screen {
         std::mem::take(&mut self.grid.replies)
     }
 
-    /// Takes the last state the program reported with `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, or another
-    /// agent's state escape (Jan's OSC 9999), since the previous call. The escape never reaches the screen.
-    pub fn take_report(&mut self) -> Option<Report> {
-        self.grid.report.take()
+    /// Takes the states the program reported since the previous call, oldest first: OSC 7501 (`state=<s>[:<key>=<value>]…`
+    /// or shed's `state=<s>;note=<n>`), or another agent's state escape (Jan's OSC 9999). The escape never
+    /// reaches the screen.
+    pub fn take_reports(&mut self) -> Vec<Report> {
+        std::mem::take(&mut self.grid.reports)
     }
 
     /// The visible screen as plain text: one line per row, trailing spaces and blank rows dropped.
@@ -298,7 +311,7 @@ struct Grid {
     primary: Option<(Cells, (usize, usize))>,
     replies: Vec<u8>,
     answered: bool,
-    report: Option<Report>,
+    reports: Vec<Report>,
     pen: Pen,
     paste: bool,
 }
@@ -323,7 +336,7 @@ impl Grid {
             primary: None,
             replies: Vec::new(),
             answered: false,
-            report: None,
+            reports: Vec::new(),
             pen: Pen::default(),
             paste: false,
         }
@@ -739,17 +752,17 @@ impl Perform for Grid {
         }
     }
 
-    fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+    fn osc_dispatch(&mut self, params: &[&[u8]], bell_terminated: bool) {
         let [code, fields @ ..] = params else { return };
         let text = String::from_utf8_lossy(&fields.join(&b';')).into_owned();
         if let Some((_, source, states)) = FOREIGN.iter().find(|(c, ..)| c == code) {
             let json: Option<serde_json::Value> = serde_json::from_str(&text).ok();
             let state = json.as_ref().and_then(|j| j.get("state")?.as_str());
             if let Some((_, ours)) = states.iter().find(|(theirs, _)| Some(*theirs) == state) {
-                self.report = Some(Report {
+                self.reports.push(Report {
                     state: (*ours).to_owned(),
-                    note: None,
                     source: Some((*source).to_owned()),
+                    ..Report::default()
                 });
             }
             return;
@@ -757,18 +770,23 @@ impl Perform for Grid {
         if *code != b"7501".as_slice() {
             return;
         }
-        let (state, note) = match text.split_once(";note=") {
-            Some((state, note)) => (state, Some(note.to_owned())),
-            None => (text.as_str(), None),
-        };
-        if let Some(state) = state.strip_prefix("state=")
-            && STATES.contains(&state)
+        if text == "?" {
+            let st: &[u8] = if bell_terminated { b"\x07" } else { b"\x1b\\" };
+            self.reply(&[PROBE_REPLY, st].concat());
+        } else if let Some((state, note)) = text.split_once(";note=") {
+            if let Some(state) = state.strip_prefix("state=")
+                && STATES.contains(&state)
+            {
+                self.reports.push(Report {
+                    state: state.to_owned(),
+                    note: Some(note.to_owned()),
+                    ..Report::default()
+                });
+            }
+        } else if text.len() <= 4096
+            && let Some(report) = program_status(&text)
         {
-            self.report = Some(Report {
-                state: state.to_owned(),
-                note,
-                source: None,
-            });
+            self.reports.push(report);
         }
     }
 
@@ -786,13 +804,88 @@ impl Perform for Grid {
             }
             b'M' => self.reverse_index(),
             b'c' => {
-                let (limit, report) = (self.limit, self.report.take());
+                let (limit, reports) = (self.limit, std::mem::take(&mut self.reports));
                 *self = Self::new(self.size(), limit);
-                self.report = report;
+                self.reports = reports;
             }
             _ => {}
         }
     }
+}
+
+const PROBE_REPLY: &[u8] =
+    b"\x1b]7501;?:states=idle,working,done,blocked,error,clear:kinds=permission,question,auth";
+
+fn segment(s: &str) -> bool {
+    (1..=32).contains(&s.len())
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_.+-".contains(&b))
+}
+
+fn text64(v: Option<&str>, max: usize) -> Result<Option<String>, ()> {
+    let Some(v) = v else { return Ok(None) };
+    let mut bits = 0u32;
+    let mut out = Vec::new();
+    for (i, c) in v.trim_end_matches('=').bytes().enumerate() {
+        let six = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return Err(()),
+        };
+        bits = bits << 6 | u32::from(six);
+        if i % 4 != 0 {
+            out.extend(u8::try_from(bits >> (6 - 2 * (i % 4)) & 0xff).ok());
+        }
+    }
+    let text = String::from_utf8(out).map_err(|_| ())?;
+    let ok = v.len() <= max.div_ceil(3) * 4
+        && v.trim_end_matches('=').len() % 4 != 1
+        && !text.chars().any(char::is_control);
+    ok.then_some(Some(text)).ok_or(())
+}
+
+fn program_status(text: &str) -> Option<Report> {
+    let mut keys = std::collections::HashMap::new();
+    for (k, v) in text.split(':').filter_map(|p| p.split_once('=')) {
+        let (k, v) = (k.trim(), v.trim());
+        let value = |b: u8| b.is_ascii_alphanumeric() || b"_.,+/=-".contains(&b);
+        if !k.is_empty() && k.len() <= 16 && v.bytes().all(value) {
+            keys.insert(k, v);
+        }
+    }
+    let state = *keys.get("state")?;
+    let id = keys.get("id").map(|id| (*id).to_owned());
+    let id_ok =
+        |id: &String| id.len() <= 128 && id.split('/').count() <= 8 && id.split('/').all(segment);
+    if !["idle", "working", "done", "blocked", "error", "clear"].contains(&state)
+        || !id.as_ref().is_none_or(id_ok)
+    {
+        return None;
+    }
+    let busy = ["working", "blocked"].contains(&state);
+    let kinds = ["permission", "question", "auth"];
+    Some(Report {
+        state: state.to_owned(),
+        id,
+        kind: keys
+            .get("kind")
+            .filter(|k| state == "blocked" && kinds.contains(k))
+            .map(|k| (*k).to_owned()),
+        progress: keys
+            .get("progress")
+            .and_then(|p| p.parse().ok())
+            .filter(|p| busy && *p <= 100),
+        app: keys
+            .get("app")
+            .filter(|a| segment(a))
+            .map(|a| (*a).to_owned()),
+        title: text64(keys.get("title").copied(), 192).ok()?,
+        msg: text64(keys.get("msg").copied(), 2048).ok()?,
+        ..Report::default()
+    })
 }
 
 #[cfg(test)]
@@ -865,20 +958,79 @@ mod tests {
         assert_eq!(s.text(), "ab");
         let working = Report {
             state: "working".into(),
-            note: None,
-            source: None,
+            ..Report::default()
         };
-        assert_eq!(s.take_report(), Some(working));
-        assert_eq!(s.take_report(), None);
+        assert_eq!(s.take_reports(), vec![working]);
+        assert_eq!(s.take_reports(), vec![]);
         s.feed(b"\x1b]7501;state=blocked;note=needs a; reply\x1b\\c");
         s.feed(b"\x1b]7501;state=bogus\x07\x1b]2;title\x07");
         assert_eq!(s.text(), "abc");
         let blocked = Report {
             state: "blocked".into(),
             note: Some("needs a; reply".into()),
-            source: None,
+            ..Report::default()
         };
-        assert_eq!(s.take_report(), Some(blocked));
+        assert_eq!(s.take_reports(), vec![blocked]);
+    }
+
+    fn program_status(osc: &str) -> Vec<Report> {
+        let mut s = screen(3, 20, 0, &format!("\x1b]7501;{osc}\x1b\\"));
+        assert_eq!(s.text(), "");
+        s.take_reports()
+    }
+
+    #[test]
+    fn osc_7501_reads_every_state_and_key() {
+        for state in ["idle", "working", "done", "blocked", "error", "clear"] {
+            let got = program_status(&format!("state={state}"));
+            assert_eq!(got.first().map(|r| r.state.as_str()), Some(state));
+        }
+        let full = "state=blocked: kind=question :progress=40:app=make:id=build/tests:title=RG9jcw==:msg=T3ZlcndyaXRlIGNvbmZpZy50b21sPw==:x=1:bad";
+        let blocked = Report {
+            state: "blocked".into(),
+            id: Some("build/tests".into()),
+            kind: Some("question".into()),
+            progress: Some(40),
+            app: Some("make".into()),
+            title: Some("Docs".into()),
+            msg: Some("Overwrite config.toml?".into()),
+            ..Report::default()
+        };
+        assert_eq!(program_status(full), vec![blocked]);
+        let loose =
+            program_status("state=done:kind=auth:progress=50:app=a b:state=working:progress=101");
+        let working = Report {
+            state: "working".into(),
+            ..Report::default()
+        };
+        assert_eq!(loose, vec![working]);
+    }
+
+    #[test]
+    fn osc_7501_drops_garbled_reports() {
+        for osc in [
+            "state=bogus",
+            "kind=auth",
+            "state=done:id=a//b",
+            "state=done:id=a/b/c/d/e/f/g/h/i",
+            "state=done:msg=QUFBQ",
+            "state=done:msg=QQ=Q",
+            "state=done:msg=Cg==",
+            "state=done:title=/w==",
+            &format!("state=done:title={}", "QUFB".repeat(65)),
+        ] {
+            assert_eq!(program_status(osc), vec![], "{osc}");
+        }
+    }
+
+    #[test]
+    fn osc_7501_probe_gets_the_spec_reply_in_the_same_terminator() {
+        let reply = b"\x1b]7501;?:states=idle,working,done,blocked,error,clear:kinds=permission,question,auth";
+        let mut s = screen(3, 20, 0, "\x1b]7501;?\x07");
+        assert_eq!(s.take_replies(), [&reply[..], b"\x07"].concat());
+        s.feed(b"\x1b]7501;?\x1b\\");
+        assert_eq!(s.take_replies(), [&reply[..], b"\x1b\\"].concat());
+        assert_eq!((s.take_reports(), s.text()), (vec![], String::new()));
     }
 
     #[test]
@@ -889,10 +1041,14 @@ mod tests {
             0,
             "\x1b]9999;{\"agentType\":\"jan\",\"state\":\"waiting\"}\x07",
         );
-        let report = s.take_report().map(|r| (r.state, r.source));
-        assert_eq!(report, Some(("blocked".into(), Some("jan-osc9999".into()))));
+        let report: Vec<_> = s
+            .take_reports()
+            .into_iter()
+            .map(|r| (r.state, r.source))
+            .collect();
+        assert_eq!(report, vec![("blocked".into(), Some("jan-osc9999".into()))]);
         s.feed(b"\x1b]9999;{\"state\":\x07\x1b]9999;[1]\x07\x1b]9999;{\"state\":7}\x07x");
-        assert_eq!((s.take_report(), s.text()), (None, "x".into()));
+        assert_eq!((s.take_reports(), s.text()), (vec![], "x".into()));
     }
 
     #[test]

@@ -277,6 +277,64 @@ fn a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each() {
 }
 
 #[test]
+fn program_status_osc_7501_keys_ids_probe_clear_and_lifetime() {
+    let dir = temp_dir("osc7501");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    let mut t = Transcript {
+        dir: dir.clone(),
+        text: String::new(),
+        golden: "program-status.txt",
+    };
+    let osc = |body: &str| format!("\\033]7501;{body}\\007");
+    let agent = [
+        "stty raw -echo; printf '\\033]7501;?\\007'; r=$(dd bs=1 count=85 2>/dev/null)".to_owned(),
+        "printf 'probe %s\\r\\n' \"$r\" | tr '\\033\\007' 'EB'".to_owned(),
+        format!(
+            "printf '{}{}{}'",
+            osc("state=working:id=build"),
+            osc("state=done:id=build/tests"),
+            osc("state=blocked:id=lint:kind=permission")
+        ),
+        format!(
+            "printf '\\033]7501;state=working:progress=40:app=make:title=RG9jcw==:msg=QnVpbGRpbmcgZG9jcw==\\033\\\\'; read x; printf '{}{}'",
+            osc("state=clear:id=build"),
+            osc("state=blocked:kind=question:msg=T3ZlcndyaXRlPw==:note=x:zz")
+        ),
+        format!("read x; printf '{}cleared\\r\\n'; read x", osc("state=clear")),
+    ]
+    .join("; ");
+    t.run(&[
+        "run", "--name", "agent", "--cwd", d, "--", "sh", "-c", &agent,
+    ]);
+    t.run(&["wait", "agent", "--until", "working", "--timeout", "10"]);
+    t.run(&["read", "agent"]);
+    t.run(&["--json", "get", "agent"]);
+    t.run(&["send", "agent", "\n"]);
+    let blocked = ["wait", "agent", "--until", "blocked", "--kind"];
+    t.run(&[&blocked[..], &["auth", "--timeout", "0.2"]].concat());
+    t.run(&[&blocked[..], &["question", "--timeout", "10"]].concat());
+    t.run(&["--json", "get", "agent"]);
+    t.run(&["send", "agent", "\n"]);
+    t.run(&["wait", "agent", "--output", "cleared", "--timeout", "10"]);
+    t.run(&["--json", "get", "agent"]);
+    for (name, report) in [("w", "state=working"), ("d", "state=done")] {
+        let script = format!(
+            "printf '{}{}{}ready\\n'; read x",
+            osc(report),
+            osc("state=blocked:id=asks"),
+            osc("state=error:id=tests")
+        );
+        t.run(&["run", "--name", name, "--cwd", d, "--", "sh", "-c", &script]);
+        t.run(&["wait", name, "--output", "ready", "--timeout", "10"]);
+        t.run(&["send", name, "\n"]);
+        t.run(&["wait", name, "--output", "never", "--timeout", "10"]);
+        t.run(&["--json", "get", name]);
+    }
+    t.check();
+}
+
+#[test]
 fn wait_matches_output_by_pattern_and_falls_back_to_idle() {
     let dir = temp_dir("wait-output");
     let d = dir.to_str().expect("utf-8 dir");

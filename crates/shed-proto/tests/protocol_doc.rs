@@ -28,6 +28,7 @@ fn info(state: State) -> TerminalInfo {
         exit: (state == State::Exited).then_some(0),
         pid: (state == State::Running).then_some(4242),
         reported: None,
+        records: Vec::new(),
         idle_after: None,
         resources: (state == State::Running).then_some(RESOURCES),
         acp: None,
@@ -77,7 +78,7 @@ const RESOURCES: Resources = Resources {
 fn events() -> Vec<Event> {
     [
         EventKind::Started,
-        EventKind::State(done()),
+        EventKind::State(Box::new(done())),
         EventKind::Resources(RESOURCES),
         EventKind::Exited { code: Some(0) },
         EventKind::Killed,
@@ -193,7 +194,27 @@ fn done() -> Reported {
     Reported {
         state: "done".into(),
         note: Some("tests pass".into()),
-        state_source: None,
+        ..Reported::default()
+    }
+}
+
+fn asking() -> TerminalInfo {
+    TerminalInfo {
+        reported: Some(Reported {
+            state: "blocked".into(),
+            kind: Some("question".into()),
+            progress: Some(40),
+            app: Some("make".into()),
+            title: Some("Docs".into()),
+            msg: Some("Overwrite config.toml?".into()),
+            ..Reported::default()
+        }),
+        records: vec![Reported {
+            state: "working".into(),
+            id: Some("build/tests".into()),
+            ..Reported::default()
+        }],
+        ..info(State::Running)
     }
 }
 
@@ -344,16 +365,14 @@ fn example(method: Method) -> (Value, Value) {
                 name: "build".into(),
                 children: None,
                 until: vec!["done".into(), "blocked".into()],
+                kind: Some("question".into()),
                 output: Some("^ok \\d+ tests$".into()),
                 timeout: Some(600.0),
             })
             .unwrap(),
             to_value(WaitResult {
                 outcome: WaitOutcome::Matched,
-                terminal: TerminalInfo {
-                    reported: Some(done()),
-                    ..info(State::Running)
-                },
+                terminal: asking(),
             })
             .unwrap(),
         ),
@@ -516,14 +535,15 @@ fn markdown() -> String {
          A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is\n\
          the exit status (128 + N for signal N), `null` while running or when the program was lost in a server\n\
          restart; `pid` is set while running; `reported` is the state the program last reported (absent until\n\
-         then), or `stuck` while the program has left input unread for over a second (`send`, `keys` and\n\
-         `acp.model` then fail, their input queued); `idle_after` is set when the `idle` fallback is on;\n\
-         `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\n\
-         running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\n\
-         and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\n\
-         slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\n\
-         tokens, and the `cost` when sent); `parent` names the terminal that started it (absent\n\
-         without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
+         then), with OSC 7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the\n\
+         program has left input unread for over a second (`send`, `keys` and `acp.model` then fail, their input\n\
+         queued); `records` are its OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle`\n\
+         fallback is on; `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last\n\
+         sample, while running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the\n\
+         current `model` and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as\n\
+         `***`; the agent's slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the\n\
+         context window in tokens, and the `cost` when sent); `parent` names the terminal that\n\
+         started it (absent without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
     );
     for method in Method::ALL {
         let (params, result) = example(method);

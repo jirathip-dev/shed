@@ -229,6 +229,20 @@ fn internal(e: impl std::fmt::Display) -> RpcError {
     RpcError::new(ErrorCode::Internal, e)
 }
 
+fn to_reported(r: Report) -> Reported {
+    Reported {
+        state: r.state,
+        note: r.note,
+        state_source: r.source,
+        id: r.id,
+        kind: r.kind,
+        progress: r.progress,
+        app: r.app,
+        title: r.title,
+        msg: r.msg,
+    }
+}
+
 fn moved(old: u64, new: u64) -> bool {
     new.abs_diff(old) * 10 > old
 }
@@ -439,28 +453,39 @@ impl Registry {
         let (mut changed, mut notes) = (false, Vec::new());
         for entry in self.entries.values_mut() {
             let Some(term) = &entry.term else { continue };
-            let reported = term.report().map(|r| Reported {
-                state: r.state,
-                note: r.note,
-                state_source: r.source,
-            });
-            if entry.info.reported != reported {
-                entry.info.reported.clone_from(&reported);
-                if let Some(r) = reported {
-                    if ["blocked", "error"].contains(&r.state.as_str()) {
-                        let what = [Some(&r.state), r.note.as_ref()].into_iter().flatten();
-                        notes.extend(note(
-                            &entry.info,
-                            &what.cloned().collect::<Vec<_>>().join(": "),
-                        ));
-                    }
-                    self.events.emit(&entry.info, EventKind::State(r));
-                }
+            let running = entry.info.state == State::Running;
+            let exit = if running {
+                term.try_wait().map_err(internal)?
+            } else {
+                None
+            };
+            let reported = term.report().map(to_reported);
+            let records: Vec<Reported> = term.records().into_iter().map(to_reported).collect();
+            if let Some(r) = reported
+                .as_ref()
+                .filter(|r| entry.info.reported.as_ref() != Some(*r))
+                && ["blocked", "error"].contains(&r.state.as_str())
+            {
+                let what = [Some(&r.state), r.note.as_ref()].into_iter().flatten();
+                notes.extend(note(
+                    &entry.info,
+                    &what.cloned().collect::<Vec<_>>().join(": "),
+                ));
+            }
+            let news = records.iter().filter(|r| !entry.info.records.contains(r));
+            let news = reported
+                .iter()
+                .filter(|r| entry.info.reported.as_ref() != Some(*r))
+                .chain(news);
+            for r in news {
+                self.events
+                    .emit(&entry.info, EventKind::State(Box::new(r.clone())));
+            }
+            if (&entry.info.reported, &entry.info.records) != (&reported, &records) {
+                (entry.info.reported, entry.info.records) = (reported, records);
                 changed = true;
             }
-            if entry.info.state == State::Running
-                && let Some(status) = term.try_wait().map_err(internal)?
-            {
+            if let Some(status) = exit {
                 notes.extend(Self::exited(&mut self.events, entry, status));
                 changed = true;
             }
@@ -482,6 +507,10 @@ impl Registry {
         entry.info.pid = None;
         entry.exited_at = Some(shed_core::clock::unix_now());
         entry.resources = None;
+        if let Some(term) = &entry.term {
+            entry.info.reported = term.report().map(to_reported);
+            entry.info.records = term.records().into_iter().map(to_reported).collect();
+        }
         let (kind, what) = match code {
             _ if entry.killing => (EventKind::Killed, "killed".to_owned()),
             Some(n) => (EventKind::Exited { code }, format!("exited {n}")),
@@ -507,8 +536,7 @@ impl Registry {
                 let state = "working".to_owned();
                 term.set_report(Report {
                     state,
-                    note: None,
-                    source: None,
+                    ..Report::default()
                 });
                 crate::acp::frame(&crate::acp::Input::Prompt(notes.join("\n")))
             } else {
@@ -737,6 +765,7 @@ impl Registry {
             exit: None,
             pid: Some(term.pid()),
             reported: None,
+            records: Vec::new(),
             idle_after: p.idle_after,
             resources: None,
             acp: p.acp,
@@ -890,7 +919,7 @@ impl Registry {
         self.live(&p.name)?.set_report(Report {
             state: p.report.state,
             note: p.report.note,
-            source: None,
+            ..Report::default()
         });
         self.refresh()?;
         self.get(&p.name)
@@ -1105,7 +1134,7 @@ mod tests {
             let report = Reported {
                 state: (if n % 2 == 0 { "working" } else { "blocked" }).to_owned(),
                 note: Some(format!("change {n}")),
-                state_source: None,
+                ..Reported::default()
             };
             let name = "busy".to_owned();
             crate::lock(&registry)
