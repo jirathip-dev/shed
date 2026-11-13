@@ -22,32 +22,37 @@ than 10% slower than the base on any stream. Set `SHED_DRAIN_MB` for another siz
 **Machine.** Apple M6 (Mac18,5), 12 cores, 32 GB, macOS 27.2. This is a shared build host, so its load
 average during the runs is given too. The numbers move with that load by up to 2x.
 
-**Results.** Base 62e565a (bench from 97d4bc6), head 96f6921, release builds. Median of 5. Load average
-7 to 12.
+**Results.** Base 62e565a (bench from 97d4bc6), head 3563620, release builds. Median of 5. Load average
+7 to 9.
 
 | 100 MiB stream | base | head | raw-read ceiling |
 |---|---|---|---|
-| plain | 2654 ms (38 MiB/s) | 932 ms (107 MiB/s) | 229–246 MiB/s |
-| colour | 2618 ms (38 MiB/s) | 1009 ms (99 MiB/s) | 180–232 MiB/s |
-| redraw | 1305 ms (77 MiB/s) | 1039 ms (96 MiB/s) | 144–234 MiB/s |
-| serve peak RSS | 95–96 MB | 5–6 MB | |
-| serve CPU, plain / colour / redraw | 2980 / 2840 / 1530 ms | 1690 / 1860 / 2010 ms | |
+| plain | 2462 ms (41 MiB/s) | 722 ms (139 MiB/s) | 268–272 MiB/s |
+| colour | 2674 ms (37 MiB/s) | 826 ms (121 MiB/s) | 246–252 MiB/s |
+| redraw | 1255 ms (80 MiB/s) | 749 ms (134 MiB/s) | 247–257 MiB/s |
+| serve peak RSS | 95–96 MB | 10–13 MB | |
+| serve CPU, plain / colour / redraw | 2720 / 2820 / 1600 ms | 1200 / 1440 / 1410 ms | |
 
-In an earlier run at load 4, the head drained plain and colour in 757 ms each (132 MiB/s), against
-1911 ms and 1868 ms (52 and 54 MiB/s) at the base, with a raw ceiling of 202–248 MiB/s.
+Single head runs ranged from 120 to 172 MiB/s for plain. An earlier run at load 4, with the same
+queues but before the log writer merged its chunks, drained plain in 694 ms and colour in 684 ms
+(148 and 150 MiB/s) against 2013 and 1830 ms at the base. The previous head, 7989ce6 with 16-chunk
+queues, drained plain at 107 MiB/s at load 7 to 12.
 
-**Where the time goes.** In `sample` profiles of serve on the head, the PTY reader thread spends about
-three quarters of its time inside `read(2)`. macOS hands out at most about 1 KiB per read, so 100 MiB
-takes about 100,000 reads. The feeder thread (VT parse, screen, replies) is busy 80–85% of the time, and
-the log writer about half. Each chunk handed to an idle thread costs a wake-up, which is why the
-pipeline stays under the bare-PTY ceiling.
+**Where the time goes.** In `sample` profiles of serve, the PTY reader thread spends about 90% of its
+time inside `read(2)`. macOS hands out about 1 KiB per read, at any line speed, so 100 MiB takes about
+100,000 reads. The feeder thread (VT parse, screen, replies) is busy about 80% of the time. Of its
+work, the VT parse is a tenth (1 to 2 G of about 10 G instructions per 100 MiB). The rest is the
+screen grid and the scrollback, so another VT parser would not close the gap. The log writer is about
+half busy, and rotating the log stalls it for a moment. With 16-chunk queues (16 KiB) such a stall
+blocked the feeder, then the reader, then `cat`; 256-chunk queues absorb it.
 
 **What changed.** The base did everything on one thread: an 8 KiB read, the parse under the screen
 lock, a log write. Scrolling built a `String` and a fresh 200-cell row for every line. Rotating the log
 read its 8 MiB tail into memory. That buffering was the 90 MB RSS spike, which the allocator kept for
 10–15 s. On the head:
 
-- the PTY read, the screen and the log write run on three threads, linked by bounded queues;
+- the PTY read, the screen and the log write run on three threads, linked by queues of 256 chunks,
+  and the feeder and the log writer each take all queued chunks at once;
 - subscribers share one chunk;
 - the scrollback is one ring of bytes;
 - rows hold only the cells written to them, so a scroll rotates and clears a row;
