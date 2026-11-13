@@ -33,14 +33,42 @@ pub enum Wake {
 
 struct Status {
     changes: u64,
+    ended: bool,
     last_output: Instant,
     report: Option<Report>,
+    records: Vec<Report>,
     idle_after: Option<Duration>,
     stuck: bool,
     exit: Option<Result<ExitStatus, std::io::ErrorKind>>,
 }
 
 impl Status {
+    fn apply(&mut self, report: Report) {
+        match (report.state.as_str(), report.id.clone()) {
+            ("clear", None) => (self.report, self.records) = (None, Vec::new()),
+            ("clear", Some(id)) => self.records.retain(|r| {
+                r.id.as_ref()
+                    .is_some_and(|r| *r != id && !r.starts_with(&format!("{id}/")))
+            }),
+            (_, None) => self.report = Some(report),
+            (_, Some(id)) => {
+                self.records.retain(|r| r.id.as_ref() != Some(&id));
+                self.records.push(report);
+                if self.records.len() > 256 {
+                    self.records.remove(0);
+                }
+            }
+        }
+        self.end(self.ended);
+    }
+
+    fn end(&mut self, ended: bool) {
+        self.ended = ended;
+        let lasts = |r: &Report| !ended || !["working", "blocked"].contains(&r.state.as_str());
+        self.report = self.report.take().filter(lasts);
+        self.records.retain(lasts);
+    }
+
     fn idle_at(&self) -> Option<Instant> {
         match self.report {
             Some(_) => None,
@@ -130,8 +158,10 @@ impl Terminal {
         let outputs = Arc::new(Mutex::new(Some(Vec::new())));
         let watch = Arc::new(watch::Sender::new(Status {
             changes: 0,
+            ended: false,
             last_output: crate::clock::now(),
             report: None,
+            records: Vec::new(),
             idle_after: None,
             stuck: false,
             exit: None,
@@ -154,7 +184,7 @@ impl Terminal {
             logger.join().ok();
             drop(reader);
             *lock(&subs) = None;
-            bump(&watcher, |_| {});
+            bump(&watcher, |s| s.end(true));
         });
         let exits = Arc::clone(&watch);
         std::thread::spawn(move || reap(child, &exits));
@@ -218,22 +248,27 @@ impl Terminal {
             return Some(Report {
                 state: "stuck".to_owned(),
                 note: Some("its input is not drained".to_owned()),
-                source: None,
+                ..Report::default()
             });
         }
         let idle = status.idle_at().is_some_and(|at| crate::clock::now() >= at);
         status.report.clone().or_else(|| {
             idle.then(|| Report {
                 state: "idle".to_owned(),
-                note: None,
-                source: None,
+                ..Report::default()
             })
         })
     }
 
+    /// The records the program reported with an `id`, least recently updated first.
+    #[must_use]
+    pub fn records(&self) -> Vec<Report> {
+        self.watch.borrow().records.clone()
+    }
+
     /// Records a reported state, as if the program had sent the escape.
     pub fn set_report(&self, report: Report) {
-        bump(&self.watch, |s| s.report = Some(report));
+        bump(&self.watch, |s| s.apply(report));
     }
 
     /// Turns the silence fallback on (`Some`) or off: [`report`](Self::report) says `idle` after this
@@ -359,16 +394,12 @@ impl Terminal {
         )))
     }
 
-    /// Ends the whole process tree: SIGTERM, then SIGKILL after `grace`; returns the program's exit status.
-    /// When the process table cannot be read (no file descriptors left), the program's process group
-    /// gets SIGKILL instead.
+    /// Ends the whole process tree: SIGTERM, then SIGKILL after `grace`; returns the program's exit status and drops its `working` and `blocked` reports.
     ///
     /// # Errors
     /// [`Error::Io`] when the exit status cannot be read.
     pub fn kill(&self, grace: Duration) -> Result<ExitStatus, Error> {
-        if proctree::kill_tree(&proctree::system(), self.pid, grace, || {}).is_err() {
-            self.kill_group();
-        }
+        proctree::kill_tree(&proctree::system(), self.pid, grace, || {});
         loop {
             if let Some(status) = self.try_wait()? {
                 return Ok(status);
@@ -376,25 +407,24 @@ impl Terminal {
             crate::clock::sleep(REAP);
         }
     }
-
-    fn kill_group(&self) {
-        if let Some(group) = Pid::from_raw(self.pid) {
-            kill_process_group(group, Signal::KILL).ok();
-        }
-    }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        if matches!(self.try_wait(), Ok(None)) {
-            self.kill_group();
+        if matches!(self.try_wait(), Ok(None))
+            && let Some(group) = Pid::from_raw(self.pid)
+        {
+            kill_process_group(group, Signal::KILL).ok();
         }
     }
 }
 
 fn reap(mut child: Child, watch: &watch::Sender<Status>) {
     let exit = child.wait().map_err(|e| e.kind());
-    bump(watch, |s| s.exit = Some(exit));
+    bump(watch, |s| {
+        s.exit = Some(exit);
+        s.end(true);
+    });
 }
 
 fn write_loop(
@@ -466,10 +496,12 @@ fn feed_loop(
         let (relayed, replies) = {
             let mut screen = lock(screen);
             let relayed = screen.relay(&chunk);
-            let report = screen.take_report();
+            let reports = screen.take_reports();
             bump(watch, |s| {
                 s.last_output = crate::clock::now();
-                s.report = report.or_else(|| s.report.take());
+                for r in reports {
+                    s.apply(r);
+                }
             });
             (relayed, screen.take_replies())
         };

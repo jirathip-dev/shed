@@ -56,21 +56,21 @@ self-hosted:
 # Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
 # environment only in shed_server::config) and size limits in .herdsman/arch.toml; one fixture breaks each.
 arch:
-    herdsman arch-check
-    cd ci/fixtures/arch-layer && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-spawn && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-process && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-sleep && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-env && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-system-time && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-instant && ! herdsman arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-size && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+    drover arch-check
+    cd ci/fixtures/arch-layer && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-spawn && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-process && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-sleep && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-env && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-system-time && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-instant && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.herdsman/arch.toml
 
 # The lesson checks in .herdsman/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:
-    herdsman lesson-check
-    ! env -u GITHUB_STEP_SUMMARY herdsman lesson-check --rules ci/fixtures/lesson-active.md
-    env -u GITHUB_STEP_SUMMARY herdsman lesson-check --rules ci/fixtures/lesson-shadow.md
+    drover lesson-check
+    ! env -u GITHUB_STEP_SUMMARY drover lesson-check --rules ci/fixtures/lesson-active.md
+    env -u GITHUB_STEP_SUMMARY drover lesson-check --rules ci/fixtures/lesson-shadow.md
 
 # Tests leave no shed-* temp folders (run after `just test`); the fixture folder proves the check bites.
 temp-left:

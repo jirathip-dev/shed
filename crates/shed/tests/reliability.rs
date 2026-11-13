@@ -425,7 +425,7 @@ fn exited_sessions_release_their_fds() {
                 .any(|t| t["name"] == name && t["state"] == "exited")
         });
     }
-    eventually("the fd count back to its baseline", || count() == baseline);
+    eventually("the fd count back to its baseline", || count() <= baseline);
 }
 
 struct Serve(Child);

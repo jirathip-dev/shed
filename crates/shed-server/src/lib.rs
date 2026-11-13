@@ -187,10 +187,11 @@ fn watch(registry: &Shared, name: String, term: Arc<Terminal>) {
     let registry = Arc::clone(registry);
     tokio::spawn(async move {
         loop {
-            let last = term.report();
+            let last = (term.report(), term.records());
             lock(&registry).refresh().ok();
             if !matches!(
-                term.wait_until(|t| t.report() != last, None).await,
+                term.wait_until(|t| (t.report(), t.records()) != last, None)
+                    .await,
                 Ok(Wake::Matched)
             ) {
                 let orphans = {
@@ -456,8 +457,9 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
         if line.trim().is_empty() {
             continue;
         }
-        let response = respond(&registry, &mut session, &line).await;
-        let flushed = lock(&registry).saver.flushed();
+        let (response, changed) =
+            registry::answering(respond(&registry, &mut session, &line)).await;
+        let flushed = lock(&registry).saver.flushed_to(changed);
         flushed.await;
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
@@ -756,6 +758,13 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
     {
         return Err(bad(&format!("unknown state {s:?}")));
     }
+    if let Some(k) = p
+        .kind
+        .as_ref()
+        .filter(|k| !["permission", "question", "auth"].contains(&k.as_str()))
+    {
+        return Err(bad(&format!("unknown kind {k:?}")));
+    }
     let pattern = p.output.as_deref().map(Pattern::new).transpose();
     let pattern = pattern.map_err(|e| bad(&e))?;
     let timeout = p.timeout.map(Duration::try_from_secs_f64).transpose();
@@ -770,11 +779,15 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
         reg.refresh()?;
         reg.to_wait(&p.name)?
     };
-    let reported = |state: &str| p.until.iter().any(|s| s == state);
+    let reported = |state: &str, kind: Option<&str>| {
+        p.until.iter().any(|s| s == state)
+            && (state != "blocked" || p.kind.is_none() || p.kind.as_deref() == kind)
+    };
     let outcome = match term {
         Some(term) => {
             let done = |t: &shed_core::Terminal| {
-                t.report().is_some_and(|r| reported(&r.state))
+                t.report()
+                    .is_some_and(|r| reported(&r.state, r.kind.as_deref()))
                     || pattern
                         .as_ref()
                         .is_some_and(|re| t.screen().lines().any(|l| re.is_match(l)))
@@ -789,7 +802,12 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
                 Wake::Timeout => WaitOutcome::Timeout,
             }
         }
-        None if info.reported.is_some_and(|r| reported(&r.state)) => WaitOutcome::Matched,
+        None if info
+            .reported
+            .is_some_and(|r| reported(&r.state, r.kind.as_deref())) =>
+        {
+            WaitOutcome::Matched
+        }
         None => WaitOutcome::Exited,
     };
     let mut reg = lock(registry);

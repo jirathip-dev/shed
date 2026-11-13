@@ -110,6 +110,24 @@ fn kill_escalates_to_sigkill_after_the_grace_period() {
     assert!(!alive(t.pid()));
 }
 
+struct OutOfFiles;
+
+impl proctree::ProcessTable for OutOfFiles {
+    fn list(&self) -> std::io::Result<Vec<proctree::ProcessInfo>> {
+        Err(std::io::Error::from_raw_os_error(24))
+    }
+}
+
+#[test]
+fn kill_ends_the_group_when_the_process_table_cannot_be_read() {
+    let t = sh("echo ready; sleep 100", SIZE);
+    eventually("ready", || t.screen() == "ready");
+    proctree::kill_tree(&OutOfFiles, t.pid(), Duration::from_millis(300), || {});
+    eventually("the program exited", || {
+        t.try_wait().expect("try_wait").is_some()
+    });
+}
+
 #[test]
 fn a_subscriber_that_never_reads_is_dropped_while_the_program_runs() {
     let t = sh("while :; do echo x; done", SIZE);

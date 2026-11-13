@@ -587,7 +587,7 @@
     },
     {
       "name": "state",
-      "description": "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen.",
+      "description": "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen. The terminal also speaks the Program Status Protocol (OSC 7501, revision 0.4): `state=<s>[:<key>=<value>]…` with `idle` and `clear`, `id`, `kind`, `progress`, `app` and base64 `title` and `msg`, and answers the probe `ESC ] 7501 ; ?`. A report with an `id` is a record of its own (`records`); on exit `working` and `blocked` ones are dropped.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -603,7 +603,7 @@
           "required": true,
           "schema": {
             "type": "string",
-            "description": "`working`, `blocked`, `done` or `error`; `idle` from the `idle_after` fallback."
+            "description": "`working`, `blocked`, `done` or `error`; `idle` from OSC 7501 or the `idle_after` fallback."
           }
         },
         {
@@ -627,6 +627,75 @@
             ],
             "description": "The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own."
           }
+        },
+        {
+          "name": "id",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own."
+          }
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is blocked: `permission`, `question` or `auth`."
+          }
+        },
+        {
+          "name": "progress",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255,
+            "description": "Percent done, 0–100, while working or blocked."
+          }
+        },
+        {
+          "name": "app",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The program's stable name, e.g. `make`."
+          }
+        },
+        {
+          "name": "title",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A short label (OSC 7501's `title`, decoded)."
+          }
+        },
+        {
+          "name": "msg",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A one-line description (OSC 7501's `msg`, decoded)."
+          }
         }
       ],
       "result": {
@@ -638,7 +707,7 @@
     },
     {
       "name": "wait",
-      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).",
+      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback; `blocked` only of `kind`, if given) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -674,6 +743,17 @@
             },
             "description": "Reported states that end the wait.",
             "default": []
+          }
+        },
+        {
+          "name": "kind",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "With `blocked` in `until`: only a block of this kind (`permission`, `question` or `auth`) ends the wait."
           }
         },
         {
@@ -1670,6 +1750,13 @@
             ],
             "description": "The state the program last reported, if any."
           },
+          "records": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reported"
+            },
+            "description": "The OSC 7501 records the program reported with an `id`, least recently updated first."
+          },
           "idle_after": {
             "type": [
               "integer",
@@ -1750,7 +1837,7 @@
         "properties": {
           "state": {
             "type": "string",
-            "description": "`working`, `blocked`, `done` or `error`; `idle` from the `idle_after` fallback."
+            "description": "`working`, `blocked`, `done` or `error`; `idle` from OSC 7501 or the `idle_after` fallback."
           },
           "note": {
             "type": [
@@ -1765,6 +1852,51 @@
               "null"
             ],
             "description": "The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own."
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is blocked: `permission`, `question` or `auth`."
+          },
+          "progress": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255,
+            "description": "Percent done, 0–100, while working or blocked."
+          },
+          "app": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The program's stable name, e.g. `make`."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A short label (OSC 7501's `title`, decoded)."
+          },
+          "msg": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A one-line description (OSC 7501's `msg`, decoded)."
           }
         },
         "required": [
