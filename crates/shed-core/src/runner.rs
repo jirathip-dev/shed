@@ -144,18 +144,22 @@ pub(crate) fn pty<S, K, V>(
     cwd: &Path,
     env: impl IntoIterator<Item = (K, V)>,
     pts: pty_process::blocking::Pts,
+    stderr: Option<OwnedFd>,
 ) -> pty_process::Result<Child>
 where
     S: AsRef<OsStr>,
     K: AsRef<OsStr>,
     V: AsRef<OsStr>,
 {
-    pty_process::blocking::Command::new(program)
+    let command = pty_process::blocking::Command::new(program)
         .args(args)
         .current_dir(cwd)
         .env("TERM", "xterm-256color")
-        .envs(env)
-        .spawn(pts)
+        .envs(env);
+    match stderr {
+        Some(fd) => command.stderr(fd).spawn(pts),
+        None => command.spawn(pts),
+    }
 }
 
 /// This process's id.

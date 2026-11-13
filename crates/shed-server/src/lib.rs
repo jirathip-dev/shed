@@ -348,10 +348,10 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     }
     let saved = lock(&registry).close();
     saved.await;
-    let running = lock(&registry).running();
-    let ends = running
+    let rest = lock(&registry).release_lanes();
+    let ends = rest
         .into_iter()
-        .map(|(_, t)| blocking(move || t.kill(registry::GRACE)));
+        .map(|t| blocking(move || t.kill(registry::GRACE)));
     futures::future::join_all(ends).await;
     Ok(())
 }

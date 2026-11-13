@@ -454,6 +454,18 @@ fn main() -> ExitCode {
     }
 }
 
+fn other_build(paths: &Paths) -> Option<String> {
+    let server = match Client::connect(&paths.socket) {
+        Ok(client) => client.server().clone(),
+        Err(shed_server::Error::Rpc(e)) => return Some(e.to_string()),
+        Err(_) => return None,
+    };
+    let ours = shed_server::proto::BUILD;
+    let theirs = server.label();
+    (server.build != ours)
+        .then(|| format!("shed serve runs build {theirs}, this is {ours}; restart shed serve"))
+}
+
 fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     let paths = match &cli.dir {
         Some(dir) => Paths::in_dir(dir),
@@ -462,7 +474,13 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     let json = cli.json;
     let server = Server::new(&paths, cli.dir.as_deref(), cli.on, &mut cli.command)?;
     match cli.command {
-        Command::Hello => out::line(format_args!("shed {}", shed_server::proto::LONG_VERSION)),
+        Command::Hello => {
+            out::line(format_args!("shed {}", shed_server::proto::LONG_VERSION));
+            if let Some(why) = other_build(&paths) {
+                out::err(why);
+                return Ok(ExitCode::FAILURE);
+            }
+        }
         Command::Schema => out::line(format_args!("{:#}", shed_server::proto::openrpc())),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
         Command::Run(args) => run_terminal(&server, json, *args)?,

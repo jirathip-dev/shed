@@ -49,7 +49,9 @@ loginctl enable-linger "$USER"   # optional: keep it running while logged out
 The state file keeps every terminal's name, labels, cwd, command, state and exit status, written
 atomically (temp file, then rename). When the server starts again, terminals run with `keep` come back
 as a shell (`$SHELL`, else `/bin/sh`) in the cwd they were started in; their task never runs again.
-The others are listed as `exited` with no exit status.
+ACP terminals (`run --acp`) keep running while the server is down and are taken back when it starts
+(see [ADR 0003](decisions/0003-acp-bridge.md)); one whose bridge ended meanwhile is `exited`. The others are
+listed as `exited` with no exit status. `shed hello` exits 1 when the running server is another build.
 
 The file is written compactly at most every 500 ms, so a killed server loses at most the last half second;
 it is written at once on a normal stop, and before `run`, `kill` and `rm` answer. An exited terminal is

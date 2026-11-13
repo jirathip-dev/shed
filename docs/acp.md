@@ -62,7 +62,7 @@ ends as `error`. `shed agents sessions <id>` lists the agent's sessions (`sessio
 current folder) when it advertises `sessionCapabilities.list`, and refuses otherwise; `--json` gives ACP's
 session objects. The agent replays the session's history first: those events carry `"replay": true` and rebuild
 the transcript, so `read` shows the whole conversation. The session id survives a server restart in the lost
-terminal's `shed get`. `shed model` (the `acp.model` method) sets the agent's `model` config option
+terminal's `shed get`; a running ACP terminal itself survives one, its `read` and state up to date. `shed model` (the `acp.model` method) sets the agent's `model` config option
 (`session/set_config_option`; the SDK shed uses has no `session/set_model`).
 
 ### Lane states

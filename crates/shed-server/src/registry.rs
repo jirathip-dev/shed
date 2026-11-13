@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -281,12 +282,41 @@ fn spawn(
     name: &str,
     idle_after: Option<u64>,
     history: &History,
-    acp: &[(&str, &str)],
+    acp: Option<&[(&str, &str)]>,
 ) -> Result<Terminal, shed_core::Error> {
-    let env = [("SHED", name)].into_iter().chain(acp.iter().copied());
-    let term = Terminal::spawn_with(cmd, cwd, env, size, history)?;
+    let env = [("SHED", name)]
+        .into_iter()
+        .chain(acp.into_iter().flatten().copied());
+    let pair = acp.map(|_| UnixStream::pair());
+    let (ours, theirs) = pair.transpose()?.unzip();
+    let term = Terminal::spawn_with(cmd, cwd, env, size, history, theirs.map(Into::into))?;
+    if let Some(ours) = ours {
+        crate::acp::hand_over(ours, term.master()?, b"null")?;
+    }
     term.set_idle_after(idle_after.map(Duration::from_secs));
     Ok(term)
+}
+
+fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<Terminal> {
+    let lent = crate::acp::pty_socket(socket, &info.name);
+    let taken = UnixStream::connect(&lent).and_then(|bridge| {
+        bridge.set_read_timeout(Some(GRACE))?;
+        crate::acp::take_over(&bridge)
+    });
+    let Ok((master, said)) = taken else {
+        fs::remove_file(lent).ok();
+        return None;
+    };
+    let term = Terminal::adopt(master, info.pid?, &history(state, &info.name)).ok()?;
+    term.set_idle_after(info.idle_after.map(Duration::from_secs));
+    if let Ok(Some(r)) = serde_json::from_slice::<Option<Reported>>(&said) {
+        term.set_report(Report {
+            state: r.state,
+            note: r.note,
+            ..Report::default()
+        });
+    }
+    Some(term)
 }
 
 fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalInfo>) {
@@ -336,7 +366,12 @@ impl Registry {
             },
             Err(e) => return Err(e),
         };
-        end_left_over(path, file.terminals.iter().map(|s| &s.info));
+        let mut adopted: BTreeMap<_, _> = (file.terminals.iter())
+            .filter(|s| s.info.state == State::Running && s.info.acp.is_some())
+            .filter_map(|s| Some((s.info.name.clone(), adopt(socket, path, &s.info)?)))
+            .collect();
+        let infos = file.terminals.iter().map(|s| &s.info);
+        end_left_over(path, infos.filter(|i| !adopted.contains_key(&i.name)));
         let shell = crate::config::var("SHELL").unwrap_or_else(|| "/bin/sh".to_owned());
         let mut entries = BTreeMap::new();
         let mut events = Events::default();
@@ -346,8 +381,8 @@ impl Registry {
             exited_at,
         } in file.terminals
         {
-            let mut term = None;
-            if info.state == State::Running {
+            let mut term = adopted.remove(&info.name).map(Arc::new);
+            if info.state == State::Running && term.is_none() {
                 if info.keep {
                     let cmd = vec![shell.clone()];
                     let history = history(path, &info.name);
@@ -358,12 +393,13 @@ impl Registry {
                         &info.name,
                         info.idle_after,
                         &history,
-                        &[],
+                        None,
                     )
                     .ok()
                     .map(Arc::new);
                     if term.is_some() {
                         info.cmd = cmd;
+                        events.emit(&info, EventKind::Started);
                     }
                 }
                 if term.is_none() {
@@ -371,9 +407,6 @@ impl Registry {
                 }
             }
             info.pid = term.as_ref().map(|t| t.pid());
-            if term.is_some() {
-                events.emit(&info, EventKind::Started);
-            }
             let exited_at = (info.state == State::Exited).then(|| exited_at.unwrap_or(now));
             let name = info.name.clone();
             entries.insert(
@@ -673,6 +706,17 @@ impl Registry {
         Stream::Events(self.events.subscribe(p))
     }
 
+    pub(crate) fn release_lanes(&self) -> Vec<Arc<Terminal>> {
+        let (lanes, rest): (Vec<_>, Vec<_>) = (self.entries.values())
+            .filter(|e| e.info.state == State::Running)
+            .filter_map(|e| Some((e.info.acp.is_some(), e.term.clone()?)))
+            .partition(|(lane, _)| *lane);
+        for (_, term) in &lanes {
+            term.release();
+        }
+        rest.into_iter().map(|(_, term)| term).collect()
+    }
+
     pub(crate) fn running(&self) -> Vec<(String, Arc<Terminal>)> {
         self.entries
             .values()
@@ -752,7 +796,7 @@ impl Registry {
             &name,
             p.idle_after,
             &history,
-            &acp,
+            p.acp.is_some().then_some(acp.as_slice()),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
         let info = TerminalInfo {
@@ -1006,7 +1050,8 @@ impl Registry {
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
         let transcript = Some(crate::acp::transcript(&self.path, name));
-        let files = [history(&self.path, name).log, transcript];
+        let lent = Some(crate::acp::pty_socket(&self.socket, name));
+        let files = [history(&self.path, name).log, transcript, lent];
         Ok((self.saved(entry.info), move || {
             for file in files.into_iter().flatten() {
                 fs::remove_file(file).ok();

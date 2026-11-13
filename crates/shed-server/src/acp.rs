@@ -12,11 +12,14 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write as _};
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+use std::io::{self, BufWriter, IoSlice, IoSliceMut, Write as _};
+use std::mem::MaybeUninit;
+use std::os::fd::{AsFd, OwnedFd};
+use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use agent_client_protocol::schema::ProtocolVersion;
@@ -33,6 +36,11 @@ use agent_client_protocol::v1::schema::{
 use agent_client_protocol::v1::{ConnectionTo, Responder};
 use agent_client_protocol::{Agent, ErrorCode, JsonRpcMessage as _, Lines, UntypedMessage};
 use futures::{sink, stream};
+use rustix::io::{FdFlags, fcntl_setfd};
+use rustix::net::{
+    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
+    SendAncillaryMessage, SendFlags, recvmsg, sendmsg,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
@@ -74,6 +82,59 @@ pub enum Input {
 #[must_use]
 pub fn frame(input: &Input) -> String {
     format!("\x1e{}\n", serde_json::to_string(input).unwrap_or_default())
+}
+
+/// Where the bridge of terminal `name` lends its PTY's master to a server on `socket` that starts again.
+#[must_use]
+pub fn pty_socket(socket: &Path, name: &str) -> PathBuf {
+    socket.with_file_name(format!("pty-{name}.sock"))
+}
+
+pub(crate) fn hand_over(to: impl AsFd, master: impl AsFd, said: &[u8]) -> io::Result<()> {
+    let fds = [master.as_fd()];
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut ancillary = SendAncillaryBuffer::new(&mut space);
+    ancillary.push(SendAncillaryMessage::ScmRights(&fds));
+    sendmsg(
+        to,
+        &[IoSlice::new(said)],
+        &mut ancillary,
+        SendFlags::empty(),
+    )?;
+    Ok(())
+}
+
+pub(crate) fn take_over(from: impl AsFd) -> io::Result<(OwnedFd, Vec<u8>)> {
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut ancillary = RecvAncillaryBuffer::new(&mut space);
+    let mut said = vec![0; 4096];
+    let got = recvmsg(
+        from,
+        &mut [IoSliceMut::new(&mut said)],
+        &mut ancillary,
+        RecvFlags::empty(),
+    )?;
+    said.truncate(got.bytes);
+    let fd = ancillary.drain().find_map(|m| match m {
+        RecvAncillaryMessage::ScmRights(mut fds) => fds.next(),
+        _ => None,
+    });
+    let fd = fd.ok_or(io::ErrorKind::InvalidData)?;
+    fcntl_setfd(&fd, FdFlags::CLOEXEC)?;
+    Ok((fd, said))
+}
+
+fn lend(master: OwnedFd, at: &Path, reported: Arc<Mutex<Option<Reported>>>) -> io::Result<()> {
+    fs::remove_file(at).ok();
+    let listener = UnixListener::bind(at)?;
+    fs::set_permissions(at, fs::Permissions::from_mode(0o600))?;
+    std::thread::spawn(move || {
+        for server in listener.incoming().flatten() {
+            let said = serde_json::to_vec(&*crate::lock(&reported)).unwrap_or_default();
+            hand_over(&server, &master, &said).ok();
+        }
+    });
+    Ok(())
 }
 
 /// The transcript of terminal `name` of the server whose state file is `state`.
@@ -871,6 +932,8 @@ async fn drive(
 
 struct Writer {
     transcript: BufWriter<File>,
+    tty: Option<File>,
+    reported: Arc<Mutex<Option<Reported>>>,
     server: Option<tokio::net::UnixStream>,
     socket: PathBuf,
     name: String,
@@ -904,6 +967,7 @@ impl Writer {
                         crate::notification(Method::Emit, &params)
                     }
                     Out::State(report) => {
+                        *crate::lock(&self.reported) = Some(report.clone());
                         let params = StateParams { name, report };
                         crate::notification(Method::State, &params)
                     }
@@ -917,13 +981,10 @@ impl Writer {
             }
             self.transcript.flush().ok();
             self.send(&calls).await;
-            if redraw {
+            if let Some(tty) = self.tty.as_mut().filter(|_| redraw) {
                 let (cols, rows, color) = stdout_style();
                 let lines = self.preview.draw(cols, color, rows - 1).join("\r\n");
-                let mut stdout = io::stdout().lock();
-                write!(stdout, "\x1b[H\x1b[2J{lines}\r\n")
-                    .and_then(|()| stdout.flush())
-                    .ok();
+                write!(tty, "\x1b[H\x1b[2J{lines}\r\n").ok();
             }
         }
     }
@@ -1203,9 +1264,19 @@ fn run(
     let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
     let mcp = mcp_servers(&mcp).map_err(Error::Acp)?;
     let meta = crate::config::var("SHED_ACP_META").and_then(|m| serde_json::from_str(&m).ok());
+    let reported = Arc::default();
+    let lent = pty_socket(socket, name);
+    if let Ok((master, _)) = take_over(io::stderr()) {
+        rustix::stdio::dup2_stderr(io::stdin()).map_err(io::Error::from)?;
+        lend(master, &lent, Arc::clone(&reported))?;
+    }
+    let tty = File::options().write(true).open("/dev/tty").ok();
+    let tty = tty.filter(|t| rustix::io::ioctl_fionbio(t, true).is_ok());
     let (out, outs) = unbounded_channel();
     let writer = Writer {
         transcript: BufWriter::new(open_transcript(state, name)?),
+        tty,
+        reported,
         server: None,
         socket: socket.to_owned(),
         name: name.to_owned(),
@@ -1293,6 +1364,7 @@ fn run(
     });
     runtime.block_on(writer).ok();
     runtime.shutdown_background();
+    fs::remove_file(lent).ok();
     result
 }
 
