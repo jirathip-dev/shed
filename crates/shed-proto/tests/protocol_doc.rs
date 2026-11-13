@@ -261,6 +261,15 @@ fn read_example() -> (Value, Value) {
     )
 }
 
+fn send_example() -> (Value, Value) {
+    let params = SendParams {
+        name: "build".into(),
+        text: "make lint".into(),
+        ..SendParams::default()
+    };
+    (to_value(params).unwrap(), json!({}))
+}
+
 fn example(method: Method) -> (Value, Value) {
     let running = || to_value(info(State::Running)).unwrap();
     let exited = || to_value(info(State::Exited)).unwrap();
@@ -280,14 +289,7 @@ fn example(method: Method) -> (Value, Value) {
         ),
         Method::Get | Method::Attach => (target(), running()),
         Method::Read => read_example(),
-        Method::Send => (
-            to_value(SendParams {
-                name: "build".into(),
-                text: "make lint\n".into(),
-            })
-            .unwrap(),
-            json!({}),
-        ),
+        Method::Send => send_example(),
         Method::Keys => (
             to_value(KeysParams {
                 name: "build".into(),

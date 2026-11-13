@@ -9,7 +9,6 @@ $
 $ shed --json read shell --lines 1
 {"text":"$"}
 $ shed send shell exit
-$ shed keys shell enter
 $ shed ls
 NAME   STATE   EXIT  PID  RSS  CPU  LABELS             CMD
 shell  exited  0     -    -    -    issue=7,role=impl  sh

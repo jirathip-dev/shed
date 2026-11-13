@@ -74,8 +74,9 @@ fn forward_input(mut conn: &UnixStream, name: &str) {
             let params = SendParams {
                 name: name.to_owned(),
                 text: String::from_utf8_lossy(typed).into_owned(),
+                ..SendParams::default()
             };
-            let sent = notification(Method::Send, &params).map(|line| conn.write_all(&line));
+            let sent = notification(Method::Input, &params).map(|line| conn.write_all(&line));
             if !matches!(sent, Ok(Ok(()))) {
                 break;
             }
