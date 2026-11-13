@@ -1041,13 +1041,12 @@ fn start(
     Ok((child, stdin, stdout, stderr))
 }
 
-fn stop(mut child: Child) -> Result<(), Error> {
+fn stop(mut child: Child) {
     if let Some(pid) = child.id().and_then(|p| i32::try_from(p).ok()) {
         let table = shed_core::proctree::system();
         let reap = || drop(child.try_wait());
-        shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap)?;
+        shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap);
     }
-    Ok(())
 }
 
 fn oneshot<T>(
@@ -1065,7 +1064,7 @@ fn oneshot<T>(
             act(cx, can).await
         });
         let done = tokio::time::timeout(Duration::from_secs(30), talk).await;
-        stop(child)?;
+        stop(child);
         done.map_err(|_| Error::Acp("the agent did not answer within 30 s".to_owned()))?
     })
 }
@@ -1192,7 +1191,7 @@ fn run(
             let Some(mut s) = slept else {
                 return Ok(child.wait().await?.code().unwrap_or(1));
             };
-            stop(child)?;
+            stop(child);
             s.state("hibernated", None);
             let Some(input) = inputs.recv().await else {
                 return Ok(0);

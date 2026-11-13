@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 use std::io;
 use std::time::Duration;
 
-use rustix::process::{Pid, Signal, kill_process, kill_process_group};
+use rustix::process::{Pid, Signal, kill_process, kill_process_group, test_kill_process_group};
 
 /// One live process, as the process table reports it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -201,36 +201,37 @@ fn signal_tree(root: i32, pids: &BTreeSet<i32>, sig: Signal) {
     }
 }
 
+fn live(table: &impl ProcessTable, root: i32, known: &BTreeSet<i32>) -> BTreeSet<i32> {
+    match table.list() {
+        Ok(procs) => tree(&procs, root, known).iter().map(|p| p.pid).collect(),
+        Err(_) => Pid::from_raw(root)
+            .filter(|&group| test_kill_process_group(group).is_ok())
+            .map(|_| root)
+            .into_iter()
+            .collect(),
+    }
+}
+
 /// Ends the tree led by `root`: SIGTERM to every process, then SIGKILL to what is left after `grace`.
 ///
 /// `reap` is called while waiting so the caller can collect its exited child; the call returns once
-/// no process of the tree is alive, or a second after SIGKILL.
-///
-/// # Errors
-/// When the process table cannot be read.
-pub fn kill_tree(
-    table: &impl ProcessTable,
-    root: i32,
-    grace: Duration,
-    mut reap: impl FnMut(),
-) -> io::Result<()> {
-    let mut known: BTreeSet<i32> = tree(&table.list()?, root, &BTreeSet::new())
-        .iter()
-        .map(|p| p.pid)
-        .collect();
+/// no process of the tree is alive, or a second after SIGKILL. While the process table cannot be read
+/// (out of file descriptors), only the process group is signalled and watched.
+pub fn kill_tree(table: &impl ProcessTable, root: i32, grace: Duration, mut reap: impl FnMut()) {
+    let mut known = live(table, root, &BTreeSet::new());
     signal_tree(root, &known, Signal::TERM);
     let mut killed = false;
     let mut deadline = crate::clock::now() + grace;
     loop {
         reap();
-        let live = tree(&table.list()?, root, &known);
+        let live = live(table, root, &known);
         if live.is_empty() {
-            return Ok(());
+            return;
         }
-        known.extend(live.iter().map(|p| p.pid));
+        known.extend(live);
         if crate::clock::now() >= deadline {
             if killed {
-                return Ok(());
+                return;
             }
             signal_tree(root, &known, Signal::KILL);
             killed = true;

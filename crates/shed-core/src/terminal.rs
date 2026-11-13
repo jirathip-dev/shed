@@ -361,9 +361,9 @@ impl Terminal {
     /// Ends the whole process tree: SIGTERM, then SIGKILL after `grace`; returns the program's exit status.
     ///
     /// # Errors
-    /// [`Error::Io`] when the process table or the exit status cannot be read.
+    /// [`Error::Io`] when the exit status cannot be read.
     pub fn kill(&self, grace: Duration) -> Result<ExitStatus, Error> {
-        proctree::kill_tree(&proctree::system(), self.pid, grace, || {})?;
+        proctree::kill_tree(&proctree::system(), self.pid, grace, || {});
         loop {
             if let Some(status) = self.try_wait()? {
                 return Ok(status);

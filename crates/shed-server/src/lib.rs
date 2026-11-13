@@ -431,8 +431,9 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
         if line.trim().is_empty() {
             continue;
         }
-        let response = respond(&registry, &mut session, &line).await;
-        let flushed = lock(&registry).saver.flushed();
+        let (response, changed) =
+            registry::answering(respond(&registry, &mut session, &line)).await;
+        let flushed = lock(&registry).saver.flushed_to(changed);
         flushed.await;
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();

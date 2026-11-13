@@ -1,4 +1,5 @@
 use shed_core::runner::ExitStatus;
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -129,16 +130,33 @@ impl Saver {
         self.dirty.notify_one();
         if urgent {
             self.wanted = self.changes;
+            CHANGED.try_with(|c| c.set(self.changes)).ok();
             self.urgent.notify_one();
         }
     }
 
     pub(crate) fn flushed(&self) -> impl Future<Output = ()> + Send + use<> {
-        let (mut written, wanted) = (self.written.subscribe(), self.wanted);
+        self.flushed_to(self.wanted)
+    }
+
+    pub(crate) fn flushed_to(&self, wanted: u64) -> impl Future<Output = ()> + Send + use<> {
+        let mut written = self.written.subscribe();
         async move {
             written.wait_for(|w| *w >= wanted).await.ok();
         }
     }
+}
+
+tokio::task_local! {
+    static CHANGED: Cell<u64>;
+}
+
+pub(crate) async fn answering<T>(request: impl Future<Output = T>) -> (T, u64) {
+    CHANGED
+        .scope(Cell::new(0), async {
+            (request.await, CHANGED.with(Cell::get))
+        })
+        .await
 }
 
 pub(crate) async fn keep_saved(registry: Arc<Mutex<Registry>>) {
@@ -276,7 +294,8 @@ fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalI
             continue;
         };
         let left = proctree::tree(&procs, pid, &BTreeSet::new()).len();
-        if left > 0 && proctree::kill_tree(&proctree::system(), pid, GRACE, || {}).is_ok() {
+        if left > 0 {
+            proctree::kill_tree(&proctree::system(), pid, GRACE, || {});
             let name = &info.name;
             writeln!(
                 io::stderr(),
