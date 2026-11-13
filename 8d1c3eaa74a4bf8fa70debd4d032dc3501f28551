@@ -1,0 +1,4 @@
+Decided: merged origin/staging (#81); in Terminal::kill took staging's version and dropped this branch's kill_group fallback.
+Because: crates/shed-core/src/proctree.rs:204
+Rejected: keeping both fallbacks — staging's kill_tree no longer returns an error, so the branch's fallback could never run.
+Owner: this round only picks up the latest staging changes; staging's own fix now covers killing a session when the server is out of open files.
