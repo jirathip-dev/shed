@@ -1,0 +1,13 @@
+Decided: reader-to-feeder and feeder-to-log queues hold 256 chunks, not 16; 16 KiB of slack let a log rotation stall back up into cat
+Because: crates/shed-core/src/terminal.rs:358
+Decided: the log writer merges all queued chunks into one write, like the feeder
+Because: crates/shed-core/src/terminal.rs:367
+Decided: a print at the end of a row pushes the cell; history copies a plain glyph directly
+Because: crates/shed-core/src/screen.rs:529
+Rejected: alacritty_terminal behind a trait — the VT parse is 1-2 G of ~10 G instructions per 100 MiB; the rest is shed's grid
+Rejected: a higher PTY line speed — macOS still hands out ~1 KiB per read at 38400 and 230400
+Rejected: an ASCII fast path at the top of print — 7% fewer instructions on plain, 10% more on redraw
+Check: AC3 on this shared M6 (load 7-9): plain 722 ms (139 MiB/s), colour 826 ms (121 MiB/s), single runs up to 172; load 4 gave 148/150 MiB/s
+Check: AC3 names the issue's M4; here the base runs 2.3-2.5x slower than its 1.05 s, and the head is 3.4x faster than base in the same runs
+Check: peak RSS 10-13 MB during a 100 MiB burst (limit 32 MB)
+Owner: big output bursts now drain about 3.4 times faster than before this work, close to but not reliably above 150 MB/s on the busy build host
