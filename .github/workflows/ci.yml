@@ -96,24 +96,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: "TEMP #112: macOS pty diagnostics, reliability 10 runs"
-        if: matrix.os == 'macos'
-        continue-on-error: true
-        run: |
-          sysctl kern.tty.ptmx_max
-          ptys() { echo "ptys: $(ls /dev/ttys* 2>/dev/null | wc -l) open-ptmx: $(sudo lsof -nP /dev/ptmx 2>/dev/null | wc -l)"; }
-          ptys
-          cargo test --locked -p shed --test reliability --no-run
-          for i in $(seq 10); do
-            ptys
-            cargo test --locked -p shed --test reliability 2>&1 | grep -E "FAILED|panicked|spawn s|test result"
-            echo "run $i exit ${PIPESTATUS[0]}"
-          done
-          ptys
-          for i in $(seq 5); do
-            cargo test --locked -p shed --test reliability serve_raises 2>&1 | grep -E "spawn s|test result"
-            echo "alone $i exit ${PIPESTATUS[0]}"
-          done
       - name: test
         run: cargo test --workspace --locked
 
