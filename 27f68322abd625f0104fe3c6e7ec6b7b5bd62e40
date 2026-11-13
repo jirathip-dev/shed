@@ -1,0 +1,4 @@
+Decided: merge origin/staging (bf677db) into issue-100; in protocol_doc.rs keep this branch's peer() and staging's send_example() side by side
+Because: crates/shed-proto/tests/protocol_doc.rs:264
+Rejected: none
+Owner: merge-only round; no behaviour changed beyond staging's #83 work joining this branch
