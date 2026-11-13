@@ -59,7 +59,10 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: 1.99.1
     steps:
+      # Two commits: on a pull request the merge commit and its base, for arch-check's --base.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
       - uses: taiki-e/install-action@v2
         with:
@@ -73,7 +76,9 @@ jobs:
         run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging drover
       - name: actionlint (.github/workflows)
         run: just actionlint
-      - name: arch-check (.herdsman/arch.toml)
+      - name: arch-check (.herdsman/arch.toml; generated files rerun `just generate`)
+        env:
+          ARCH_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: just arch
       - name: lesson checks (active fail, shadow report)
         run: just lessons
