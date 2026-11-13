@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `shed setup [<agent>…] [--dry-run] [--remove]` adds hooks that report an installed agent's state through
+  `shed state` (a no-op outside shed) to its config file, keeping every other entry; `shed doctor` lists per
+  agent whether they are in. Claude Code's are in `~/.claude/settings.json`; see `docs/hooks.md`.
 - Parent and child terminals: `shed run` inside a terminal (`$SHED`) records it as the child's `parent`
   (`--parent T` sets it, `--no-parent` clears it); `get`, `ls --json` and every event show it, and
   `ls --parent T` lists a terminal's children. When a parent's program ends or is killed its children are

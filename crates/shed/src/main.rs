@@ -77,10 +77,7 @@ enum Command {
         #[arg(long, requires = "events")]
         before: Option<u64>,
     },
-    Send {
-        name: String,
-        text: String,
-    },
+    Send(SendArgs),
     Keys {
         name: String,
         #[arg(required = true)]
@@ -159,6 +156,16 @@ enum Command {
     },
     Uninstall,
     Doctor,
+    Setup(SetupArgs),
+}
+
+#[derive(Args)]
+struct SetupArgs {
+    agents: Vec<String>,
+    #[arg(long)]
+    remove: bool,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 impl Command {
@@ -166,7 +173,7 @@ impl Command {
         match self {
             Self::Get { name }
             | Self::Read { name, .. }
-            | Self::Send { name, .. }
+            | Self::Send(SendArgs { name, .. })
             | Self::Keys { name, .. }
             | Self::Kill { name }
             | Self::Rm { name }
@@ -189,6 +196,9 @@ enum AgentsCommand {
         registry: String,
     },
     Rm {
+        id: String,
+    },
+    Sessions {
         id: String,
     },
 }
@@ -237,6 +247,7 @@ impl Server<'_> {
                 | Command::Install { .. }
                 | Command::Uninstall
                 | Command::Doctor
+                | Command::Setup(_)
         );
         if local && on.is_some() {
             bail!(
@@ -252,7 +263,7 @@ impl Server<'_> {
                 | Command::Ls { .. }
                 | Command::Get { .. }
                 | Command::Read { .. }
-                | Command::Send { .. }
+                | Command::Send(_)
                 | Command::Keys { .. }
                 | Command::Kill { .. }
                 | Command::Rm { .. }
@@ -358,6 +369,18 @@ struct RunArgs {
     size: Option<(u16, u16)>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
+}
+
+#[derive(Args)]
+struct SendArgs {
+    name: String,
+    text: String,
+    #[arg(long)]
+    no_enter: bool,
+    #[arg(long)]
+    no_paste: bool,
+    #[arg(long, value_name = "SECONDS")]
+    draft_wait: Option<u64>,
 }
 
 #[derive(Args)]
@@ -467,7 +490,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             };
             read(&server, json, &params)?;
         }
-        Command::Send { name, text } => send(&server, json, name, text)?,
+        Command::Send(args) => send(&server, json, args)?,
         Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
@@ -520,6 +543,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
         Command::Doctor => {}
+        Command::Setup(args) => setup(&args)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -530,7 +554,7 @@ fn ls(server: &Server, json: bool, params: &LsParams) -> anyhow::Result<()> {
         let prefix = server.name(String::new());
         list.retain(|t| t.name.starts_with(&prefix));
     }
-    print(json, &list, || table(&list))
+    print(json, &list, || table(&list, false))
 }
 
 fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow::Result<()> {
@@ -617,25 +641,28 @@ fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> 
     print(json, &read, || format!("{}{end}", read.text))
 }
 
-fn send(server: &Server, json: bool, name: String, text: String) -> anyhow::Result<()> {
+fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
+    let mut params = SendParams {
+        name: args.name,
+        text: args.text,
+        no_enter: args.no_enter,
+        no_paste: args.no_paste,
+        draft_wait: args.draft_wait,
+    };
     let mut client = server.connect(None)?;
+    let name = params.name.clone();
     let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
-    let text = if info.acp.is_some() {
+    if info.acp.is_some() {
         let report = Reported {
             state: "working".to_owned(),
             note: None,
             state_source: None,
         };
-        let params = StateParams {
-            name: name.clone(),
-            report,
-        };
-        let _: TerminalInfo = client.call(Method::State, &params)?;
-        acp::frame(&Input::Prompt(text))
-    } else {
-        text
-    };
-    let done: Value = client.call(Method::Send, &SendParams { name, text })?;
+        let state = StateParams { name, report };
+        let _: TerminalInfo = client.call(Method::State, &state)?;
+        params.text = acp::frame(&Input::Prompt(std::mem::take(&mut params.text)));
+    }
+    let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
 }
 
@@ -659,7 +686,12 @@ fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::R
         bail!("{name} is not an ACP terminal (shed run --acp)");
     }
     let text = acp::frame(input);
-    let done: Value = client.call(Method::Send, &SendParams { name, text })?;
+    let params = SendParams {
+        name,
+        text,
+        ..SendParams::default()
+    };
+    let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
 }
 
@@ -682,6 +714,18 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
             let agent = agents::rm(&paths.state, &id)?;
             print(json, &agent, || format!("removed {}", line(&agent)))
         }
+        Some(AgentsCommand::Sessions { id }) => {
+            let agents = agents::list(&paths.state)?;
+            let agent = agents.iter().find(|a| a.id == id);
+            let agent = agent.with_context(|| format!("ACP agent {id} is not installed"))?;
+            let here = std::env::current_dir().context("current directory")?;
+            let list = acp::sessions(&agent.cmd, &here)?;
+            print(json, &list, || {
+                let field = |s: &Value, k: &str| s[k].as_str().unwrap_or("-").to_owned();
+                let row = |s| ["sessionId", "updatedAt", "cwd", "title"].map(|k| field(s, k));
+                list.iter().map(|s| row(s).join("  ") + "\n").collect()
+            })
+        }
     }
 }
 
@@ -690,7 +734,7 @@ fn top(server: &Server, json: bool) -> anyhow::Result<()> {
         .connect(None)?
         .call(Method::Ls, &LsParams::default())?;
     list.sort_by_key(|t| std::cmp::Reverse(t.resources.map(|r| r.rss_mb)));
-    print(json, &list, || table(&list))
+    print(json, &list, || table(&list, true))
 }
 
 fn state(
@@ -715,6 +759,23 @@ fn state(
     };
     let info: TerminalInfo = server.connect(None)?.call(Method::State, &params)?;
     print(json, &info, String::new)
+}
+
+fn setup(a: &SetupArgs) -> anyhow::Result<()> {
+    let home = shed_server::config::var("HOME").context("HOME is not set")?;
+    let files = shed_server::hooks::setup(Path::new(&home), &a.agents, a.remove, a.dry_run)?;
+    if files.is_empty() {
+        bail!("no installed agent has hooks shed can set up");
+    }
+    for f in files {
+        let (agent, file) = (f.agent, f.file.display());
+        match (f.after, a.dry_run) {
+            (None, _) => out::line(format_args!("{agent}: {file} unchanged")),
+            (Some(t), true) => out::text(format_args!("{agent}: {file} would become:\n{t}")),
+            (Some(_), false) => out::line(format_args!("{agent}: {file} updated")),
+        }
+    }
+    Ok(())
 }
 
 fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode> {
@@ -1001,17 +1062,14 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     Ok(())
 }
 
-fn table(list: &[TerminalInfo]) -> String {
+fn table(list: &[TerminalInfo], tokens: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-    let mut rows = vec![
-        [
-            "NAME", "STATE", "EXIT", "PID", "RSS", "CPU", "LABELS", "CMD",
-        ]
-        .map(str::to_owned),
-    ];
+    let head = "NAME STATE EXIT PID RSS CPU TOKENS LABELS CMD".split(' ');
+    let mut rows = vec![head.map(str::to_owned).collect::<Vec<_>>()];
     for t in list {
         let labels: Vec<String> = t.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        rows.push([
+        let usage = t.session.as_ref().and_then(|s| s.usage.as_ref());
+        rows.push(vec![
             t.name.clone(),
             match t.state {
                 State::Running => "running",
@@ -1022,6 +1080,7 @@ fn table(list: &[TerminalInfo]) -> String {
             dash(t.pid.map(|v| v.to_string())),
             dash(t.resources.map(|r| format!("{}M", r.rss_mb))),
             dash(t.resources.map(|r| format!("{}%", r.cpu_pct))),
+            dash(usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000))),
             if labels.is_empty() {
                 "-".to_owned()
             } else {
@@ -1030,7 +1089,10 @@ fn table(list: &[TerminalInfo]) -> String {
             t.cmd.join(" "),
         ]);
     }
-    let mut widths = [0; 8];
+    for row in rows.iter_mut().filter(|_| !tokens) {
+        row.remove(6);
+    }
+    let mut widths = vec![0; rows.first().map_or(0, Vec::len)];
     for row in &rows {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = cell.chars().count().max(*w);
@@ -1040,7 +1102,7 @@ fn table(list: &[TerminalInfo]) -> String {
     for row in &rows {
         let cells: Vec<String> = row
             .iter()
-            .zip(widths)
+            .zip(&widths)
             .map(|(c, w)| format!("{c:<w$}"))
             .collect();
         writeln!(out, "{}", cells.join("  ").trim_end()).ok();

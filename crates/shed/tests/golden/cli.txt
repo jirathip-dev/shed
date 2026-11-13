@@ -9,7 +9,6 @@ $
 $ shed --json read shell --lines 1
 {"text":"$"}
 $ shed send shell exit
-$ shed keys shell enter
 $ shed ls
 NAME   STATE   EXIT  PID  RSS  CPU  LABELS             CMD
 shell  exited  0     -    -    -    issue=7,role=impl  sh
@@ -43,9 +42,9 @@ $ shed get shell
 $ shed --json get shell
 {"name":"shell","labels":{"issue":"7","role":"impl"},"cwd":"$DIR","cmd":["sh"],"keep":false,"state":"exited","exit":0,"pid":null}
 $ shed top
-NAME   STATE   EXIT  PID  RSS  CPU  LABELS             CMD
-rev    exited  143   -    -    -    role=rev           sleep 100
-shell  exited  0     -    -    -    issue=7,role=impl  sh
+NAME   STATE   EXIT  PID  RSS  CPU  TOKENS  LABELS             CMD
+rev    exited  143   -    -    -    -       role=rev           sleep 100
+shell  exited  0     -    -    -    -       issue=7,role=impl  sh
 $ shed rm shell
 shell removed
 $ shed --json rm rev

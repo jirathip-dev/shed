@@ -24,13 +24,12 @@ use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::events::{Events, Subscriber};
+use crate::input::{DRAFT_WAIT, Draft, Input};
 use crate::stats::Stats;
 
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
 const FILE_VERSION: u32 = 1;
 const SAVE_EVERY: Duration = Duration::from_millis(500);
-
-pub(crate) type Input = (Arc<Terminal>, Vec<u8>);
 
 pub(crate) enum Stream {
     Output(Vec<u8>, UnboundedReceiver<Arc<[u8]>>),
@@ -73,6 +72,7 @@ struct Saved {
 struct Entry {
     info: TerminalInfo,
     term: Option<Arc<Terminal>>,
+    draft: Arc<Draft>,
     exited_at: Option<u64>,
     killing: bool,
     resources: Option<Resources>,
@@ -86,6 +86,7 @@ impl Entry {
         Self {
             info,
             term,
+            draft: Arc::default(),
             exited_at: None,
             killing: false,
             resources: None,
@@ -814,10 +815,34 @@ impl Registry {
     }
 
     pub(crate) fn send(&self, p: SendParams) -> Result<Input, RpcError> {
-        Ok((Arc::clone(self.live(&p.name)?), p.text.into_bytes()))
+        let term = Arc::clone(self.live(&p.name)?);
+        let entry = self.entry(&p.name)?;
+        let mut bytes = p.text.into_bytes();
+        if entry.info.acp.is_some() {
+            return Ok(Input::Now(term, bytes));
+        }
+        if !p.no_paste && term.bracketed_paste() {
+            bytes = [b"\x1b[200~".as_slice(), &bytes, b"\x1b[201~"].concat();
+        }
+        if !p.no_enter {
+            bytes.push(b'\r');
+        }
+        Ok(Input::Sent {
+            name: p.name,
+            term,
+            bytes,
+            draft: Arc::clone(&entry.draft),
+            wait: p.draft_wait.unwrap_or(DRAFT_WAIT),
+        })
     }
 
-    pub(crate) fn keys(&self, p: &KeysParams) -> Result<Input, RpcError> {
+    pub(crate) fn typed(&self, p: SendParams) -> Result<Input, RpcError> {
+        let term = Arc::clone(self.live(&p.name)?);
+        let draft = Arc::clone(&self.entry(&p.name)?.draft);
+        Ok(Input::Typed(term, p.text.into_bytes(), draft))
+    }
+
+    pub(crate) fn keys(&self, p: &KeysParams, person: bool) -> Result<Input, RpcError> {
         let term = self.live(&p.name)?;
         let bytes = p
             .keys
@@ -825,7 +850,12 @@ impl Registry {
             .map(|k| shed_core::keys::encode(k))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))?;
-        Ok((Arc::clone(term), bytes.concat()))
+        let (term, bytes) = (Arc::clone(term), bytes.concat());
+        Ok(if person {
+            Input::Typed(term, bytes, Arc::clone(&self.entry(&p.name)?.draft))
+        } else {
+            Input::Now(term, bytes)
+        })
     }
 
     pub(crate) fn resize(&self, p: &ResizeParams) -> Result<(), RpcError> {
@@ -877,7 +907,14 @@ impl Registry {
         let entry = self.entries.get_mut(&p.name);
         let info = &mut entry.ok_or_else(|| not_found(&p.name))?.info;
         let session = match &p.kind {
-            EventKind::Session(s) => info.session.replace(s.clone()).is_none_or(|old| old != *s),
+            EventKind::Session(s) => info
+                .session
+                .replace((**s).clone())
+                .is_none_or(|old| old != **s),
+            EventKind::Usage(u) => {
+                info.session.get_or_insert_default().usage = Some(u.clone());
+                false
+            }
             _ => false,
         };
         self.events.emit_as(info, p.kind, p.replay);
@@ -892,7 +929,10 @@ impl Registry {
         let acp = self.entry(&p.name)?.info.acp.as_ref();
         acp.ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, why))?;
         let text = crate::acp::frame(&crate::acp::Input::Model(p.model));
-        self.send(SendParams { name: p.name, text })
+        Ok(Input::Now(
+            Arc::clone(self.live(&p.name)?),
+            text.into_bytes(),
+        ))
     }
 
     pub(crate) fn to_wait(

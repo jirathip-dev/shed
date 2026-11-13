@@ -196,6 +196,12 @@ impl Terminal {
         self.watch.borrow().changes
     }
 
+    /// Whether the program has turned bracketed paste on.
+    #[must_use]
+    pub fn bracketed_paste(&self) -> bool {
+        lock(&self.screen).bracketed_paste()
+    }
+
     /// The last `n` lines of scrollback and screen as plain text.
     #[must_use]
     pub fn history(&self, n: usize) -> String {
