@@ -1,0 +1,9 @@
+Decided: no code change for the macOS lock.rs failure; merged staging and re-ran CI on the new head.
+Because: crates/shed-server/src/lib.rs:211
+Rejected: raising the 100 ms ls limit in lock.rs — the test is not this branch's, and the same check flaked on staging run 43351277451.
+Check: ls holds the registry lock only for refresh and ls (crates/shed-server/src/lib.rs:529); kill runs off-lock in a blocking thread.
+Decided: heartbeats are opt-in per connection; the ACP bridge writer and machine links opt in.
+Because: "A heartbeat every 15 s in both directions; a peer that misses 2 is dropped."
+Decided: a subscriber more than 4,096 events behind is closed with a `lagged` line; a `since` older than the ring gets a `reset` line first.
+Because: "A subscriber more than N events behind is dropped with a `lagged` notice, and it resumes with `since` or gets a reset."
+Owner: slow or silent clients of shed serve are cut off instead of filling memory; this round only picks up staging and re-runs a flaky timing check.
