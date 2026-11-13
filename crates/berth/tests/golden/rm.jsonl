@@ -1,2 +1,0 @@
-{"id":15,"jsonrpc":"2.0","method":"rm","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":15,"result":{"cmd":["sh","-c","printf 'hello\\n'; exec sleep 100"],"cwd":"$DIR","exit":143,"keep":false,"labels":{"issue":"7","role":"impl"},"name":"build","pid":null,"reported":{"note":"step 1","state":"working"},"state":"exited"}}

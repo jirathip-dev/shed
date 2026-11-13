@@ -1,0 +1,4 @@
+{"jsonrpc":"2.0","id":17,"method":"wait","params":{"name":"build","until":["working"],"timeout":10}}
+{"jsonrpc":"2.0","id":17,"result":{"outcome":"matched","terminal":{"name":"build","labels":{"issue":"7","role":"impl"},"cwd":"$DIR","cmd":["sh","-c","printf 'hello\\n'; exec sleep 100"],"keep":false,"state":"running","exit":null,"pid":0,"reported":{"state":"working","note":"step 1"}}}}
+{"jsonrpc":"2.0","id":18,"method":"wait","params":{"name":"build","until":["done"],"timeout":0.1}}
+{"jsonrpc":"2.0","id":18,"result":{"outcome":"timeout","terminal":{"name":"build","labels":{"issue":"7","role":"impl"},"cwd":"$DIR","cmd":["sh","-c","printf 'hello\\n'; exec sleep 100"],"keep":false,"state":"running","exit":null,"pid":0,"reported":{"state":"working","note":"step 1"}}}}

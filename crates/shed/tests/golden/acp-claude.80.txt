@@ -1,0 +1,20 @@
+› [1mreplay[0m
+[x] Read the failing test
+[~] Fix the parser
+[ ] Run the tests
+[2m✓ read Read /home/user/project/src/parse.rs[0m
+[2m✓ execute `cargo test -p parser \[0m
+? [33m`cargo test -p parser \: allow_always (Always Allow) | allow (Allow) | reject[0m
+  [33m(Reject)[0m
+[2mapproved allow[0m
+[2m✗ search grep "fn tokenize" /home/user/project/src[0m
+[1mFixed[0m
+
+The parser now:
+  • skips [36m\r[39m before [36m\n[39m, which the Windows fixtures carry on every line of
+    the input file
+  • keeps blank lines
+
+    [2mrust[0m
+    [2mlet line = line.trim_end_matches('\r');[0m
+All 12 tests pass.

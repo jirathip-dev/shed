@@ -7,20 +7,25 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/jirathip-dev/berth"
+repository = "https://github.com/jirathip-dev/shed"
 publish = false
 
 [workspace.dependencies]
-berth-proto = { path = "crates/berth-proto" }
-berth-core = { path = "crates/berth-core" }
-berth-server = { path = "crates/berth-server" }
+shed-proto = { path = "crates/shed-proto" }
+shed-core = { path = "crates/shed-core" }
+shed-server = { path = "crates/shed-server" }
+agent-client-protocol = "=5.0.0"
 anyhow = "=1.0.104"
 clap = { version = "=4.6.7", features = ["derive"] }
+futures = { version = "=0.3.34", default-features = false, features = ["std"] }
 pty-process = "=0.5.4"
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
+serde_json = { version = "=1.0.154", features = ["preserve_order", "raw_value"] }
+schemars = "=1.2.3"
 rustix = { version = "=1.1.6", features = ["param", "process"] }
 thiserror = "=2.0.21"
+tokio = { version = "=1.54.1", default-features = false }
+unicode-width = { version = "=0.2.3", default-features = false }
 vte = { version = "=0.15.0", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
@@ -29,4 +34,20 @@ missing_docs = "warn"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
-allow_attributes_without_reason = "warn"
+allow_attributes_without_reason = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+indexing_slicing = "deny"
+as_conversions = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+let_underscore_must_use = "deny"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true

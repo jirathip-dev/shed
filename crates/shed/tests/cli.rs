@@ -1,0 +1,965 @@
+//! The CLI end to end, against a real server.
+//!
+//! The human and JSON output is checked against `tests/golden/cli.txt` (the temp dir and pids
+//! normalised). Regenerate with `SHED_BLESS=1 cargo test -p shed`.
+#![cfg(test)]
+
+mod common;
+
+use std::fmt::Write as _;
+use std::io::{BufRead as _, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
+
+use common::{Server, eventually, temp_dir};
+use serde_json::{Value, json};
+use shed_core::{Size, Terminal};
+use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
+
+const SHED: &str = env!("CARGO_BIN_EXE_shed");
+
+fn shed(args: &[&str]) -> String {
+    let out = Command::new(SHED).args(args).output().expect("shed runs");
+    assert!(out.status.success(), "shed {args:?} failed: {out:?}");
+    String::from_utf8(out.stdout).expect("utf-8 stdout")
+}
+
+fn shed_in(dir: &Path, args: &[&str]) -> Output {
+    Command::new(SHED)
+        .arg("--dir")
+        .arg(dir)
+        .args(args)
+        .output()
+        .expect("shed runs")
+}
+
+fn stdout(out: &Output) -> String {
+    assert!(out.status.success(), "shed failed: {out:?}");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+fn zero_pids(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(at) = rest.find("\"pid\":") {
+        let (head, tail) = rest.split_at(at + 6);
+        out.push_str(head);
+        let spaces = tail.len() - tail.trim_start_matches(' ').len();
+        let (gap, tail) = tail.split_at(spaces);
+        out.push_str(gap);
+        let digits = tail.len() - tail.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        out.push_str(if digits > 0 { "0" } else { "" });
+        rest = &tail[digits..];
+    }
+    out + rest
+}
+
+struct Transcript {
+    dir: PathBuf,
+    text: String,
+    golden: &'static str,
+}
+
+impl Transcript {
+    fn run(&mut self, args: &[&str]) -> Output {
+        let out = shed_in(&self.dir, args);
+        let dir = self.dir.to_str().expect("utf-8 dir");
+        let mut text = format!(
+            "$ shed {}\n{}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stdout)
+        );
+        if !out.status.success() {
+            let code = out.status.code().unwrap_or(-1);
+            let err = String::from_utf8_lossy(&out.stderr);
+            let err = if err.is_empty() { "\n".into() } else { err };
+            write!(text, "[exit {code}] {err}").expect("write to a String");
+        }
+        let text = text.replace(SHED, "shed").replace(dir, "$DIR");
+        self.text.push_str(&zero_pids(&text));
+        out
+    }
+
+    fn check(&self) {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/golden")
+            .join(self.golden);
+        if std::env::var_os("SHED_BLESS").is_some() {
+            std::fs::write(&path, &self.text).expect("write golden");
+        }
+        let have = std::fs::read_to_string(&path).unwrap_or_default();
+        assert_eq!(
+            have,
+            self.text,
+            "{} differs; SHED_BLESS=1 to update",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn hello_prints_the_version() {
+    let dir = temp_dir("hello");
+    let out = shed_in(&dir, &["hello"]);
+    assert_eq!(stdout(&out), format!("shed {LONG_VERSION}\n"));
+    let _server = Server::start(&dir);
+    assert_eq!(
+        stdout(&shed_in(&dir, &["hello"])),
+        format!("shed {LONG_VERSION}\n")
+    );
+}
+
+#[test]
+fn hello_reports_a_server_of_another_build() {
+    let dir = temp_dir("hello-build");
+    let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut hello = String::new();
+        BufReader::new(&stream)
+            .read_line(&mut hello)
+            .expect("hello");
+        let other = json!({"jsonrpc": "2.0", "id": 1, "result":
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL}});
+        std::io::Write::write_all(&mut stream, format!("{other}\n").as_bytes()).expect("reply");
+    });
+    let out = shed_in(&dir, &["hello"]);
+    server.join().expect("fake server");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("shed {LONG_VERSION}\n")
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("shed serve runs build 56de739, this is {BUILD}; restart shed serve\n")
+    );
+}
+
+#[test]
+fn schema_prints_the_committed_openrpc_document() {
+    let committed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/shed.openrpc.json");
+    let committed = std::fs::read_to_string(committed).expect("docs/shed.openrpc.json");
+    assert_eq!(shed(&["schema"]), committed);
+}
+
+#[test]
+fn version_flag_prints_the_version_and_the_git_sha() {
+    let sha = git_sha();
+    assert_eq!(
+        shed(&["--version"]),
+        format!("shed {} ({sha})\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+fn git_sha() -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("git runs");
+    String::from_utf8(out.stdout)
+        .expect("utf-8")
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn a_client_of_a_newer_protocol_exits_at_once_with_the_mismatch_line() {
+    let dir = temp_dir("protocol");
+    let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
+    let (done, held) = std::sync::mpsc::channel::<()>();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut hello = String::new();
+        BufReader::new(&stream)
+            .read_line(&mut hello)
+            .expect("hello");
+        let older = json!({"jsonrpc": "2.0", "id": 1, "result":
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 1}});
+        std::io::Write::write_all(&mut stream, format!("{older}\n").as_bytes()).expect("reply");
+        held.recv_timeout(Duration::from_secs(10)).ok();
+    });
+    let started = Instant::now();
+    let out = shed_in(&dir, &["ls"]);
+    let took = started.elapsed();
+    done.send(()).ok();
+    server.join().expect("fake server");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!(
+            "shed: SHED_VERSION: client {BUILD} / server 56de739: protocol {PROTOCOL} vs {}; restart shed serve\n",
+            PROTOCOL - 1
+        )
+    );
+    assert!(took < Duration::from_secs(2), "took {took:?}");
+}
+
+#[test]
+fn help_lists_every_command() {
+    let help = shed(&["--help"]);
+    for cmd in [
+        "hello", "schema", "serve", "run", "ls", "get", "read", "send", "keys", "kill", "rm",
+        "attach", "state", "wait", "events", "top", "approve", "cancel", "agents", "connect",
+        "machine",
+    ] {
+        assert!(
+            help.contains(&format!("\n  {cmd} ")),
+            "{cmd} missing from {help}"
+        );
+    }
+}
+
+#[test]
+fn run_read_send_exit_ls_and_labels_match_the_golden() {
+    let dir = temp_dir("cli");
+    let d = dir.to_str().expect("utf-8 dir");
+    let mut t = Transcript {
+        dir: dir.clone(),
+        text: String::new(),
+        golden: "cli.txt",
+    };
+    t.run(&["ls"]);
+    t.run(&["run", "--cwd", d, "--", "true"]);
+    let _server = Server::start(&dir);
+
+    let run = [
+        "run",
+        "--name",
+        "shell",
+        "--label",
+        "role=impl",
+        "--label",
+        "issue=7",
+    ];
+    t.run(&[&run[..], &["--cwd", d, "--", "sh"]].concat());
+    eventually("the prompt", || {
+        stdout(&shed_in(&dir, &["read", "shell"])) == "$\n"
+    });
+    t.run(&["read", "shell"]);
+    t.run(&["--json", "read", "shell", "--lines", "1"]);
+    t.run(&["send", "shell", "exit"]);
+    eventually("the shell to exit", || {
+        stdout(&shed_in(&dir, &["get", "shell"])).contains("\"exited\"")
+    });
+    t.run(&["ls"]);
+
+    let rev = ["run", "--name", "rev", "--label", "role=rev", "--cwd", d];
+    t.run(&[&["--json"], &rev[..], &["--", "sleep", "100"]].concat());
+    t.run(&["kill", "rev"]);
+    t.run(&["ls", "--label", "role=impl"]);
+    t.run(&["ls", "--label", "role=impl", "--label", "issue=8"]);
+    t.run(&["--json", "ls", "--label", "role=rev"]);
+    t.run(&["get", "shell"]);
+    t.run(&["--json", "get", "shell"]);
+    t.run(&["top"]);
+    t.run(&["rm", "shell"]);
+    t.run(&["--json", "rm", "rev"]);
+    t.run(&["ls"]);
+    t.run(&["keys", "rev", "enter"]);
+    t.run(&["run", "--label", "nolabel", "--", "true"]);
+    t.check();
+}
+
+#[test]
+fn a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each() {
+    let dir = temp_dir("state");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    let mut t = Transcript {
+        dir: dir.clone(),
+        text: String::new(),
+        golden: "state.txt",
+    };
+    let agent = format!(
+        "printf 'start\\033]7501;state=working;note=step 1\\007end\\n'; read x; \
+         '{SHED}' --dir '{d}' state done --note 'all green'; read y"
+    );
+    t.run(&[
+        "run", "--name", "agent", "--cwd", d, "--", "sh", "-c", &agent,
+    ]);
+    t.run(&[
+        "wait",
+        "agent",
+        "--until",
+        "done",
+        "working",
+        "--timeout",
+        "10",
+    ]);
+    t.run(&["read", "agent"]);
+    t.run(&["read", "agent", "--history"]);
+    t.run(&["send", "agent", ""]);
+    t.run(&[
+        "--json",
+        "wait",
+        "agent",
+        "--until",
+        "done",
+        "--timeout",
+        "10",
+    ]);
+    t.run(&["wait", "agent", "--until", "blocked", "--timeout", "0.2"]);
+    t.run(&["state", "agent", "blocked", "--note", "needs review"]);
+    t.run(&["--json", "get", "agent"]);
+    t.run(&["state", "agent", "sleeping"]);
+    t.run(&["send", "agent", ""]);
+    t.run(&["wait", "agent", "--until", "working"]);
+    t.check();
+}
+
+#[test]
+fn program_status_osc_7501_keys_ids_probe_clear_and_lifetime() {
+    let dir = temp_dir("osc7501");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    let mut t = Transcript {
+        dir: dir.clone(),
+        text: String::new(),
+        golden: "program-status.txt",
+    };
+    let osc = |body: &str| format!("\\033]7501;{body}\\007");
+    let agent = [
+        "stty raw -echo; printf '\\033]7501;?\\007'; r=$(dd bs=1 count=85 2>/dev/null)".to_owned(),
+        "printf 'probe %s\\r\\n' \"$r\" | tr '\\033\\007' 'EB'".to_owned(),
+        format!(
+            "printf '{}{}{}'",
+            osc("state=working:id=build"),
+            osc("state=done:id=build/tests"),
+            osc("state=blocked:id=lint:kind=permission")
+        ),
+        format!(
+            "printf '\\033]7501;state=working:progress=40:app=make:title=RG9jcw==:msg=QnVpbGRpbmcgZG9jcw==\\033\\\\'; read x; printf '{}{}'",
+            osc("state=clear:id=build"),
+            osc("state=blocked:kind=question:msg=T3ZlcndyaXRlPw==:note=x:zz")
+        ),
+        format!("read x; printf '{}cleared\\r\\n'; read x", osc("state=clear")),
+    ]
+    .join("; ");
+    t.run(&[
+        "run", "--name", "agent", "--cwd", d, "--", "sh", "-c", &agent,
+    ]);
+    t.run(&["wait", "agent", "--until", "working", "--timeout", "10"]);
+    t.run(&["read", "agent"]);
+    t.run(&["--json", "get", "agent"]);
+    t.run(&["send", "agent", "\n"]);
+    let blocked = ["wait", "agent", "--until", "blocked", "--kind"];
+    t.run(&[&blocked[..], &["auth", "--timeout", "0.2"]].concat());
+    t.run(&[&blocked[..], &["question", "--timeout", "10"]].concat());
+    t.run(&["--json", "get", "agent"]);
+    t.run(&["send", "agent", "\n"]);
+    t.run(&["wait", "agent", "--output", "cleared", "--timeout", "10"]);
+    t.run(&["--json", "get", "agent"]);
+    for (name, report) in [("w", "state=working"), ("d", "state=done")] {
+        let script = format!(
+            "printf '{}{}{}ready\\n'; read x",
+            osc(report),
+            osc("state=blocked:id=asks"),
+            osc("state=error:id=tests")
+        );
+        t.run(&["run", "--name", name, "--cwd", d, "--", "sh", "-c", &script]);
+        t.run(&["wait", name, "--output", "ready", "--timeout", "10"]);
+        t.run(&["send", name, "\n"]);
+        t.run(&["wait", name, "--output", "never", "--timeout", "10"]);
+        t.run(&["--json", "get", name]);
+    }
+    t.check();
+}
+
+#[test]
+fn wait_matches_output_by_pattern_and_falls_back_to_idle() {
+    let dir = temp_dir("wait-output");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    let script = "sleep 0.3; echo 'ok 12 tests'; exec sleep 100";
+    stdout(&shed_in(
+        &dir,
+        &[
+            "run", "--name", "test", "--cwd", d, "--", "sh", "-c", script,
+        ],
+    ));
+    let started = Instant::now();
+    let out = shed_in(
+        &dir,
+        &[
+            "wait",
+            "test",
+            "--output",
+            "^ok \\d+ tests$",
+            "--timeout",
+            "10",
+        ],
+    );
+    assert_eq!(stdout(&out), "test output\n");
+    assert!(started.elapsed() < Duration::from_secs(5));
+
+    let idle = [
+        "run",
+        "--name",
+        "quiet",
+        "--idle-after",
+        "1",
+        "--cwd",
+        d,
+        "--",
+        "sleep",
+        "100",
+    ];
+    stdout(&shed_in(&dir, &idle));
+    let out = shed_in(
+        &dir,
+        &["wait", "quiet", "--until", "idle", "--timeout", "10"],
+    );
+    assert_eq!(stdout(&out), "quiet idle\n");
+    let out = shed_in(
+        &dir,
+        &["wait", "test", "--until", "idle", "--timeout", "1.2"],
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(124),
+        "no fallback unless asked: {out:?}"
+    );
+}
+
+#[test]
+fn attach_types_resizes_and_detaches_in_a_pty() {
+    let dir = temp_dir("attach");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    stdout(&shed_in(
+        &dir,
+        &["run", "--name", "shell", "--cwd", d, "--", "sh"],
+    ));
+    eventually("the prompt", || {
+        stdout(&shed_in(&dir, &["read", "shell"])) == "$\n"
+    });
+
+    let size = Size { rows: 24, cols: 80 };
+    let cmd = [SHED, "--dir", d, "attach", "shell"];
+    let outer = Terminal::spawn(&cmd, &dir, [("TERM", "xterm")], size).expect("attach in a pty");
+    eventually("the redraw", || outer.screen().starts_with('$'));
+    outer.write(b"echo hi-$((1+2))\r").expect("type");
+    eventually("typed input to run", || outer.screen().contains("hi-3"));
+
+    outer
+        .resize(Size {
+            rows: 30,
+            cols: 100,
+        })
+        .expect("resize");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !outer.screen().contains("30 100") {
+        assert!(
+            Instant::now() < deadline,
+            "resize not forwarded: {}",
+            outer.screen()
+        );
+        outer.write(b"stty size\r").expect("type");
+        std::thread::sleep(Duration::from_millis(300));
+    }
+
+    outer.write(&[0x1c]).expect("Ctrl+\\");
+    eventually("detach", || matches!(outer.try_wait(), Ok(Some(_))));
+    let status = outer.try_wait().expect("status").expect("exited");
+    assert!(status.success(), "attach exits 0 on detach: {status:?}");
+    let ls = stdout(&shed_in(&dir, &["ls"]));
+    assert!(
+        ls.contains("shell  running"),
+        "still running after detach: {ls}"
+    );
+    let read = stdout(&shed_in(&dir, &["read", "shell", "--history"]));
+    assert!(read.contains("hi-3"), "{read}");
+}
+
+#[test]
+fn a_query_the_screen_answers_reaches_the_program_once_with_a_client_attached() {
+    let dir = temp_dir("attach-da1");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    let script = r#"stty -echo; printf ready; read go; printf '\033[casked'; read line
+printf '\nreplies=%d\n' "$(printf %s "$line" | tr -cd c | wc -c)"; exec sleep 100"#;
+    stdout(&shed_in(
+        &dir,
+        &["run", "--name", "q", "--cwd", d, "--", "sh", "-c", script],
+    ));
+    let size = Size { rows: 24, cols: 80 };
+    let cmd = [SHED, "--dir", d, "attach", "q"];
+    let outer = Terminal::spawn(&cmd, &dir, [("TERM", "xterm")], size).expect("attach in a pty");
+    eventually("the program", || outer.screen().contains("ready"));
+    outer.write(b"go\r").expect("type");
+    eventually("the query", || outer.screen().contains("asked"));
+    outer.write(b"\r").expect("type");
+    eventually("the count", || {
+        stdout(&shed_in(&dir, &["read", "q"])).contains("replies=")
+    });
+    let read = stdout(&shed_in(&dir, &["read", "q"]));
+    assert!(read.contains("replies=1\n"), "{read}");
+}
+
+#[test]
+fn run_size_sets_the_program_size_and_the_default_is_wide() {
+    let dir = temp_dir("run-size");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    let script = "stty size; exec sleep 100";
+    for (name, size, want) in [
+        ("wide", None, "50 200"),
+        ("given", Some("50x200"), "50 200"),
+        ("small", Some("7x33"), "7 33"),
+    ] {
+        let mut args = vec!["run", "--name", name, "--cwd", d];
+        args.extend(size.map(|s| ["--size", s]).into_iter().flatten());
+        args.extend(["--", "sh", "-c", script]);
+        stdout(&shed_in(&dir, &args));
+        eventually(want, || {
+            stdout(&shed_in(&dir, &["read", name])) == format!("{want}\n")
+        });
+    }
+    let bad = shed_in(&dir, &["run", "--size", "0x10", "--", "true"]);
+    assert!(!bad.status.success(), "{bad:?}");
+}
+
+#[test]
+fn attach_ends_when_the_program_exits() {
+    let dir = temp_dir("attach-exit");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    stdout(&shed_in(
+        &dir,
+        &["run", "--name", "cat", "--cwd", d, "--", "cat"],
+    ));
+    let size = Size { rows: 24, cols: 80 };
+    let cmd = [SHED, "--dir", d, "attach", "cat"];
+    let outer = Terminal::spawn(&cmd, &dir, [("TERM", "xterm")], size).expect("attach in a pty");
+    outer.write(b"ping\r").expect("type");
+    eventually("the echo", || outer.screen().contains("ping"));
+    stdout(&shed_in(&dir, &["kill", "cat"]));
+    eventually("attach to end", || matches!(outer.try_wait(), Ok(Some(_))));
+}
+
+#[test]
+fn run_autostart_starts_a_detached_server() {
+    let dir = temp_dir("autostart");
+    let d = dir.to_str().expect("utf-8 dir");
+    let out = shed_in(
+        &dir,
+        &[
+            "run",
+            "--autostart",
+            "--cwd",
+            d,
+            "--",
+            "sh",
+            "-c",
+            "echo $PPID; exec sleep 100",
+        ],
+    );
+    assert_eq!(stdout(&out), "t1\n");
+    let socket = dir.join("shed.sock");
+    let started = format!("server {LONG_VERSION} on {} started", socket.display());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains(&started),
+        "{out:?}"
+    );
+    let mut server = String::new();
+    eventually("the server's pid", || {
+        server = stdout(&shed_in(&dir, &["read", "t1"])).trim().to_owned();
+        !server.is_empty()
+    });
+    let again = shed_in(&dir, &["serve", "--detach"]);
+    assert!(!again.status.success(), "a second server is refused");
+    let killed = Command::new("kill").arg(&server).status().expect("kill");
+    assert!(
+        killed.success(),
+        "the server ({server}) is the program's parent"
+    );
+    eventually("the server to exit", || {
+        !Command::new("kill")
+            .args(["-0", &server])
+            .stderr(Stdio::null())
+            .status()
+            .expect("kill -0")
+            .success()
+    });
+}
+
+#[test]
+fn serve_prints_one_ready_line_once_its_socket_accepts() {
+    let dir = temp_dir("ready");
+    let mut serve = Command::new(SHED)
+        .arg("--dir")
+        .arg(&dir)
+        .arg("serve")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("shed serve");
+    let mut lines = BufReader::new(serve.stdout.take().expect("stdout")).lines();
+    let line = lines.next().expect("a line").expect("utf-8");
+    let socket = dir.join("shed.sock");
+    assert_eq!(
+        line,
+        format!("shed ready {LONG_VERSION} {}", socket.display())
+    );
+    assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok());
+    serve.kill().expect("kill");
+    assert!(lines.next().is_none(), "exactly one line");
+    serve.wait().ok();
+}
+
+#[test]
+fn a_server_that_exits_before_it_is_ready_is_reported_as_an_exit() {
+    let dir = temp_dir("early-exit");
+    std::fs::write(dir.join("state.json"), "not json").expect("state");
+    let start = Instant::now();
+    let out = shed_in(&dir, &["serve", "--detach"]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("shed serve exited (exit status: 1) before it was ready"),
+        "{err}"
+    );
+    assert!(start.elapsed() < Duration::from_secs(10), "not the timeout");
+}
+
+#[test]
+fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
+    let dir = temp_dir("resources");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::sampling(&dir, "0.2");
+    let mut events = Command::new(SHED)
+        .args(["--dir", d, "events", "--label", "test=mem"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("shed events");
+    let mut lines = BufReader::new(events.stdout.take().expect("stdout")).lines();
+    let mut next = || -> Value {
+        let line = lines.next().expect("an event").expect("a line");
+        serde_json::from_str(&line).expect("event is JSON")
+    };
+    stdout(&shed_in(
+        &dir,
+        &["run", "--name", "small", "--cwd", d, "--", "sleep", "100"],
+    ));
+    let script = r#"sh -c 'x=$(head -c 52428800 /dev/zero | tr "\0" x); sleep 100'"#;
+    let run = ["run", "--name", "mem", "--label", "test=mem", "--cwd", d];
+    stdout(&shed_in(
+        &dir,
+        &[&run[..], &["--", "sh", "-c", script]].concat(),
+    ));
+    assert_eq!(next()["event"], "started");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        assert!(Instant::now() < deadline, "no 50 MB resources event");
+        let event = next();
+        assert_eq!(
+            (&event["name"], &event["event"]),
+            (&json!("mem"), &json!("resources"))
+        );
+        if event["rss_mb"].as_u64().expect("rss_mb") >= 50 {
+            break;
+        }
+    }
+    events.kill().ok();
+    events.wait().ok();
+
+    let get: Value = serde_json::from_str(&stdout(&shed_in(&dir, &["get", "mem"]))).expect("json");
+    assert!(get["resources"]["rss_mb"].as_u64() >= Some(50), "{get}");
+    let top = stdout(&shed_in(&dir, &["top"]));
+    let names: Vec<&str> = top
+        .lines()
+        .skip(1)
+        .filter_map(|l| l.split(' ').next())
+        .collect();
+    assert_eq!(names, ["mem", "small"], "{top}");
+}
+
+#[test]
+fn timing_report() {
+    const CALLS: usize = 30;
+    let dir = temp_dir("timing");
+    let d = dir.to_str().expect("utf-8 dir");
+    let _server = Server::start(&dir);
+    stdout(&shed_in(
+        &dir,
+        &[
+            "run",
+            "--name",
+            "t",
+            "--cwd",
+            d,
+            "--",
+            "sh",
+            "-c",
+            "exec cat >/dev/null",
+        ],
+    ));
+    let calls = [
+        &["ls"][..],
+        &["get", "t"],
+        &["read", "t"],
+        &["send", "t", "x"],
+        &["keys", "t", "enter"],
+        &["exec", "--", "true"],
+    ];
+    for args in calls {
+        let mut ms: Vec<f64> = (0..CALLS)
+            .map(|_| {
+                let start = Instant::now();
+                stdout(&shed_in(&dir, args));
+                start.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
+        ms.sort_by(f64::total_cmp);
+        let median = ms[CALLS / 2];
+        let note = if median < 20.0 { "ok" } else { "SLOW" };
+        eprintln!(
+            "timing: shed {:<6} median {median:5.1} ms, p90 {:5.1} ms, max {:5.1} ms over {CALLS} calls (target < 20 ms, soft): {note}",
+            args.join(" "),
+            ms[CALLS * 9 / 10],
+            ms[CALLS - 1],
+        );
+    }
+}
+
+#[test]
+fn a_terminal_has_shed_set() {
+    let dir = temp_dir("env");
+    let _server = Server::start(&dir);
+    let d = dir.to_str().expect("utf-8 dir");
+    let script = "echo \"shed=$SHED\"; read x";
+    stdout(&shed_in(
+        &dir,
+        &[
+            "run", "--name", "envs", "--cwd", d, "--", "sh", "-c", script,
+        ],
+    ));
+    eventually("the name", || {
+        stdout(&shed_in(&dir, &["read", "envs"])).contains("shed=envs")
+    });
+}
+
+#[test]
+fn a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail() {
+    let passed = std::thread::spawn(|| temp_dir("ends-pass"))
+        .join()
+        .expect("passes");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let failed = std::thread::spawn(move || {
+        tx.send(temp_dir("ends-fail")).expect("send");
+        panic!("a failing test");
+    });
+    assert!(failed.join().is_err());
+    let failed = rx.recv().expect("the failed test's dir");
+    assert!(!passed.exists(), "{}", passed.display());
+    assert!(!failed.exists(), "{}", failed.display());
+}
+
+fn shed_ok(dir: &Path, args: &[&str]) -> String {
+    stdout(&shed_in(dir, args))
+}
+
+fn info(dir: &Path, name: &str) -> Value {
+    serde_json::from_str(&shed_ok(dir, &["--json", "get", name])).expect("terminal JSON")
+}
+
+fn start(dir: &Path, name: &str, extra: &[&str], cmd: &[&str]) {
+    let d = dir.to_str().expect("utf-8 dir");
+    let args = [&["run", "--name", name, "--cwd", d], extra, &["--"], cmd].concat();
+    shed_ok(dir, &args);
+}
+
+#[test]
+fn a_child_started_inside_a_terminal_has_that_parent() {
+    let dir = temp_dir("parent");
+    let _server = Server::start(&dir);
+    let d = dir.to_str().expect("utf-8 dir");
+    let script = format!(
+        "'{SHED}' --dir '{d}' run --name kid -- sleep 100; \
+         '{SHED}' --dir '{d}' run --no-parent --name loner -- sleep 100; read x"
+    );
+    start(&dir, "lead", &[], &["sh", "-c", &script]);
+    eventually("both started", || {
+        shed_in(&dir, &["get", "loner"]).status.success()
+    });
+    assert_eq!(info(&dir, "kid")["parent"], json!({"name": "lead"}));
+    assert_eq!(info(&dir, "loner").get("parent"), None);
+    let kids: Vec<Value> =
+        serde_json::from_str(&shed_ok(&dir, &["--json", "ls", "--parent", "lead"])).expect("ls");
+    assert_eq!(kids.len(), 1);
+    assert_eq!(kids[0]["name"], "kid");
+    let refused = shed_in(&dir, &["run", "--parent", "nope", "--", "true"]);
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("parent nope is not running"));
+}
+
+#[test]
+fn wait_children_all_returns_only_after_both_children_report_done() {
+    let dir = temp_dir("children");
+    let _server = Server::start(&dir);
+    start(&dir, "lead", &[], &["sleep", "100"]);
+    for kid in ["a", "b"] {
+        start(&dir, kid, &["--parent", "lead"], &["sleep", "100"]);
+    }
+    let all = ["wait", "--children", "all", "lead", "--timeout"];
+    let mut waiter = Command::new(SHED)
+        .arg("--dir")
+        .arg(&dir)
+        .args([&all[..], &["20"]].concat())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("wait starts");
+    shed_ok(&dir, &["state", "a", "done"]);
+    let early = shed_in(&dir, &[&all[..], &["0.3"]].concat());
+    assert_eq!(early.status.code(), Some(124), "{early:?}");
+    assert!(waiter.try_wait().expect("try_wait").is_none());
+    shed_ok(&dir, &["state", "b", "done"]);
+    let done = waiter.wait_with_output().expect("wait ends");
+    assert_eq!(done.status.code(), Some(0));
+    assert_eq!(
+        String::from_utf8_lossy(&done.stdout),
+        "lead no child working\n"
+    );
+}
+
+#[test]
+fn wait_children_any_returns_on_the_next_child_with_news() {
+    let dir = temp_dir("any");
+    let _server = Server::start(&dir);
+    start(&dir, "lead", &[], &["sleep", "100"]);
+    for kid in ["a", "b"] {
+        start(&dir, kid, &["--parent", "lead"], &["sleep", "100"]);
+    }
+    let mut waiter = Command::new(SHED)
+        .arg("--dir")
+        .arg(&dir)
+        .args([
+            "--json",
+            "wait",
+            "--children",
+            "any",
+            "lead",
+            "--timeout",
+            "20",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("wait starts");
+    eventually("news of b ends the wait", || {
+        shed_ok(&dir, &["state", "a", "working"]);
+        shed_ok(&dir, &["state", "b", "working"]);
+        shed_ok(&dir, &["state", "b", "blocked"]);
+        waiter.try_wait().expect("try_wait").is_some()
+    });
+    let done = waiter.wait_with_output().expect("wait ends");
+    assert_eq!(done.status.code(), Some(0));
+    let done: Value = serde_json::from_slice(&done.stdout).expect("wait JSON");
+    assert_eq!(
+        (&done["outcome"], &done["terminal"]["name"]),
+        (&json!("matched"), &json!("b"))
+    );
+    shed_ok(&dir, &["kill", "a"]);
+    shed_ok(&dir, &["kill", "b"]);
+    let none = shed_in(
+        &dir,
+        &["wait", "--children", "any", "lead", "--timeout", "10"],
+    );
+    assert_eq!(stdout_code(&none), ("lead exited\n".to_owned(), Some(1)));
+}
+
+fn stdout_code(out: &Output) -> (String, Option<i32>) {
+    (
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        out.status.code(),
+    )
+}
+
+#[test]
+fn killing_the_parent_ends_a_child_and_spares_one_started_to_outlive_it() {
+    let dir = temp_dir("cascade");
+    let _server = Server::start(&dir);
+    start(&dir, "lead", &[], &["sleep", "100"]);
+    start(&dir, "kid", &["--parent", "lead"], &["sleep", "100"]);
+    start(
+        &dir,
+        "free",
+        &["--parent", "lead", "--outlive-parent"],
+        &["sleep", "100"],
+    );
+    shed_ok(&dir, &["kill", "lead"]);
+    let ended = shed_in(&dir, &["wait", "kid", "--until", "done", "--timeout", "10"]);
+    assert_eq!(
+        stdout_code(&ended),
+        ("kid exited 143\n".to_owned(), Some(1))
+    );
+    assert_eq!(info(&dir, "free")["state"], "running");
+
+    start(&dir, "quits", &[], &["sh", "-c", "read x"]);
+    start(&dir, "kid2", &["--parent", "quits"], &["sleep", "100"]);
+    shed_ok(&dir, &["send", "quits", "\n"]);
+    let ended = shed_in(
+        &dir,
+        &["wait", "kid2", "--until", "done", "--timeout", "10"],
+    );
+    assert_eq!(
+        stdout_code(&ended),
+        ("kid2 exited 143\n".to_owned(), Some(1))
+    );
+}
+
+#[test]
+fn notify_puts_one_note_in_an_idle_parent_and_none_while_it_works() {
+    let dir = temp_dir("notes");
+    let _server = Server::start(&dir);
+    start(&dir, "lead", &[], &["sh", "-c", "while read l; do :; done"]);
+    start(
+        &dir,
+        "a",
+        &["--parent", "lead", "--notify"],
+        &["sleep", "100"],
+    );
+    start(
+        &dir,
+        "b",
+        &["--parent", "lead", "--notify"],
+        &["sleep", "100"],
+    );
+    start(&dir, "quiet", &["--parent", "lead"], &["sleep", "100"]);
+    let screen = || shed_ok(&dir, &["read", "lead"]);
+    let count = |text: &str, line: &str| text.lines().filter(|l| *l == line).count();
+    let upto = |mark: &str| {
+        eventually(mark, || screen().contains(mark));
+        let text = screen();
+        text.split(mark).next().unwrap_or_default().to_owned()
+    };
+
+    shed_ok(&dir, &["state", "quiet", "blocked"]);
+    shed_ok(&dir, &["state", "a", "blocked", "--note", "needs review"]);
+    shed_ok(&dir, &["state", "a", "blocked", "--note", "needs review"]);
+    shed_ok(&dir, &["send", "lead", "mark1\n"]);
+    let before = upto("mark1");
+    assert_eq!(
+        count(&before, "[shed] a blocked: needs review"),
+        1,
+        "{before}"
+    );
+    assert!(!before.contains("[shed] quiet"), "{before}");
+
+    shed_ok(&dir, &["state", "lead", "working"]);
+    shed_ok(&dir, &["state", "b", "error"]);
+    shed_ok(&dir, &["send", "lead", "mark2\n"]);
+    let before = upto("mark2");
+    assert!(!before.contains("[shed] b"), "{before}");
+
+    shed_ok(&dir, &["state", "lead", "done"]);
+    eventually("b's note once lead is done", || {
+        count(&screen(), "[shed] b error") == 1
+    });
+    shed_ok(&dir, &["send", "lead", "mark3\n"]);
+    let all = upto("mark3");
+    assert_eq!(count(&all, "[shed] a blocked: needs review"), 1, "{all}");
+    assert_eq!(count(&all, "[shed] b error"), 1, "{all}");
+}

@@ -1,49 +1,57 @@
-# berth protocol
+# shed protocol
 
-<!-- Generated from crates/berth-proto by `BERTH_BLESS=1 cargo test -p berth-proto`; do not edit. -->
+<!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto`; do not edit. -->
 
-Version: `0.0.0`. Client and server must run the same version.
+Version: `0.0.0`, protocol `1`. Client and server must speak the same protocol.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
-`$XDG_RUNTIME_DIR/berth.sock` (macOS: `~/Library/Caches/berth/berth.sock`). One request per line, one
+`$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
 response per line; a request without an `id` is a notification and gets no response.
 
-Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`; a different
-version is refused with `BERTH_VERSION: client x, server y; restart the server`.
+Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`; another
+product or protocol is refused with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>;
+restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `protocol` as 0).
 
 A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is
 the exit status (128 + N for signal N), `null` while running or when the program was lost in a server
 restart; `pid` is set while running; `reported` is the state the program last reported (absent until
-then); `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory
-(MiB) and CPU (percent of one core) at the last sample, while running.
+then), with OSC 7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the
+program has left input unread for over a second (`send`, `keys` and `acp.model` then fail, their input
+queued); `records` are its OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle`
+fallback is on; `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last
+sample, while running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the
+current `model` and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as
+`***`; the agent's slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the
+context window in tokens, and the `cost` when sent); `parent` names the terminal that
+started it (absent without one), with `outlive` and `notify` as `run` set them.
 
 ## Methods
 
 ### `hello`
 
-The handshake; must come first on every connection. A different version is refused with `BERTH_VERSION`.
+The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","product":"shed","protocol":1,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","product":"shed","protocol":1,"version":"0.0.0"}}
 ```
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true}}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `ls`
 
-List terminals, by name; `labels` keeps those that carry every given label.
+List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"ls","params":{"labels":{"issue":"7"}}}
-{"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
+{"jsonrpc":"2.0","id":1,"method":"ls","params":{"labels":{"issue":"7"},"parent":"lead"}}
+{"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
 ```
 
 ### `get`
@@ -52,12 +60,12 @@ One terminal.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"get","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `read`
 
-The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines.
+The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"read","params":{"history":false,"lines":2,"name":"build"}}
@@ -66,10 +74,10 @@ The visible screen, or with `history` the scrollback and screen, as plain text; 
 
 ### `send`
 
-Type text into the terminal.
+Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint\n"}}
+{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
@@ -88,16 +96,16 @@ End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exite
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"kill","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":null,"state":"exited"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
 ```
 
 ### `rm`
 
-Remove an exited terminal; returns it as it was.
+Remove an exited terminal, its ACP session closed; returns it as it was.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rm","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":null,"state":"exited"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
 ```
 
 ### `resize`
@@ -111,34 +119,34 @@ Resize the terminal; the program gets SIGWINCH.
 
 ### `attach`
 
-Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection.
+Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"attach","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `state`
 
-Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen.
+Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen. The terminal also speaks the Program Status Protocol (OSC 7501, revision 0.4): `state=<s>[:<key>=<value>]…` with `idle` and `clear`, `id`, `kind`, `progress`, `app` and base64 `title` and `msg`, and answers the probe `ESC ] 7501 ; ?`. A report with an `id` is a record of its own (`records`); on exit `working` and `blocked` ones are dropped.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"state","params":{"name":"build","note":"tests pass","state":"done"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `wait`
 
-Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls.
+Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback; `blocked` only of `kind`, if given) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"wait","params":{"name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
-{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
+{"jsonrpc":"2.0","id":1,"method":"wait","params":{"kind":"question","name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
+{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"records":[{"id":"build/tests","state":"working"}],"reported":{"app":"make","kind":"question","msg":"Overwrite config.toml?","progress":40,"state":"blocked","title":"Docs"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
 ```
 
 ### `events`
 
-Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes.
+Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"events","params":{"labels":{"issue":"7"},"since":120}}
@@ -147,33 +155,161 @@ Stream events. After the response the server writes one event per line (see Even
 
 ### `emit`
 
-Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply`); its bridge (`berth run --acp`) calls this. Other events are refused.
+Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply`); its bridge (`shed run --acp`) calls this. Other events are refused.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"emit","params":{"event":"reply","name":"agent","stop_reason":"end_turn","text":"All 12 tests pass."}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
-## Events
+### `screen.watch`
 
-An event names its terminal, carries its labels and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
-
-An ACP terminal (`berth run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `berth approve`), `approved` and `reply` (the turn's whole reply and its `stop_reason`).
+Stream a running terminal's screen. After the response the server writes screen updates (see Screen updates), at most 20 a second: the full screen first (none when `since` is the screen's current `seq`), then the rows that changed. It closes the connection when the program's PTY closes. The connection still takes requests; their responses are not written.
 
 ```json
-{"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"event":"started"}
-{"seq":2,"name":"build","labels":{"issue":"7","role":"impl"},"event":"state","state":"done","note":"tests pass"}
-{"seq":3,"name":"build","labels":{"issue":"7","role":"impl"},"event":"resources","rss_mb":52,"cpu_pct":3}
-{"seq":4,"name":"build","labels":{"issue":"7","role":"impl"},"event":"exited","code":0}
-{"seq":5,"name":"build","labels":{"issue":"7","role":"impl"},"event":"killed"}
-{"seq":6,"name":"build","labels":{"issue":"7","role":"impl"},"event":"turn","prompt":"Fix the failing test"}
-{"seq":7,"name":"build","labels":{"issue":"7","role":"impl"},"event":"text","text":"Looking at the test"}
-{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending"}
-{"seq":9,"name":"build","labels":{"issue":"7","role":"impl"},"event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
-{"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"event":"mode","mode":"default"}
-{"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}
-{"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"event":"approved","option":"allow"}
-{"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
+{"jsonrpc":"2.0","id":1,"method":"screen.watch","params":{"since":41,"terminal":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.input`
+
+Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.input","params":{"terminal":"build","text":"make lint"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.keys`
+
+Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.resize`
+
+Resize the terminal, as `resize`; without `terminal`, the one this connection watches.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.resize","params":{"cols":60,"rows":30}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.readonly`
+
+Mark the terminal read-only for this connection: from then on, until it closes, the connection's `send`, `keys`, `resize`, `attach`, `terminal.input`, `terminal.keys` and `terminal.resize` to the terminal are refused with `READONLY`. The connection may resize only the terminals it has not marked.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.readonly","params":{"terminal":"agent"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `machine.stats`
+
+The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000}}
+{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}}
+```
+
+### `acp.model`
+
+Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"acp.model","params":{"model":"haiku","name":"agent"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `machine.links`
+
+Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+```
+
+### `exec`
+
+Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","machine":"box","timeout":30.0}}
+{"jsonrpc":"2.0","id":1,"result":{"code":0,"stderr":[],"stdout":[32,77,32,115,114,99,47,108,105,98,46,114,115,10]}}
+```
+
+### `file.read`
+
+A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"file.read","params":{"path":"/home/user/project/VERSION"}}
+{"jsonrpc":"2.0","id":1,"result":[49,46,50,46,48,10]}
+```
+
+### `file.write`
+
+Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"path":"/home/user/project/VERSION"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `heartbeat`
+
+Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"heartbeat","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `rpc.discover`
+
+The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0"},"openrpc":"1.3.2"}}
+```
+
+## Events
+
+An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
+
+An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
+
+```json
+{"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"started"}
+{"seq":2,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"state","state":"done","note":"tests pass"}
+{"seq":3,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"resources","rss_mb":52,"cpu_pct":3}
+{"seq":4,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"exited","code":0}
+{"seq":5,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"killed"}
+{"seq":6,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"turn","prompt":"Fix the failing test"}
+{"seq":7,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"text","text":"Looking at the test"}
+{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending","kind":"edit"}
+{"seq":9,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
+{"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"mode","mode":"default"}
+{"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}
+{"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow"}
+{"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
+{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}}
+{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}
+```
+
+## Screen updates
+
+`screen.watch` writes one update per line. `seq` is the screen's change count; `rows`, `cols`, `cursor` (`[row, col]`, from 0) and `scrollback` (lines) are always there; `lines` holds the rows that changed, each as runs of cells with one pen: `fg` and `bg` (a palette index 0–255, or `[r, g, b]`; `null` is the default), `bold`, `italic`, `underline` and `inverse`. Trailing blank default cells are dropped, so a blank row has no runs. `full` marks an update that carries every row: the first, and the one after a resize.
+
+```json
+{"seq":41,"full":true,"rows":2,"cols":40,"cursor":[1,2],"scrollback":120,"lines":[{"row":0,"runs":[{"text":"ok","fg":2,"bg":null,"bold":true,"italic":false,"underline":false,"inverse":false},{"text":" 12 tests","fg":null,"bg":null,"bold":false,"italic":false,"underline":false,"inverse":false}]},{"row":1,"runs":[{"text":"$","fg":null,"bg":null,"bold":false,"italic":false,"underline":false,"inverse":false}]}]}
+{"seq":44,"full":false,"rows":2,"cols":40,"cursor":[1,6],"scrollback":120,"lines":[{"row":1,"runs":[{"text":"$ ","fg":null,"bg":null,"bold":false,"italic":false,"underline":false,"inverse":false},{"text":"make","fg":null,"bg":[40,40,40],"bold":false,"italic":false,"underline":false,"inverse":false}]}]}
 ```
 
 ## Errors
@@ -187,13 +323,17 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |
 | -32603 | `INTERNAL` |
-| -32000 | `BERTH_VERSION` |
+| -32000 | `SHED_VERSION` |
 | -32001 | `NO_HELLO` |
 | -32002 | `NO_SUCH_TERMINAL` |
 | -32003 | `NAME_TAKEN` |
 | -32004 | `STILL_RUNNING` |
 | -32005 | `SPAWN_FAILED` |
+| -32006 | `READONLY` |
+| -32007 | `NO_LINK` |
+| -32008 | `IO` |
+| -32009 | `DRAFT_HELD` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"BERTH_VERSION: client 0.1.0, server 0.0.0; restart the server"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 / server 56de739: protocol 2 vs 1; restart shed serve"}}
 ```

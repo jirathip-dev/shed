@@ -1,2 +1,0 @@
-{"id":1,"jsonrpc":"2.0","method":"hello","params":{"version":"$VERSION"}}
-{"jsonrpc":"2.0","id":1,"result":{"version":"$VERSION"}}

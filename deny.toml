@@ -9,7 +9,8 @@ yanked = "deny"
 
 [licenses]
 version = 2
-allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016"]
+# Zlib: foldhash, through serde_json's preserve_order, which the ACP SDK turns on.
+allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
 confidence-threshold = 0.9
 
 [licenses.private]
@@ -18,6 +19,8 @@ ignore = true
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
+# The ACP SDK's derive macros (derive_more, strum, tracing, pin-project) still build on syn 2; build time only.
+skip = [{ crate = "syn@2.0.119", reason = "proc macros of the ACP SDK's dependencies; serde is on syn 3" }]
 allow-wildcard-paths = true
 
 [sources]

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>shed #42: the whole server on tokio (design)</title>
+<style>
+  :root { --fg: #1f2328; --mut: #59636e; --line: #d1d9e0; --bg: #fff; --tint: #f6f8fa; --acc: #0969da; --ok: #1a7f37; --warn: #9a6700; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 40px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+  p, li { margin: 6px 0; }
+  ul, ol { padding-left: 22px; margin: 6px 0; }
+  code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--tint); padding: 1px 4px; border-radius: 4px; }
+  .sub { color: var(--mut); margin: 0 0 16px; }
+  .tldr { background: var(--tint); border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 6px; padding: 10px 14px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 8px 0; }
+  th, td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { background: var(--tint); font-weight: 600; }
+  td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .warn { color: var(--warn); font-weight: 600; }
+  .q li { margin: 8px 0; }
+  .rec { color: var(--ok); }
+  footer { color: var(--mut); font-size: 13px; margin-top: 28px; }
+  @media (max-width: 700px) {
+    main { padding: 20px 16px 32px; }
+    body { font-size: 15px; }
+    h1 { font-size: 21px; }
+    .two { grid-template-columns: 1fr; gap: 0; }
+    table { font-size: 13px; }
+    th, td { padding: 5px 6px; }
+  }
+  @media print {
+    @page { size: A4; margin: 11mm 12mm; }
+    body { font-size: 10.5px; line-height: 1.38; }
+    main { max-width: none; padding: 0; }
+    h1 { font-size: 17px; } h2 { font-size: 12.5px; margin: 12px 0 4px; }
+    code { font-size: 9.5px; } table { font-size: 10px; margin: 4px 0; } th, td { padding: 3px 5px; }
+    p, li { margin: 3px 0; } .q li { margin: 3px 0; } .tldr { padding: 6px 10px; }
+    h2, tr { break-inside: avoid; break-after: avoid-page; }
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>shed-server on one tokio runtime</h1>
+<p class="sub">Design for jirathip-dev/shed#42 (step 3 of 3, after #41 and #40). Branch <code>issue-42</code>. For owner approval before any impl starts.</p>
+
+<div class="tldr">
+<b>In short:</b> connections, streams, terminal watchers and samplers become tasks on one multi-thread runtime (at most 4 workers). PTY reads stay on one plain thread per terminal. The ACP bridge loses its two glue threads. The two benches get faster through two changes. First, <b>event fan-out moves to one shared log</b> that subscriber tasks drain in batches: one push per event however many clients listen, instead of one channel send per client. Second, <b>every stream writes a batch per wake</b> instead of writing and flushing once per message. No new crate except tokio's <code>socket2</code>. Target: <b>net ≤ 0 lines</b>, because the repo is at 6,989 / 7,000.
+</div>
+
+<h2>1. Which threads become tasks</h2>
+<div class="scroll"><table>
+<tr><th>Today (a thread each)</th><th>After</th></tr>
+<tr><td>Accept loop on the main thread</td><td><code>serve</code> = <code>runtime.block_on(accept)</code> on a tokio <code>UnixListener</code>.</td></tr>
+<tr><td>One thread per connection</td><td>One task per connection. The socket splits into read and write halves. Lines are read and dispatched synchronously under the std <code>Mutex&lt;Registry&gt;</code>, which is never held across <code>.await</code> (clippy's <code>await_holding_lock</code> enforces this).</td></tr>
+<tr><td>One pump thread per <code>attach</code> / <code>events</code> / <code>screen.watch</code> stream</td><td>One stream task that owns the write half. It is aborted when the read half ends, so a dead client's subscription goes at once. Today it waits for its next write to fail, which is never for a filter that never matches.</td></tr>
+<tr><td><code>screen.watch</code>: a diff thread plus its pump</td><td>One task: await a change, diff, write, <code>tokio::time::sleep(50 ms)</code>. No channel.</td></tr>
+<tr><td>Event fan-out: one <code>mpsc</code> per subscriber</td><td>A shared log plus a <code>watch</code> of the last seq (§4).</td></tr>
+<tr><td>One watcher thread per running terminal (<code>watch()</code>)</td><td>A task looping on <code>term.wait_until(..).await</code>, then <code>refresh()</code>.</td></tr>
+<tr><td>Sampler and machine-stats recorder threads</td><td>Two tasks on <code>tokio::time::sleep</code>. The <code>ps</code>, <code>df</code> and <code>sysctl</code> calls run in <code>spawn_blocking</code>.</td></tr>
+<tr><td><code>wait</code> blocks its connection thread; <code>kill</code> blocks it for up to 2 s; <code>machine.stats</code> runs <code>df</code> on it</td><td><code>wait</code> awaits inline in the connection task (shed-core's Condvar becomes a <code>tokio::sync::watch</code>). <code>kill</code> and <code>stats::system</code> run in <code>spawn_blocking</code>.</td></tr>
+<tr><td>ACP bridge (#40's glue): a stdin thread and a writer thread with a sync <code>Client</code></td><td>Stdin becomes a task (<code>io-std</code>). The writer becomes a task that drains with <code>recv_many</code> and does one write per batch on a tokio <code>UnixStream</code>. It is still connected with the sync <code>Client</code> hello and reconnects once, as now. The runtime stays current-thread.</td></tr>
+</table></div>
+<p>Thread count with T terminals, C connections and S streams (W of them <code>screen.watch</code>): today 3 + 2T + C + S + W. After: workers (≤ 4) + T readers + blocking threads only while a job runs (they exit after 10 s idle). For example, 20 terminals and 50 <code>events</code> clients is <b>143 threads today, 24 after</b>.</p>
+<p><b>Out of scope:</b> the CLI side stays sync. That covers <code>Client</code>, <code>attach</code>, <code>watch</code>, <code>relay</code> and the <code>machine stats</code> fan-out over ssh. It is a short-lived process, no bench covers it, and the protocol is unchanged.</p>
+
+<h2>2. PTY and terminal reads, which block</h2>
+<p><b>A dedicated std thread per terminal, as today.</b> <code>read_loop</code> is untouched. From that thread it bumps the terminal's <code>watch</code> and sends output to tokio unbounded <code>mpsc</code> subscribers, both of which are fine to call from sync code.</p>
+<ul>
+<li>Not <code>spawn_blocking</code>: a terminal reads for hours. It would pin blocking-pool threads meant for short jobs, which share their cap with <code>kill</code> and <code>df</code>.</li>
+<li>Not <code>AsyncFd</code>: it needs a non-blocking PTY master. <code>Terminal::write</code> (sync, called under the registry lock) would then see <code>EAGAIN</code>. kqueue on macOS PTY masters is unreliable. And it means rewriting core onto pty-process's async API, which costs more lines and wins nothing that tens of terminals need.</li>
+</ul>
+<p>shed-core gets tokio with <b><code>sync</code> + <code>time</code> only</b> (no runtime, no sockets). <code>wait_until</code> becomes <code>async</code>: a <code>select!</code> of <code>changed()</code> and <code>sleep_until(deadline | idle | reap)</code>, which replaces the Condvar wait and wait_timeout loop. Core tests use <code>#[tokio::test]</code>.</p>
+
+<div class="two">
+<div>
+<h2>3. Runtime, threads, shutdown</h2>
+<ul>
+<li><b>Server:</b> <code>new_multi_thread()</code>, <code>worker_threads = min(cpus, 4)</code>, <code>enable_all</code>. Multi-thread because <code>save()</code> fsyncs under the lock and <code>screen.watch</code> diffs and serialises. On one worker, one slow call would stall every client. Capped at 4 because shed is a background daemon.</li>
+<li><b>Bridge:</b> current-thread, as in #40.</li>
+<li><b>Shutdown:</b> unchanged. Today the server has none: it is killed, its PTYs close and <code>keep</code> terminals come back on the next load. No signal handler is added. <code>serve</code> returns only on a bind or accept error.</li>
+<li><b>Cancellation:</b> when the read half reaches EOF, the stream task is aborted. When a stream ends, the socket is shut down. A watcher ends when its terminal exits. A <code>wait</code> whose client left runs to its own end (match, exit or timeout) as today, but as a task instead of a thread. <code>spawn_blocking</code> jobs run to completion.</li>
+<li><b>Bridge exit:</b> await the writer task so queued outputs land, then call <code>shutdown_background()</code>. Without it, the pending stdin read would hang the bridge at exit.</li>
+</ul>
+</div>
+<div>
+<h2>4. Where tokio wins, and how the benches show it</h2>
+<p><b>Fan-out.</b> <code>Events</code> keeps one <code>Arc&lt;Mutex&lt;Log&gt;&gt;</code> of <code>(Event, Line)</code> and a <code>watch::Sender&lt;u64&gt;</code>. <code>emit</code> does one push and one notify, whatever N is. Each subscriber holds a cursor. When woken, it locks once, clones the matching lines after its cursor, and writes and flushes them as one batch. The log keeps ≥ 1,000 events for <code>since</code> and trims past the slowest live cursor. A slow client therefore keeps today's unbounded semantics, but with one shared copy instead of a queue per client.</p>
+<p><b>ACP path</b> (prompt → 1,000 updates → <code>reply</code> at a client):</p>
+<ul>
+<li>the server's event stream does a write per batch, not 1,000 write+flush syscalls and cross-thread wakes;</li>
+<li>in the bridge, session task → writer task stays in one runtime, so there is no futex wake or thread switch per batch;</li>
+<li>a reserve lever if needed: <code>emit</code> notifications skip the per-request <code>refresh()</code> (a <code>waitpid</code> per running terminal). The watcher tasks already refresh on every change.</li>
+</ul>
+</div>
+</div>
+
+<div class="scroll"><table>
+<tr><th>Measured on this Mac (M-series, release)</th><th class="n">base</th><th class="n">shared log</th></tr>
+<tr><td>Fan-out bench, total of n = 1, 16, 64, 256 (best of 3; 3 runs)</td><td class="n">61–66 ms</td><td class="n">—</td></tr>
+<tr><td>Spike of the same workload, std only: per-subscriber channel vs shared log (3 runs, a build running beside it)</td><td class="n">64–105 ms</td><td class="n ok">14–31 ms</td></tr>
+<tr><td>ACP throughput, 1,000 updates (best of 3; 3 runs) / replay</td><td class="n">11–19 ms / 80 ms</td><td class="n">—</td></tr>
+</table></div>
+<p><b>Bench rules for impl and rev.</b> The CI jobs keep only the 10% floor. The amendment's gate is that the head's median of 5 beats the base's on <b>both</b> benches, and rev's PASS quotes both lines. At the head, <code>tests/bench/fanout.rs</code> changes only its API calls: <code>subscribe</code> returns a subscriber, and draining is <code>take()</code> after the burst. The workload stays identical: 5,000 events, n ∈ {1, 16, 64, 256}, best of 3, emit then drain, one thread. Rev diffs that file to check this. A report-only line in <code>bench-fanout.sh</code> covers many idle connections: 500 <code>events</code> clients and one state change, giving time-to-all and the server's thread count at base and head (500+ vs ≤ 4 + T). It shows the idle-connection win without gating on it.</p>
+<p><b>Risk:</b> ACP throughput varies 11–19 ms between runs here, a much wider spread than the fan-out bench. The Python agent and PTY rendering set a floor that tokio does not touch, so the margin over base on this bench may be thin. If the head&rsquo;s median does not beat the base&rsquo;s after commit 4, impl pulls the reserve lever and tunes the batch size before filing an ask.</p>
+
+<h2>5. Migration order: one PR, five commits, each green on its own</h2>
+<p>Each commit passes fmt, clippy <code>-D warnings</code>, every test and the line cap. Impl runs both bench scripts locally after commits 1, 4 and 5.</p>
+<div class="scroll"><table>
+<tr><th>#</th><th>Commit</th><th class="n">est. net lines</th></tr>
+<tr><td>1</td><td><code>shed-server: the ACP bridge without glue threads</code>. Stdin and the writer become tasks, with <code>recv_many</code> batches and a tokio socket. Independent of the server, so it goes first.</td><td class="n">−5 to −10</td></tr>
+<tr><td>2</td><td><code>shed-server: one tokio runtime, accept and connections as tasks</code>. The <code>wait</code>, <code>kill</code>, stats and stream pumps run in <code>spawn_blocking</code> for now (interim, gone in 3).</td><td class="n">+8 to +12</td></tr>
+<tr><td>3</td><td><code>shed-core: async wait_until on a tokio watch</code>. Watchers, <code>wait</code>, <code>screen.watch</code> and <code>attach</code> become tasks, and the interim <code>spawn_blocking</code> goes.</td><td class="n">−15 to −25</td></tr>
+<tr><td>4</td><td><code>shed-server: events in one shared log, drained in batches</code>. Includes the bench's API update and the idle-connections report.</td><td class="n">+10 to +18</td></tr>
+<tr><td>5</td><td><code>docs: decision 0004 (tokio)</code>. Fixes 0003's “No async runtime” line, architecture.md and the crate docs.</td><td class="n">0</td></tr>
+<tr><td></td><td><b>Total, against 6,989 / 7,000</b></td><td class="n"><b>about −10 (range −25 to +10)</b></td></tr>
+</table></div>
+<p>If a commit would go over 7,000, impl first trims inside the files that commit touches (wording, never packing lines). If that is not enough, see question 2.</p>
+
+<h2>6. Dependency</h2>
+<p>tokio is already in (<code>=1.54.1</code>, from #40). The workspace entry drops to no features, and each crate names what it uses. <b>shed-server</b> adds <code>net</code> (Unix sockets) and <code>rt-multi-thread</code>; the bridge adds <code>io-std</code>. <b>shed-core</b> takes only <code>sync</code> and <code>time</code>. The one new crate in <code>Cargo.lock</code> is <b><code>socket2</code></b> (MIT OR Apache-2.0, already allowed by <code>deny.toml</code>), which tokio's <code>net</code> feature pulls in. <code>dep-direction.sh</code> is unaffected.</p>
+
+<h2>7. Open questions for the owner</h2>
+<ol class="q">
+<li><b>One PR with five green commits</b> <span class="rec">(recommended)</span>, or a sub-issue per commit? One PR keeps the amendment's “faster” gate on the whole step.</li>
+<li><b>Fallback trim if the cap is hit:</b> may impl drop the berth→shed shims (<code>Paths::move_old_dirs</code> and <code>$BERTH</code>, about 30 lines, promised “for one release”)? <span class="rec">Recommended yes, used only if needed.</span> The alternative is a cap raise, which #41 ruled out.</li>
+<li><b>The CLI stays on threads and the sync <code>Client</code></b> (§1) <span class="rec">(recommended)</span>, or should it move too? Moving it costs lines, and no bench measures it.</li>
+<li><b>Slow subscribers:</b> keep today's unbounded retention, shared now <span class="rec">(recommended)</span>, or cap the log and disconnect a client that falls behind? Capping would be a visible protocol change.</li>
+</ol>
+
+<footer>Sources: <code>crates/shed-server/src/{lib,registry,events,screen,stats,acp}.rs</code>, <code>crates/shed-core/src/terminal.rs</code>, <code>scripts/bench-{fanout,acp}.sh</code>, <code>ci/cap.toml</code>. Spike: a throwaway std-only program, not committed.</footer>
+</main>
+</body>
+</html>

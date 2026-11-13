@@ -1,0 +1,21 @@
+[package]
+name = "shed-core"
+description = "shed's terminals, screen model, state machine and persistence; no sockets."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+pty-process.workspace = true
+rustix = { workspace = true, features = ["termios"] }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["io-util", "macros", "process", "sync", "time"] }
+unicode-width.workspace = true
+vte.workspace = true
+
+[lints]
+workspace = true

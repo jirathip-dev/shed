@@ -4,13 +4,13 @@
 
 ## Context
 
-berth ships as one binary, but its logic should be testable without a socket or a CLI, and the API types
+shed ships as one binary, but its logic should be testable without a socket or a CLI, and the API types
 should be shared by the client and the server without pulling in either.
 
 ## Decision
 
-A Cargo workspace with four crates under `crates/`: `berth-proto` (API types), `berth-core` (terminals,
-screen, state, persistence), `berth-server` (socket and JSON-RPC) and `berth` (the binary). `berth-core`
+A Cargo workspace with four crates under `crates/`: `shed-proto` (API types), `shed-core` (terminals,
+screen, state, persistence), `shed-server` (socket and JSON-RPC) and `shed` (the binary). `shed-core`
 depends on no other workspace crate, enforced in CI by `scripts/dep-direction.sh`. A `justfile` instead of
 an `xtask` crate runs the gates locally.
 

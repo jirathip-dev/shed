@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":7,"method":"keys","params":{"name":"build","keys":["enter"]}}
+{"jsonrpc":"2.0","id":7,"result":{}}

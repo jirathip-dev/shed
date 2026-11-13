@@ -9,7 +9,7 @@ just check
 ```
 
 It runs every CI gate: `fmt`, `clippy` (pedantic, at most 10 allows, each with a reason), `test`, `doc`,
-`deny`, `cap` (≤ 5,000 non-test lines across `crates/*/src`), `deps` (`berth-core` has no workspace deps)
+`deny`, `cap` (≤ 6,200 non-test lines across `crates/*/src`), `deps` (`shed-core` has no workspace deps)
 and `hygiene` (no setup-specific names, see `ci/denylist.txt`). Each one also runs alone, e.g. `just clippy`.
 The toolchain is the MSRV pinned in `rust-toolchain.toml`; CI also tests stable.
 

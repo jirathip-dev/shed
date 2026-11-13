@@ -1,6 +1,6 @@
 ---
 name: Bug
-about: Something berth does wrong
+about: Something shed does wrong
 labels: bug
 ---
 
@@ -14,4 +14,4 @@ labels: bug
 
 ## Versions
 
-<!-- `berth --version`, OS and arch. -->
+<!-- `shed --version`, OS and arch. -->

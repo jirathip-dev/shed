@@ -1,0 +1,20 @@
+- Don't write `//` or `/* */` comments (only `// SAFETY:` and `// TODO(#N)` on an open issue), and don't put `///` on anything but public API. Enforcer: `just comments` (scripts/comment-rule.py).
+- Don't push unformatted Rust. Enforcer: `just fmt` (cargo fmt --check).
+- Don't leave a clippy warning (pedantic), or add an `allow` past the workspace's 10, or one without a reason. Enforcer: `just clippy`.
+- Don't `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `dbg!`, index or slice, cast with `as`, or `let _ =` a must-use value outside tests, and don't write `unsafe`. Enforcer: `just clippy` (`[workspace.lints]`, clippy.toml), `just banned` (ci/fixtures/banned).
+- Don't `print!` or `eprint!` outside crates/shed/src/out.rs. Enforcer: `just clippy` (print_stdout, print_stderr), `just banned`.
+- Don't push a failing test. Enforcer: `just test`.
+- Don't let a test leave a temp folder behind, pass or fail. Enforcer: `just temp-left` (scripts/temp-left.sh) after `just test`.
+- Don't break the rustdoc build. Enforcer: `just doc`.
+- Don't add a dependency with a disallowed licence, an advisory or a duplicate version. Enforcer: `just deny` (deny.toml).
+- Don't grow the non-test Rust lines in crates/*/src past `line_cap`. Enforcer: `just cap` (ci/cap.toml).
+- Don't make shed-core depend on another workspace crate. Enforcer: `just deps` (scripts/dep-direction.sh).
+- Don't use a layer outside its `may_use` (core and proto use nothing, server uses core and proto, cli uses server). Enforcer: `just arch` (.herdsman/arch.toml).
+- Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.herdsman/arch.toml).
+- Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.herdsman/arch.toml).
+- Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.herdsman/arch.toml).
+- Don't commit a setup-specific name (home paths, tailnet hosts, private IPs, chat IDs). Enforcer: `just hygiene` (ci/denylist.txt).
+- Don't name an agent or provider outside crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
+- Don't push a GitHub workflow actionlint rejects. Enforcer: `just actionlint`.
+- Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo. Enforcer: `just self-hosted` (scripts/self-hosted.py).
+- Don't fail an active lesson check in this file (a shadow one only reports). Enforcer: `just lessons` (drover lesson-check).

@@ -1,0 +1,45 @@
+$ shed run --name agent --cwd $DIR -- sh -c stty raw -echo; printf '\033]7501;?\007'; r=$(dd bs=1 count=85 2>/dev/null); printf 'probe %s\r\n' "$r" | tr '\033\007' 'EB'; printf '\033]7501;state=working:id=build\007\033]7501;state=done:id=build/tests\007\033]7501;state=blocked:id=lint:kind=permission\007'; printf '\033]7501;state=working:progress=40:app=make:title=RG9jcw==:msg=QnVpbGRpbmcgZG9jcw==\033\\'; read x; printf '\033]7501;state=clear:id=build\007\033]7501;state=blocked:kind=question:msg=T3ZlcndyaXRlPw==:note=x:zz\007'; read x; printf '\033]7501;state=clear\007cleared\r\n'; read x
+agent
+$ shed wait agent --until working --timeout 10
+agent working
+$ shed read agent
+probe E]7501;?:states=idle,working,done,blocked,error,clear:kinds=permission,question,authB
+$ shed --json get agent
+{"name":"agent","labels":{},"cwd":"$DIR","cmd":["sh","-c","stty raw -echo; printf '\\033]7501;?\\007'; r=$(dd bs=1 count=85 2>/dev/null); printf 'probe %s\\r\\n' \"$r\" | tr '\\033\\007' 'EB'; printf '\\033]7501;state=working:id=build\\007\\033]7501;state=done:id=build/tests\\007\\033]7501;state=blocked:id=lint:kind=permission\\007'; printf '\\033]7501;state=working:progress=40:app=make:title=RG9jcw==:msg=QnVpbGRpbmcgZG9jcw==\\033\\\\'; read x; printf '\\033]7501;state=clear:id=build\\007\\033]7501;state=blocked:kind=question:msg=T3ZlcndyaXRlPw==:note=x:zz\\007'; read x; printf '\\033]7501;state=clear\\007cleared\\r\\n'; read x"],"keep":false,"state":"running","exit":null,"pid":0,"reported":{"state":"working","progress":40,"app":"make","title":"Docs","msg":"Building docs"},"records":[{"state":"working","id":"build"},{"state":"done","id":"build/tests"},{"state":"blocked","id":"lint","kind":"permission"}]}
+$ shed send agent 
+
+$ shed wait agent --until blocked --kind auth --timeout 0.2
+agent timeout
+[exit 124] 
+$ shed wait agent --until blocked --kind question --timeout 10
+agent blocked
+$ shed --json get agent
+{"name":"agent","labels":{},"cwd":"$DIR","cmd":["sh","-c","stty raw -echo; printf '\\033]7501;?\\007'; r=$(dd bs=1 count=85 2>/dev/null); printf 'probe %s\\r\\n' \"$r\" | tr '\\033\\007' 'EB'; printf '\\033]7501;state=working:id=build\\007\\033]7501;state=done:id=build/tests\\007\\033]7501;state=blocked:id=lint:kind=permission\\007'; printf '\\033]7501;state=working:progress=40:app=make:title=RG9jcw==:msg=QnVpbGRpbmcgZG9jcw==\\033\\\\'; read x; printf '\\033]7501;state=clear:id=build\\007\\033]7501;state=blocked:kind=question:msg=T3ZlcndyaXRlPw==:note=x:zz\\007'; read x; printf '\\033]7501;state=clear\\007cleared\\r\\n'; read x"],"keep":false,"state":"running","exit":null,"pid":0,"reported":{"state":"blocked","kind":"question","msg":"Overwrite?"},"records":[{"state":"blocked","id":"lint","kind":"permission"}]}
+$ shed send agent 
+
+$ shed wait agent --output cleared --timeout 10
+agent output
+$ shed --json get agent
+{"name":"agent","labels":{},"cwd":"$DIR","cmd":["sh","-c","stty raw -echo; printf '\\033]7501;?\\007'; r=$(dd bs=1 count=85 2>/dev/null); printf 'probe %s\\r\\n' \"$r\" | tr '\\033\\007' 'EB'; printf '\\033]7501;state=working:id=build\\007\\033]7501;state=done:id=build/tests\\007\\033]7501;state=blocked:id=lint:kind=permission\\007'; printf '\\033]7501;state=working:progress=40:app=make:title=RG9jcw==:msg=QnVpbGRpbmcgZG9jcw==\\033\\\\'; read x; printf '\\033]7501;state=clear:id=build\\007\\033]7501;state=blocked:kind=question:msg=T3ZlcndyaXRlPw==:note=x:zz\\007'; read x; printf '\\033]7501;state=clear\\007cleared\\r\\n'; read x"],"keep":false,"state":"running","exit":null,"pid":0}
+$ shed run --name w --cwd $DIR -- sh -c printf '\033]7501;state=working\007\033]7501;state=blocked:id=asks\007\033]7501;state=error:id=tests\007ready\n'; read x
+w
+$ shed wait w --output ready --timeout 10
+w output
+$ shed send w 
+
+$ shed wait w --output never --timeout 10
+w exited 0
+[exit 1] 
+$ shed --json get w
+{"name":"w","labels":{},"cwd":"$DIR","cmd":["sh","-c","printf '\\033]7501;state=working\\007\\033]7501;state=blocked:id=asks\\007\\033]7501;state=error:id=tests\\007ready\\n'; read x"],"keep":false,"state":"exited","exit":0,"pid":null,"records":[{"state":"error","id":"tests"}]}
+$ shed run --name d --cwd $DIR -- sh -c printf '\033]7501;state=done\007\033]7501;state=blocked:id=asks\007\033]7501;state=error:id=tests\007ready\n'; read x
+d
+$ shed wait d --output ready --timeout 10
+d output
+$ shed send d 
+
+$ shed wait d --output never --timeout 10
+d exited 0
+[exit 1] 
+$ shed --json get d
+{"name":"d","labels":{},"cwd":"$DIR","cmd":["sh","-c","printf '\\033]7501;state=done\\007\\033]7501;state=blocked:id=asks\\007\\033]7501;state=error:id=tests\\007ready\\n'; read x"],"keep":false,"state":"exited","exit":0,"pid":null,"reported":{"state":"done"},"records":[{"state":"error","id":"tests"}]}

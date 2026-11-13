@@ -1,6 +1,6 @@
 ---
 name: Feature
-about: Something berth should do
+about: Something shed should do
 labels: enhancement
 ---
 

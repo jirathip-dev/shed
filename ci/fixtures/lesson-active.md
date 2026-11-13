@@ -1,0 +1,1 @@
+- don't X (enforced by: always-fails `false`, active since 2026-11-11)

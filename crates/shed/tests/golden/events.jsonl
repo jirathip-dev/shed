@@ -1,0 +1,6 @@
+{"jsonrpc":"2.0","id":22,"method":"events","params":{"since":0}}
+{"jsonrpc":"2.0","id":22,"result":{}}
+{"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"event":"started"}
+{"seq":2,"name":"other","labels":{"role":"rev"},"parent":"build","event":"started"}
+{"seq":3,"name":"build","labels":{"issue":"7","role":"impl"},"event":"state","state":"working","note":"step 1"}
+{"seq":4,"name":"build","labels":{"issue":"7","role":"impl"},"event":"killed"}

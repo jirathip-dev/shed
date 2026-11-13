@@ -1,0 +1,59 @@
+$ shed ls
+[exit 1] shed: no shed server on $DIR/shed.sock; start one with `shed serve --detach`
+$ shed run --cwd $DIR -- true
+[exit 1] shed: no shed server on $DIR/shed.sock; start one with `shed serve --detach` (or pass --autostart)
+$ shed run --name shell --label role=impl --label issue=7 --cwd $DIR -- sh
+shell
+$ shed read shell
+$
+$ shed --json read shell --lines 1
+{"text":"$"}
+$ shed send shell exit
+$ shed ls
+NAME   STATE   EXIT  PID  RSS  CPU  LABELS             CMD
+shell  exited  0     -    -    -    issue=7,role=impl  sh
+$ shed --json run --name rev --label role=rev --cwd $DIR -- sleep 100
+{"name":"rev","labels":{"role":"rev"},"cwd":"$DIR","cmd":["sleep","100"],"keep":false,"state":"running","exit":null,"pid":0}
+$ shed kill rev
+rev exited 143
+$ shed ls --label role=impl
+NAME   STATE   EXIT  PID  RSS  CPU  LABELS             CMD
+shell  exited  0     -    -    -    issue=7,role=impl  sh
+$ shed ls --label role=impl --label issue=8
+NAME  STATE  EXIT  PID  RSS  CPU  LABELS  CMD
+$ shed --json ls --label role=rev
+[{"name":"rev","labels":{"role":"rev"},"cwd":"$DIR","cmd":["sleep","100"],"keep":false,"state":"exited","exit":143,"pid":null}]
+$ shed get shell
+{
+  "name": "shell",
+  "labels": {
+    "issue": "7",
+    "role": "impl"
+  },
+  "cwd": "$DIR",
+  "cmd": [
+    "sh"
+  ],
+  "keep": false,
+  "state": "exited",
+  "exit": 0,
+  "pid": null
+}
+$ shed --json get shell
+{"name":"shell","labels":{"issue":"7","role":"impl"},"cwd":"$DIR","cmd":["sh"],"keep":false,"state":"exited","exit":0,"pid":null}
+$ shed top
+NAME   STATE   EXIT  PID  RSS  CPU  TOKENS  LABELS             CMD
+rev    exited  143   -    -    -    -       role=rev           sleep 100
+shell  exited  0     -    -    -    -       issue=7,role=impl  sh
+$ shed rm shell
+shell removed
+$ shed --json rm rev
+{"name":"rev","labels":{"role":"rev"},"cwd":"$DIR","cmd":["sleep","100"],"keep":false,"state":"exited","exit":143,"pid":null}
+$ shed ls
+NAME  STATE  EXIT  PID  RSS  CPU  LABELS  CMD
+$ shed keys rev enter
+[exit 1] shed: NO_SUCH_TERMINAL: rev
+$ shed run --label nolabel -- true
+[exit 2] error: invalid value 'nolabel' for '--label <K=V>': "nolabel" is not k=v
+
+For more information, try '--help'.

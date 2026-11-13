@@ -1,0 +1,2 @@
+{"jsonrpc":"2.0","id":4,"method":"get","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":4,"result":{"name":"build","labels":{"issue":"7","role":"impl"},"cwd":"$DIR","cmd":["sh","-c","printf 'hello\\n'; exec sleep 100"],"keep":false,"state":"running","exit":null,"pid":0}}

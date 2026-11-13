@@ -1,2 +1,0 @@
-{"id":5,"jsonrpc":"2.0","method":"read","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":5,"result":{"text":"hello"}}

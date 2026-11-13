@@ -1,0 +1,11 @@
+# shed serve as a systemd user service. See docs/service.md.
+[Unit]
+Description=shed: keeps coding-agent terminals alive
+
+[Service]
+# %h is your home directory; point this at your shed binary.
+ExecStart=%h/.cargo/bin/shed serve
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

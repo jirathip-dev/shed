@@ -1,0 +1,44 @@
+$ shed run --name a --label run=golden --acp fake
+a
+$ shed wait a --output ACP session ready --timeout 10
+a output
+$ shed send a tool
+$ shed wait a --until waiting-approval --timeout 10
+a waiting-approval
+$ shed approve a allow-once
+$ shed wait a --until done --timeout 10
+a done
+$ shed read a
+> tool
+[tool] Write notes.txt (completed)
+wrote notes.txt
+$ shed send a hi
+$ shed wait a --until done --timeout 10
+a done
+$ shed read a --lines 2
+> hi
+you said: hi
+$ shed events --label run=golden --since 0
+{"seq":1,"name":"a","labels":{"run":"golden"},"event":"started"}
+{"seq":2,"name":"a","labels":{"run":"golden"},"event":"session","id":"sess-1","model":"fast","models":[["fast","Fast"],["smart","Smart"]]}
+{"seq":3,"name":"a","labels":{"run":"golden"},"event":"state","state":"working"}
+{"seq":4,"name":"a","labels":{"run":"golden"},"event":"turn","prompt":"tool"}
+{"seq":5,"name":"a","labels":{"run":"golden"},"event":"plan","entries":[{"content":"Write notes","priority":"high","status":"in_progress"}]}
+{"seq":6,"name":"a","labels":{"run":"golden"},"event":"mode","mode":"code"}
+{"seq":7,"name":"a","labels":{"run":"golden"},"event":"tool_call","id":"call-1","title":"Write notes.txt","status":"pending","kind":"edit"}
+{"seq":8,"name":"a","labels":{"run":"golden"},"event":"state","state":"running","note":"Write notes.txt"}
+{"seq":9,"name":"a","labels":{"run":"golden"},"event":"approval_request","tool":"Write notes.txt","options":[{"id":"allow-once","name":"Allow","kind":"allow_once"},{"id":"reject-once","name":"Reject","kind":"reject_once"}]}
+{"seq":10,"name":"a","labels":{"run":"golden"},"event":"state","state":"waiting-approval","note":"Write notes.txt"}
+{"seq":11,"name":"a","labels":{"run":"golden"},"event":"approved","option":"allow-once"}
+{"seq":12,"name":"a","labels":{"run":"golden"},"event":"state","state":"running","note":"Write notes.txt"}
+{"seq":13,"name":"a","labels":{"run":"golden"},"event":"tool_call","id":"call-1","title":"Write notes.txt","status":"completed","kind":"edit"}
+{"seq":14,"name":"a","labels":{"run":"golden"},"event":"state","state":"working"}
+{"seq":15,"name":"a","labels":{"run":"golden"},"event":"text","text":"wrote "}
+{"seq":16,"name":"a","labels":{"run":"golden"},"event":"text","text":"notes.txt"}
+{"seq":17,"name":"a","labels":{"run":"golden"},"event":"reply","text":"wrote notes.txt","stop_reason":"end_turn"}
+{"seq":18,"name":"a","labels":{"run":"golden"},"event":"state","state":"done","note":"end_turn"}
+{"seq":19,"name":"a","labels":{"run":"golden"},"event":"state","state":"working"}
+{"seq":20,"name":"a","labels":{"run":"golden"},"event":"turn","prompt":"hi"}
+{"seq":21,"name":"a","labels":{"run":"golden"},"event":"text","text":"you said: hi"}
+{"seq":22,"name":"a","labels":{"run":"golden"},"event":"reply","text":"you said: hi","stop_reason":"end_turn"}
+{"seq":23,"name":"a","labels":{"run":"golden"},"event":"state","state":"done","note":"end_turn"}

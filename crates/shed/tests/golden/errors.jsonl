@@ -1,0 +1,24 @@
+{"jsonrpc":"2.0","id":1,"method":"ls","params":{}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32001,"message":"NO_HELLO: send hello with your version first"}}
+{"jsonrpc":"2.0","id":8,"method":"nope","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":8,"error":{"code":-32601,"message":"NO_SUCH_METHOD: nope"}}
+{"jsonrpc":"2.0","id":19,"method":"state","params":{"name":"build","state":"idle"}}
+{"jsonrpc":"2.0","id":19,"error":{"code":-32602,"message":"INVALID_PARAMS: state must be working, blocked, done or error"}}
+{"jsonrpc":"2.0","id":20,"method":"wait","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":20,"error":{"code":-32602,"message":"INVALID_PARAMS: give until, output or children"}}
+{"jsonrpc":"2.0","id":21,"method":"wait","params":{"name":"build","output":"[a"}}
+{"jsonrpc":"2.0","id":21,"error":{"code":-32602,"message":"INVALID_PARAMS: bad pattern \"[a\": unclosed ["}}
+{"jsonrpc":"2.0","id":9,"method":"get","params":{"name":"nope"}}
+{"jsonrpc":"2.0","id":9,"error":{"code":-32002,"message":"NO_SUCH_TERMINAL: nope"}}
+{"jsonrpc":"2.0","id":10,"method":"rm","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":10,"error":{"code":-32004,"message":"STILL_RUNNING: build"}}
+{"jsonrpc":"2.0","id":11,"method":"run","params":{"name":"other","labels":{"role":"rev"},"cwd":"$DIR","cmd":["sleep","100"],"parent":{"name":"build","outlive":true}}}
+{"jsonrpc":"2.0","id":11,"error":{"code":-32003,"message":"NAME_TAKEN: other"}}
+{"jsonrpc":"2.0","id":12,"method":"keys","params":{"name":"build","keys":["hyper"]}}
+{"jsonrpc":"2.0","id":12,"error":{"code":-32602,"message":"INVALID_PARAMS: unknown key: \"hyper\""}}
+{"jsonrpc":"2.0","id":13,"method":"run","params":{"cwd":"$DIR","cmd":[]}}
+{"jsonrpc":"2.0","id":13,"error":{"code":-32602,"message":"INVALID_PARAMS: empty cmd"}}
+{"jsonrpc":"2.0","id":25,"method":"run","params":{"cwd":"$DIR","cmd":["true"],"parent":{"name":"nope"}}}
+{"jsonrpc":"2.0","id":25,"error":{"code":-32002,"message":"NO_SUCH_TERMINAL: parent nope is not running"}}
+{
+{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"PARSE: EOF while parsing an object at line 1 column 1"}}

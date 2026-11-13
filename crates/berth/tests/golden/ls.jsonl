@@ -1,2 +1,0 @@
-{"id":3,"jsonrpc":"2.0","method":"ls","params":{"labels":{"role":"impl"}}}
-{"jsonrpc":"2.0","id":3,"result":[{"cmd":["sh","-c","printf 'hello\\n'; exec sleep 100"],"cwd":"$DIR","exit":null,"keep":false,"labels":{"issue":"7","role":"impl"},"name":"build","pid":0,"state":"running"}]}
