@@ -1,0 +1,23 @@
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-83/crates/shed-server)
+   Compiling shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-83/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.37s
+     Running tests/machines.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-83/debug/deps/machines-f2166501463c6a28)
+
+running 1 test
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... FAILED
+
+failures:
+
+---- machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s stdout ----
+
+thread 'machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s' (113554349) panicked at crates/shed/tests/machines.rs:625:9:
+{"at":1794541467,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":61513,"cpus":12,"uptime_s":0,"terminals":{"exited":1,"working":1},"history":[{"at":1794541467,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":61515,"cpus":12,"uptime_s":0,"terminals":{}}]}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 8 filtered out; finished in 1.26s
+
+error: test failed, to rerun pass `-p shed --test machines`

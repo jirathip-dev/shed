@@ -1,0 +1,26 @@
+cargo deny --locked check
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/jkmacmini/.local/share/drover/work/shed/issue-83/deny.toml:13:32
+   │
+13 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+   │                                ━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/jkmacmini/.local/share/drover/work/shed/issue-83/deny.toml:13:48
+   │
+13 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+   │                                                ━━━━━━━━━━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/jkmacmini/.local/share/drover/work/shed/issue-83/deny.toml:13:64
+   │
+13 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+   │                                                                ━━━ unmatched license allowance
+
+warning[license-not-encountered]: license was not encountered
+   ┌─ /Users/jkmacmini/.local/share/drover/work/shed/issue-83/deny.toml:13:86
+   │
+13 │ allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016", "Zlib"]
+   │                                                                                      ━━━━━━━━━━━━━━━━ unmatched license allowance
+
+advisories ok, bans ok, licenses ok, sources ok
