@@ -122,12 +122,7 @@ impl proctree::ProcessTable for OutOfFiles {
 fn kill_ends_the_group_when_the_process_table_cannot_be_read() {
     let t = sh("echo ready; sleep 100", SIZE);
     eventually("ready", || t.screen() == "ready");
-    drop(proctree::kill_tree(
-        &OutOfFiles,
-        t.pid(),
-        Duration::from_millis(300),
-        || {},
-    ));
+    proctree::kill_tree(&OutOfFiles, t.pid(), Duration::from_millis(300), || {});
     eventually("the program exited", || {
         t.try_wait().expect("try_wait").is_some()
     });

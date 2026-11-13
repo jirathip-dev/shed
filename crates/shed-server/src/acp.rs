@@ -1101,7 +1101,7 @@ fn run(
             if let Some(pid) = child.id().and_then(|p| i32::try_from(p).ok()) {
                 let table = shed_core::proctree::system();
                 let reap = || drop(child.try_wait());
-                shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap)?;
+                shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap);
             }
             s.state("hibernated", None);
             let Some(input) = inputs.recv().await else {

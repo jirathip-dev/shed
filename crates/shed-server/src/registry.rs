@@ -1,4 +1,5 @@
 use shed_core::runner::ExitStatus;
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -118,16 +119,30 @@ impl Saver {
         }
     }
 
-    fn save(&self, file: StateFile) {
+    fn save(&self, file: StateFile) -> u64 {
         let generation = self.queued.fetch_add(1, Ordering::SeqCst) + 1;
         self.files.send((generation, file)).ok();
+        generation
     }
 
-    pub(crate) async fn flushed(&self) {
-        let generation = self.queued.load(Ordering::SeqCst);
+    pub(crate) async fn flushed(&self, generation: u64) {
         let mut written = self.written.clone();
         written.wait_for(|w| *w >= generation).await.ok();
     }
+
+    pub(crate) async fn answering<T>(&self, request: impl Future<Output = T>) -> T {
+        let (answer, generation) = CHANGED
+            .scope(Cell::new(0), async {
+                (request.await, CHANGED.with(Cell::get))
+            })
+            .await;
+        self.flushed(generation).await;
+        answer
+    }
+}
+
+tokio::task_local! {
+    static CHANGED: Cell<u64>;
 }
 
 pub(crate) struct Registry {
@@ -232,7 +247,8 @@ fn end_left_over(state: &Path, terminals: &[TerminalInfo]) {
             continue;
         };
         let left = proctree::tree(&procs, pid, &BTreeSet::new()).len();
-        if left > 0 && proctree::kill_tree(&proctree::system(), pid, GRACE, || {}).is_ok() {
+        if left > 0 {
+            proctree::kill_tree(&proctree::system(), pid, GRACE, || {});
             let name = &info.name;
             writeln!(
                 io::stderr(),
@@ -328,7 +344,8 @@ impl Registry {
     }
 
     fn save(&self) {
-        self.saver.save(self.state_file());
+        let generation = self.saver.save(self.state_file());
+        CHANGED.try_with(|c| c.set(generation)).ok();
     }
 
     fn saved<T>(&self, value: T) -> T {
@@ -368,7 +385,7 @@ impl Registry {
         }
         self.deliver(notes);
         if changed {
-            self.save();
+            self.saver.save(self.state_file());
         }
         Ok(self)
     }
@@ -937,6 +954,10 @@ mod tests {
         tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap()
-            .block_on(registry.saver.flushed());
+            .block_on(
+                registry
+                    .saver
+                    .flushed(registry.saver.queued.load(Ordering::SeqCst)),
+            );
     }
 }
