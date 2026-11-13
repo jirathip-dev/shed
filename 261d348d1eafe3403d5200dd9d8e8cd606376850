@@ -1,0 +1,6 @@
+Decided: bring in staging with a merge commit, not a rebase, so the pushed history is not rewritten
+Decided: no src change in this round; the merge picks up the raised line cap from #106
+Rejected: rebase onto staging — it rewrites pushed history and needs a force-push
+Because: ci/cap.toml:3
+Check: the merge had no conflicts and `just cap` reads 7860 / 10000 at this head
+Owner: brings the branch up to date with the latest staging; no behaviour change.
