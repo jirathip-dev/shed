@@ -58,6 +58,5 @@ read its 8 MiB tail into memory. That buffering was the 90 MB RSS spike, which t
 - rows hold only the cells written to them, so a scroll rotates and clears a row;
 - log rotation streams its tail from one file to the other.
 
-Reads, `screen.watch` and attach output match the base on the golden files. Fed 20 MiB of each
-stream, with two resizes along the way, the screen gives the base's relayed bytes, text, history and
-snapshot.
+Reads, `screen.watch` and attach output match the base on the golden files: the existing golden tests
+pass unchanged (`cargo test --workspace`).
