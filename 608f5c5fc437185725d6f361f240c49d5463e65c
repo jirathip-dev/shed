@@ -1,0 +1,9 @@
+Decided: merged origin/staging b5a69b2 (the #106 cap raise); it touched only the cap files
+Because: ci/cap.toml:3
+Rejected: rebasing onto staging — lane rules forbid history rewrites and force-pushes
+Decided: dropped #81's block on #106 now that the raise is on staging
+Because: ci/cap.toml:3
+Check: just cap exits 0 at 7994 / 10000
+Check: the 50 MB resources and lowered-soft-limit tests pass alone and in the full run; their earlier failures came while the disk was full
+Check: machine_stats_..._within_5_s is the only failing test, the same host uptime 0 failure as at staging
+Owner: the cap no longer blocks this PR; it is ready for review
