@@ -198,4 +198,9 @@ fn setup_hooks_report_nothing_outside_shed_and_doctor_lists_them() {
 
     let installed = format!("ok    hooks    claude: {}\n", file.display());
     assert!(text(&shed(&home, &["--dir", d, "doctor"])).contains(&installed));
+
+    std::fs::write(&file, "{bad").expect("malformed settings");
+    let report = text(&shed(&home, &["--dir", d, "doctor"]));
+    assert!(report.contains("FAIL  hooks    "), "{report}");
+    assert!(report.contains("not JSON objects"), "{report}");
 }

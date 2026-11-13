@@ -17,7 +17,7 @@ agent behaves the same outside shed. Setup edits the file as text: it inserts sh
 and never twice, right after the bracket that opens their list, and leaves every other byte where it
 was. `--remove` deletes exactly the text setup inserted, so setup then remove gives the file back byte for
 byte; entries the agent has since rewritten in its own layout are not recognised and stay. A file shed
-created is deleted again.
+created is deleted again while it is still exactly as shed wrote it.
 
 ## The files each agent's setup touches
 

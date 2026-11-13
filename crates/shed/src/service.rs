@@ -158,11 +158,18 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         crate::out::line(format_args!("{mark:<5} {what:<8} {v}"));
     }
     let home = shed_server::config::var("HOME").unwrap_or_default();
-    for f in shed_server::hooks::setup(Path::new(&home), &[], false, true).unwrap_or_default() {
+    let hooks = shed_server::hooks::setup(Path::new(&home), &[], false, true);
+    if let Err(e) = &hooks {
+        crate::out::line(format_args!("FAIL  hooks    {e}"));
+    }
+    for f in hooks.as_deref().unwrap_or_default() {
         let (agent, file) = (f.agent, f.file.display());
-        let fix = f.after.map_or("", |_| " lacks them; fix: shed setup");
+        let fix = f
+            .after
+            .as_ref()
+            .map_or("", |_| " lacks them; fix: shed setup");
         let mark = if fix.is_empty() { "ok" } else { "--" };
         crate::out::line(format_args!("{mark:<5} hooks    {agent}: {file}{fix}"));
     }
-    Ok(checks.iter().all(|(_, r)| r.is_ok()))
+    Ok(hooks.is_ok() && checks.iter().all(|(_, r)| r.is_ok()))
 }

@@ -10,15 +10,13 @@ use serde_json::{Value, json};
 
 use crate::providers::{Hooks, hook_tables};
 
-const EMPTY: &str = "{}\n";
-
 /// One agent's config file and, when `shed setup` changes it, its new text.
 pub struct HookFile {
     /// The agent's name, as `shed setup <agent>` takes it.
     pub agent: &'static str,
     /// Its config file.
     pub file: PathBuf,
-    /// The new text (`None`: unchanged); a file left an empty object is deleted.
+    /// The new text (`None`: unchanged; empty: the file shed created is deleted).
     pub after: Option<String>,
 }
 
@@ -109,19 +107,21 @@ fn strip(text: &str, h: &Hooks) -> String {
 
 fn edit(home: &Path, h: &Hooks, remove: bool, dry: bool) -> io::Result<HookFile> {
     let file = home.join(h.file);
-    let before = fs::read_to_string(&file).or_else(|e| match e.kind() {
-        ErrorKind::NotFound => Ok(EMPTY.to_owned()),
-        _ => Err(e),
-    })?;
-    let bad = |e| io::Error::other(format!("{}: not JSON objects: {e}", file.display()));
-    let after = if remove {
-        strip(&before, h)
-    } else {
-        add(&before, h).map_err(bad)?
+    let created = format!("{{\n{}\n}}\n", whole(h));
+    let before = match fs::read_to_string(&file) {
+        Err(e) if e.kind() == ErrorKind::NotFound => None,
+        read => Some(read?),
     };
-    let after = (after != before).then_some(after);
+    let bad = |e| io::Error::other(format!("{}: not JSON objects: {e}", file.display()));
+    let after = match (before, remove) {
+        (None, true) => None,
+        (None, false) => Some(created),
+        (Some(b), true) if b == created => Some(String::new()),
+        (Some(b), true) => Some(strip(&b, h)).filter(|a| *a != b),
+        (Some(b), false) => Some(add(&b, h).map_err(bad)?).filter(|a| *a != b),
+    };
     match (&after, dry) {
-        (Some(t), false) if t == EMPTY => fs::remove_file(&file)?,
+        (Some(t), false) if t.is_empty() => fs::remove_file(&file)?,
         (Some(t), false) => fs::write(&file, t)?,
         _ => {}
     }
@@ -144,6 +144,8 @@ mod tests {
         "{ \"hooks\" : {\"Stop\":[ {\"matcher\": \"\", \"hooks\": [{\"type\":\"command\",\n\t\"command\": \"say done\"}]} ], \"Other\": []},\n  \"alpha\": true }\n",
         "{\"hooks\":{\"Prompt\":[],\"Stop\": [ ]},\"n\":2}",
         "  {\"hooks\": {}}\n",
+        "{}\n",
+        "{\n\n}\n",
     ];
 
     fn run(home: &Path, remove: bool, dry_run: bool) -> Option<String> {
