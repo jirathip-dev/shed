@@ -270,7 +270,8 @@ fn example(method: Method) -> (Value, Value) {
         Method::Send => (
             to_value(SendParams {
                 name: "build".into(),
-                text: "make lint\n".into(),
+                text: "make lint".into(),
+                ..SendParams::default()
             })
             .unwrap(),
             json!({}),

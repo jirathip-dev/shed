@@ -87,6 +87,7 @@ fn best_turn<E>(
             let params = SendParams {
                 name: name.to_owned(),
                 text,
+                ..SendParams::default()
             };
             let _: Value = client.call(Method::Send, &params).expect("send");
             let (texts, first) = count(&mut events, sent);

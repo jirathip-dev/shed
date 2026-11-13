@@ -7,7 +7,6 @@ startend
 $ shed read agent --history
 startend
 $ shed send agent 
-
 $ shed --json wait agent --until done --timeout 10
 {"outcome":"matched","terminal":{"name":"agent","labels":{},"cwd":"$DIR","cmd":["sh","-c","printf 'start\\033]7501;state=working;note=step 1\\007end\\n'; read x; 'shed' --dir '$DIR' state done --note 'all green'; read y"],"keep":false,"state":"running","exit":null,"pid":0,"reported":{"state":"done","note":"all green"}}}
 $ shed wait agent --until blocked --timeout 0.2
@@ -19,7 +18,6 @@ $ shed --json get agent
 $ shed state agent sleeping
 [exit 1] shed: INVALID_PARAMS: state must be working, blocked, done or error
 $ shed send agent 
-
 $ shed wait agent --until working
 agent exited 0
 [exit 1] 

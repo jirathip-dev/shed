@@ -337,7 +337,8 @@ fn a_kept_terminal_comes_back_as_a_shell_in_its_cwd() {
 
     let send = SendParams {
         name: "kept".into(),
-        text: "echo \"in:$PWD\"\n".into(),
+        text: "echo \"in:$PWD\"".into(),
+        ..SendParams::default()
     };
     client.call::<_, Value>(Method::Send, &send).expect("send");
     let want = format!("in:{}", work.display());
@@ -501,7 +502,7 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
     };
     let working = (json!("working"), json!("jan-osc9999"), json!("state"));
     assert_eq!(state(live.event()), working);
-    c.result("send", &json!({"name": "jan", "text": "\n"}));
+    c.result("send", &json!({"name": "jan", "text": ""}));
     let done = (json!("done"), json!("jan-osc9999"), json!("state"));
     assert_eq!(state(live.event()), done);
     let info = c.result("get", &json!({"name": "jan"}));
@@ -742,4 +743,55 @@ fn terminal_resize_from_the_watcher_resizes_the_screen_and_the_program() {
 
 fn read_params() -> ReadParams {
     serde_json::from_value(serde_json::json!({"name": ""})).expect("read params")
+}
+
+#[test]
+fn fifty_concurrent_multi_line_sends_each_arrive_whole() {
+    let dir = temp_dir("sends");
+    let _server = Server::start(&dir);
+    let mut c = hello(&dir);
+    let cmd = ["sh", "-c", "exec cat > got.txt"];
+    c.result("run", &json!({"name": "e", "cwd": dir, "cmd": cmd}));
+    let mut texts: Vec<String> = (0..50)
+        .map(|i| format!("{i} one\n{i} two\n{i} three"))
+        .collect();
+    std::thread::scope(|s| {
+        for text in &texts {
+            let dir = &dir;
+            s.spawn(move || hello(dir).result("send", &json!({"name": "e", "text": text})));
+        }
+    });
+    let got = || std::fs::read_to_string(dir.join("got.txt")).unwrap_or_default();
+    eventually("every line", || got().lines().count() == 150);
+    let got = got();
+    let lines: Vec<&str> = got.lines().collect();
+    let mut arrived: Vec<String> = lines.chunks(3).map(|t| t.join("\n")).collect();
+    arrived.sort();
+    texts.sort();
+    assert_eq!(arrived, texts, "{got}");
+}
+
+#[test]
+fn a_send_is_one_bracketed_paste_and_one_enter_only_when_the_program_turned_paste_on() {
+    let dir = temp_dir("paste");
+    let _server = Server::start(&dir);
+    let mut c = hello(&dir);
+    for (name, mode) in [("on", "\\033[?2004h"), ("off", "")] {
+        let script = format!("stty raw -echo; printf '{mode}ready'; exec cat > {name}.bin");
+        let cmd = ["sh", "-c", &script];
+        c.result("run", &json!({"name": name, "cwd": dir, "cmd": cmd}));
+        eventually("ready", || {
+            c.result("read", &json!({"name": name}))["text"] == "ready"
+        });
+        c.result("send", &json!({"name": name, "text": "one\ntwo\nthree"}));
+    }
+    let bytes = |name: &str| std::fs::read(dir.join(format!("{name}.bin"))).unwrap_or_default();
+    let pasted = b"\x1b[200~one\ntwo\nthree\x1b[201~\r";
+    eventually("the paste", || bytes("on") == pasted);
+    eventually("the typed text", || bytes("off") == b"one\ntwo\nthree\r");
+    let options = json!({"name": "on", "text": "four", "no_paste": true, "no_enter": true});
+    c.result("send", &options);
+    eventually("the plain text", || {
+        bytes("on") == [&pasted[..], b"four"].concat()
+    });
 }

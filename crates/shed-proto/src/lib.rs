@@ -151,11 +151,13 @@ pub enum ErrorCode {
     ReadOnly,
     /// The machine a `<machine>/<name>` names has no link up (`machine.links` says why).
     NoLink,
+    /// A person's unsent line held the `send` past `draft_wait`; nothing was written.
+    DraftHeld,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -169,6 +171,7 @@ impl ErrorCode {
         Self::SpawnFailed,
         Self::ReadOnly,
         Self::NoLink,
+        Self::DraftHeld,
     ];
 
     /// The numeric JSON-RPC code.
@@ -188,6 +191,7 @@ impl ErrorCode {
             Self::SpawnFailed => -32005,
             Self::ReadOnly => -32006,
             Self::NoLink => -32007,
+            Self::DraftHeld => -32008,
         }
     }
 
@@ -208,6 +212,7 @@ impl ErrorCode {
             Self::SpawnFailed => "SPAWN_FAILED",
             Self::ReadOnly => "READONLY",
             Self::NoLink => "NO_LINK",
+            Self::DraftHeld => "DRAFT_HELD",
         }
     }
 }
@@ -348,7 +353,9 @@ impl Method {
             Self::Read => {
                 "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`."
             }
-            Self::Send => "Type text into the terminal.",
+            Self::Send => {
+                "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is."
+            }
             Self::Keys => {
                 "Press keys by name (`enter`, `esc`, `ctrl+c`, `up`, …); nothing is sent if any name is unknown."
             }
@@ -358,7 +365,7 @@ impl Method {
             Self::Rm => "Remove an exited terminal; returns it as it was.",
             Self::Resize => "Resize the terminal; the program gets SIGWINCH.",
             Self::Attach => {
-                "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection."
+                "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection."
             }
             Self::State => {
                 "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen."
@@ -375,8 +382,12 @@ impl Method {
             Self::ScreenWatch => {
                 "Stream a running terminal's screen. After the response the server writes screen updates (see Screen updates), at most 20 a second: the full screen first (none when `since` is the screen's current `seq`), then the rows that changed. It closes the connection when the program's PTY closes. The connection still takes requests; their responses are not written."
             }
-            Self::Input => "Type text into the terminal, as `send`.",
-            Self::TerminalKeys => "Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.",
+            Self::Input => {
+                "Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`."
+            }
+            Self::TerminalKeys => {
+                "Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s."
+            }
             Self::TerminalResize => {
                 "Resize the terminal, as `resize`; without `terminal`, the one this connection watches."
             }
@@ -548,13 +559,22 @@ pub struct Logged {
 }
 
 /// `send` and `terminal.input` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SendParams {
     /// The terminal's name (`terminal` in `terminal.input`).
     #[serde(alias = "terminal")]
     pub name: String,
     /// The text, sent as UTF-8.
     pub text: String,
+    /// `send`: no enter after the text.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_enter: bool,
+    /// `send`: the text as typed keys even when the program has turned bracketed paste on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_paste: bool,
+    /// `send`: seconds after a person's last key that their unsent line holds the send (default 60, 0 off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_wait: Option<u64>,
 }
 
 /// `keys` and `terminal.keys` params.
