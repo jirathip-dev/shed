@@ -1,0 +1,13 @@
+Decided: compare product + a PROTOCOL number in hello, not the semver; same protocol with another build still connects
+Because: "Client and server exchange a protocol version on connect. On a mismatch the client exits non-zero at once"
+Decided: build sha stamped by crates/shed-proto/build.rs from git rev-parse, so every local and release build carries it
+Because: "Every build carries its git sha: `shed --version` prints `shed <semver> (<sha>)`"
+Decided: older peers without a protocol field read as 0 and are refused, which covers the exact 56de739 server case
+Decided: keep the repo's SHED_VERSION: prefix in front of the issue's mismatch line; links.rs matches on it
+Because: crates/shed-server/src/links.rs:148
+Decided: shed install always restarts the job (stop, then start), even when the job file is up to date
+Because: "Installing shed (`shed install --force`, or the documented install path) restarts `dev.shed.serve` itself"
+Rejected: restart only when the job file changed — a replaced binary at the same path would keep the old server
+Check: the install test fakes launchctl/systemctl on PATH so no test touches the real job; a refused install restarts nothing
+Check: doctor compares Client::server().build with BUILD (crates/shed/src/service.rs)
+Owner: installing shed now restarts its server, which ends the terminals that server runs
