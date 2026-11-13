@@ -32,7 +32,7 @@ const FILE_VERSION: u32 = 1;
 pub(crate) type Input = (Arc<Terminal>, Vec<u8>);
 
 pub(crate) enum Stream {
-    Output(Vec<u8>, UnboundedReceiver<Vec<u8>>),
+    Output(Vec<u8>, UnboundedReceiver<Arc<[u8]>>),
     Events(Subscriber),
     Screen(Arc<Terminal>, Option<u64>),
 }
@@ -47,7 +47,7 @@ impl Stream {
     }
 }
 
-async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Vec<u8>>) {
+async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Arc<[u8]>>) {
     let mut batch = Vec::new();
     while out.write_all(&bytes).await.is_ok() && rx.recv_many(&mut batch, 1024).await > 0 {
         bytes = batch.concat();
