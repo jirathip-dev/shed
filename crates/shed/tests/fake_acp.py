@@ -14,6 +14,7 @@ reason on stderr) on the first that does not fit. Prompts:
   per-update encoding) 0.2 s after the prompt (once shed has saved the turn's `working` state), so a
   bench timing from the first chunk to the reply times shed's throughput rather than this agent.
 - "unknown": an update of a kind no ACP schema has, then the reply "still here".
+- "usage": a usage_update (53,000 of 200,000 tokens, 0.045 USD), then the reply "counted".
 - "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
 - "replay": with `--replay FILE`, FILE's recorded session updates (JSON lines) in order; a line
   `{"request_permission": {...}}` is sent as that request and waits for its answer.
@@ -22,6 +23,11 @@ reason on stderr) on the first that does not fit. Prompts:
 It offers the models "fast" and "smart" (a `model` config option). `--history FILE` keeps the session's
 prompts and updates in FILE (JSON lines) and advertises loadSession, which replays them; without it
 loadSession is off.
+
+`--sessions` advertises sessionCapabilities list and close and loadSession: session/list returns
+sess-1 and sess-2 (one per page) and session/load takes either. `--closed FILE` appends each
+session/close's sessionId to FILE, advertised or not (so a test sees a close that should not come).
+`--v2` answers initialize with protocolVersion 2.
 
 `--mcp FILE` is the JSON list of MCP servers session/new and session/load must get (default none);
 each entry is checked against ACP's stdio, http and sse shapes. `--mcp-caps http,sse` advertises
@@ -45,6 +51,10 @@ CAPS = sys.argv[sys.argv.index("--mcp-caps") + 1].split(",") if "--mcp-caps" in 
 KEPT = []
 CANNED = "--canned" in sys.argv
 REPLAY = sys.argv[sys.argv.index("--replay") + 1] if "--replay" in sys.argv else None
+SESSIONS = "--sessions" in sys.argv
+CLOSED = sys.argv[sys.argv.index("--closed") + 1] if "--closed" in sys.argv else None
+LISTED = [{"sessionId": "sess-1", "cwd": "/work", "title": "First", "updatedAt": "2026-11-01T10:00:00Z"},
+          {"sessionId": "sess-2", "cwd": "/work", "title": "Second"}]
 
 
 def options():
@@ -162,7 +172,7 @@ def tool_turn():
 
 
 def main():
-    global MODEL
+    global MODEL, SESSION
     while True:
         msg = read()
         method, params, rid = msg.get("method"), msg.get("params", {}), msg.get("id")
@@ -170,22 +180,39 @@ def main():
             check(isinstance(rid, (int, str)), "initialize: id")
             check(params.get("protocolVersion") == 1, "initialize: protocolVersion 1")
             check(isinstance(params.get("clientCapabilities"), dict), "initialize: clientCapabilities")
-            caps = {"loadSession": HISTORY is not None,
+            caps = {"loadSession": HISTORY is not None or SESSIONS,
                     "mcpCapabilities": {k: k in CAPS for k in ("http", "sse")}}
-            send({"id": rid, "result": {"protocolVersion": 1, "agentCapabilities": caps,
+            if SESSIONS:
+                caps["sessionCapabilities"] = {"list": {}, "close": {}}
+            version = 2 if "--v2" in sys.argv else 1
+            send({"id": rid, "result": {"protocolVersion": version, "agentCapabilities": caps,
                                         "authMethods": []}})
+        elif method == "session/list" and SESSIONS:
+            page = 1 if params.get("cursor") == "p2" else 0
+            result = {"sessions": [LISTED[page]]}
+            if page == 0:
+                result["nextCursor"] = "p2"
+            send({"id": rid, "result": result})
+        elif method == "session/close":
+            if CLOSED:
+                with open(CLOSED, "a") as f:
+                    f.write(params.get("sessionId") + "\n")
+            check(SESSIONS, "session/close without sessionCapabilities.close")
+            send({"id": rid, "result": {}})
         elif method == "session/new":
             check(str(params.get("cwd", "")).startswith("/"), "session/new: absolute cwd")
             check_mcp("session/new", params.get("mcpServers"))
             check_keys("session/new", params, ["cwd", "mcpServers"])
             send({"id": rid, "result": {"sessionId": SESSION, "configOptions": options()}})
         elif method == "session/load":
-            check(HISTORY is not None, "session/load without loadSession")
-            check(params.get("sessionId") == SESSION, "session/load: sessionId")
+            check(HISTORY is not None or SESSIONS, "session/load without loadSession")
+            ids = [s["sessionId"] for s in LISTED] if SESSIONS else [SESSION]
+            check(params.get("sessionId") in ids, "session/load: sessionId")
+            SESSION = params["sessionId"]
             check(str(params.get("cwd", "")).startswith("/"), "session/load: absolute cwd")
             check_mcp("session/load", params.get("mcpServers"))
             check_keys("session/load", params, ["sessionId", "cwd", "mcpServers"])
-            with open(HISTORY, "a+") as f:
+            with open(HISTORY or "/dev/null", "a+" if HISTORY else "r") as f:
                 f.seek(0)
                 for line in f:
                     send({"method": "session/update",
@@ -261,6 +288,12 @@ def main():
                             "availableCommands": cmds})
                 update({"sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "commands sent"}})
+                stop = "end_turn"
+            elif text == "usage":
+                update({"sessionUpdate": "usage_update", "used": 53000, "size": 200000,
+                        "cost": {"amount": 0.045, "currency": "USD"}})
+                update({"sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "counted"}})
                 stop = "end_turn"
             elif text == "unknown":
                 update({"sessionUpdate": "brand_new_kind", "whatever": [1, 2]})

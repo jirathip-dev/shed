@@ -79,8 +79,12 @@ fn registry(dir: &Path) -> PathBuf {
     let url = format!("file://{}", archive.display());
     let binary =
         |sum: &str| json!({platform(): {"archive": url, "cmd": "./fake-acp", "sha256": sum}});
+    let sum = sha256(&archive);
+    let lister = json!({platform(): {"archive": url, "cmd": "./fake-acp", "sha256": sum,
+        "args": ["--sessions"]}});
     let registry = json!({"version": "1.0.0", "agents": [
-        {"id": "fake", "version": "0.1.0", "distribution": {"binary": binary(&sha256(&archive))}},
+        {"id": "fake", "version": "0.1.0", "distribution": {"binary": binary(&sum)}},
+        {"id": "lister", "version": "0.1.0", "distribution": {"binary": lister}},
         {"id": "npx-agent", "version": "1.2.3", "distribution": {"npx": {
             "package": "npx-agent@1.2.3", "args": ["--acp"], "env": {"NO_UPDATE": "1"}}}},
         {"id": "uvx-agent", "version": "0.4.0", "distribution": {"uvx": {"package": "uvx-agent==0.4.0"}}},
@@ -545,6 +549,172 @@ fn resume_is_refused_without_load_session() {
     assert_eq!(
         reported(&dir, "n"),
         json!({"state": "error", "note": "acp: the agent cannot resume a session (no loadSession)"})
+    );
+}
+
+#[test]
+fn a_usage_update_shows_in_get_top_and_as_an_event() {
+    let dir = temp_dir("acp-usage");
+    let _server = Server::start(&dir);
+    start_fake(&dir, "g", "fake");
+    ok(&dir, &["send", "g", "hi"]);
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert_eq!(info["session"].get("usage"), None, "{info}");
+    let tokens = || {
+        let top = ok(&dir, &["top"]);
+        let cells = |l: &str| l.split_whitespace().nth(6).map(str::to_owned);
+        let row = top.lines().find(|l| l.starts_with("g "));
+        (top.lines().next().and_then(cells), row.and_then(cells))
+    };
+    assert_eq!(tokens(), (Some("TOKENS".into()), Some("-".into())));
+    ok(&dir, &["send", "g", "usage"]);
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    let usage =
+        json!({"used": 53_000, "size": 200_000, "cost": {"amount": 0.045, "currency": "USD"}});
+    let events = events_until(&dir, "g", |e| e["event"] == "usage");
+    let event: Value = serde_json::from_str(events.last().expect("a usage event")).expect("JSON");
+    let fields = ["used", "size", "cost"].map(|k| event[k].clone());
+    assert_eq!(fields, ["used", "size", "cost"].map(|k| usage[k].clone()));
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert_eq!(info["session"]["usage"], usage);
+    assert_eq!(
+        info["session"]["models"],
+        json!([["fast", "Fast"], ["smart", "Smart"]])
+    );
+    ok(&dir, &["model", "g", "smart"]);
+    common::eventually("the switch", || {
+        let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+        info["session"]["model"] == "smart" && info["session"]["usage"] == usage
+    });
+    assert_eq!(tokens(), (Some("TOKENS".into()), Some("53k/200k".into())));
+    assert!(!ok(&dir, &["ls"]).contains("TOKENS"));
+}
+
+#[test]
+fn agents_sessions_lists_every_page_and_resume_takes_one() {
+    let dir = temp_dir("acp-sessions");
+    let _server = Server::start(&dir);
+    let reg = registry(&dir);
+    for id in ["lister", "fake"] {
+        ok(
+            &dir,
+            &[
+                "agents",
+                "add",
+                id,
+                "--registry",
+                reg.to_str().expect("utf-8"),
+            ],
+        );
+    }
+    assert_eq!(
+        ok(&dir, &["agents", "sessions", "lister"]),
+        "sess-1  2026-11-01T10:00:00Z  /work  First\nsess-2  -  /work  Second\n"
+    );
+    let listed: Value =
+        serde_json::from_str(&ok(&dir, &["--json", "agents", "sessions", "lister"])).expect("JSON");
+    assert_eq!(listed[1]["sessionId"], "sess-2");
+    let refused = shed(&dir, &["agents", "sessions", "fake"]);
+    let err = String::from_utf8_lossy(&refused.stderr);
+    assert!(!refused.status.success(), "{refused:?}");
+    assert!(
+        err.contains("the agent cannot list sessions (no sessionCapabilities.list)"),
+        "{err}"
+    );
+    let missing = shed(&dir, &["agents", "sessions", "nope"]);
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("ACP agent nope is not installed"));
+
+    ok(
+        &dir,
+        &[
+            "run", "--name", "s2", "--acp", "lister", "--resume", "sess-2",
+        ],
+    );
+    ok(
+        &dir,
+        &[
+            "wait",
+            "s2",
+            "--output",
+            "ACP session ready",
+            "--timeout",
+            "10",
+        ],
+    );
+    ok(&dir, &["send", "s2", "hi"]);
+    ok(&dir, &["wait", "s2", "--until", "done", "--timeout", "10"]);
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "s2"])).expect("JSON");
+    assert_eq!(info["session"]["id"], "sess-2");
+    assert_eq!(ok(&dir, &["read", "s2"]), "> hi\nyou said: hi\n");
+}
+
+#[test]
+fn rm_closes_the_session_once_and_only_when_the_agent_can() {
+    let dir = temp_dir("acp-close");
+    let _server = Server::start(&dir);
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    for (name, caps, want) in [
+        ("c", &["--sessions"][..], Some("sess-1\n")),
+        ("n", &[], None),
+    ] {
+        let closed = dir.join(format!("{name}.closed"));
+        let fake = [
+            "python3",
+            agent,
+            "--closed",
+            closed.to_str().expect("utf-8"),
+        ];
+        let run = ["run", "--name", name, "--acp", "fake", "--"];
+        ok(&dir, &[&run[..], &fake, caps].concat());
+        ok(
+            &dir,
+            &[
+                "wait",
+                name,
+                "--output",
+                "ACP session ready",
+                "--timeout",
+                "10",
+            ],
+        );
+        ok(&dir, &["send", name, "hi"]);
+        ok(&dir, &["wait", name, "--until", "done", "--timeout", "10"]);
+        ok(&dir, &["kill", name]);
+        assert!(!closed.exists(), "{name}: closed before rm");
+        assert_eq!(ok(&dir, &["rm", name]), format!("{name} removed\n"));
+        assert_eq!(
+            std::fs::read_to_string(&closed).ok().as_deref(),
+            want,
+            "{name}"
+        );
+        assert!(!shed(&dir, &["rm", name]).status.success());
+        assert_eq!(
+            std::fs::read_to_string(&closed).ok().as_deref(),
+            want,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_v2_only_agent_is_refused_with_a_clear_message() {
+    let dir = temp_dir("acp-v2");
+    let _server = Server::start(&dir);
+    let agent = fake_agent();
+    let run = ["run", "--name", "v", "--acp", "fake", "--", "python3"];
+    ok(
+        &dir,
+        &[&run[..], &[agent.to_str().expect("utf-8"), "--v2"]].concat(),
+    );
+    ok(&dir, &["wait", "v", "--until", "error", "--timeout", "10"]);
+    let note = reported(&dir, "v")["note"].clone();
+    let note = note.as_str().unwrap_or_default();
+    assert!(
+        note.starts_with("acp: ")
+            && note.contains("required ACP protocol version 1 but peer negotiated 2"),
+        "{note}"
     );
 }
 

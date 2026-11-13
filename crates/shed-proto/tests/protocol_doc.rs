@@ -8,9 +8,9 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{Map, Value, json, to_value};
 use shed_proto::{
-    AcpSession, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind, EventsParams,
-    ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState, LsParams,
-    MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported, Request,
+    AcpSession, AcpUsage, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind,
+    EventsParams, ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState,
+    LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported, Request,
     ResizeParams, Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams,
     State, StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams,
     VERSION, WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
@@ -57,6 +57,15 @@ fn session() -> AcpSession {
             "name": "web", "type": "http", "url": "https://mcp.example/"}),
         ],
         commands: vec![["review".into(), "Review the diff".into(), "files".into()]],
+        usage: Some(usage()),
+    }
+}
+
+fn usage() -> AcpUsage {
+    AcpUsage {
+        used: 53_000,
+        size: 200_000,
+        cost: Some(json!({"amount": 0.045, "currency": "USD"})),
     }
 }
 
@@ -114,7 +123,8 @@ fn events() -> Vec<Event> {
             text: "Fixed; all 12 tests pass.".into(),
             stop_reason: "end_turn".into(),
         },
-        EventKind::Session(session()),
+        EventKind::Session(Box::new(session())),
+        EventKind::Usage(usage()),
     ]
     .into_iter()
     .zip(1..)
@@ -522,7 +532,8 @@ fn markdown() -> String {
          fallback is on; `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last\n\
          sample, while running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the\n\
          current `model` and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as\n\
-         `***`; the agent's slash `commands`, `[name, description, hint]`); `parent` names the terminal that\n\
+         `***`; the agent's slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the\n\
+         context window in tokens, and the `cost` when sent); `parent` names the terminal that\n\
          started it (absent without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
     );
     for method in Method::ALL {
@@ -545,8 +556,9 @@ fn markdown() -> String {
          `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).\n\n\
          An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), \
          `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer \
-         with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`) and `session` (the \
-         session is ready, or its model or slash commands changed). A resumed session's history (`run` with `resume`) comes first, \
+         with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the \
+         session is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens \
+         `used` of the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, \
          its events marked `\"replay\": true` so a client does not count them as new. An idle agent hibernates \
          (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.\n\n```json\n",
     );
