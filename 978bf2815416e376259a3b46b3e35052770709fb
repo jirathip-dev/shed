@@ -1,0 +1,4 @@
+Decided: merge origin/staging (4de49d0) into issue-100; keep both sides in CHANGELOG.md, protocol_doc.rs imports and service.rs doctor tests
+Because: crates/shed/tests/service.rs:194
+Rejected: none
+Owner: merge-only round; no behaviour changed beyond staging's #88 and setup-hooks work joining this branch
