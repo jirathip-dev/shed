@@ -1,0 +1,4 @@
+Decided: merged origin/staging (#100); kept this branch's hello closure in protocol_doc.rs and used staging's peer("4254d78", PROTOCOL) value in it.
+Because: crates/shed-proto/tests/protocol_doc.rs:295
+Rejected: none
+Owner: this round only picks up the latest staging changes; behaviour is unchanged.
