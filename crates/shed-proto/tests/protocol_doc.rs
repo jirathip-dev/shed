@@ -10,10 +10,10 @@ use serde_json::{Map, Value, json, to_value};
 use shed_proto::{
     AcpSession, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind, EventsParams,
     ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState, LsParams,
-    MachineStats, Method, ModelParams, ReadParams, ReadResult, Reported, Request, ResizeParams,
-    Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams, State,
-    StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams, VERSION,
-    WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
+    MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported, Request,
+    ResizeParams, Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams,
+    State, StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams,
+    VERSION, WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
 };
 
 fn info(state: State) -> TerminalInfo {
@@ -31,6 +31,15 @@ fn info(state: State) -> TerminalInfo {
         resources: (state == State::Running).then_some(RESOURCES),
         acp: None,
         session: None,
+        parent: Some(lead()),
+    }
+}
+
+fn lead() -> Parent {
+    Parent {
+        name: "lead".into(),
+        outlive: false,
+        notify: true,
     }
 }
 
@@ -112,6 +121,7 @@ fn events() -> Vec<Event> {
         seq,
         name: "build".into(),
         labels: info(State::Running).labels,
+        parent: Some("lead".into()),
         kind,
         replay: false,
     })
@@ -206,6 +216,7 @@ fn run_params() -> Value {
         meta: None,
         no_hibernate: false,
         machine: None,
+        parent: Some(lead()),
         rows: None,
         cols: None,
     })
@@ -262,6 +273,7 @@ fn example(method: Method) -> (Value, Value) {
         Method::Ls => (
             to_value(LsParams {
                 labels: BTreeMap::from([("issue".into(), "7".into())]),
+                parent: Some("lead".into()),
             })
             .unwrap(),
             json!([running()]),
@@ -309,6 +321,7 @@ fn example(method: Method) -> (Value, Value) {
         Method::Wait => (
             to_value(WaitParams {
                 name: "build".into(),
+                children: None,
                 until: vec!["done".into(), "blocked".into()],
                 output: Some("^ok \\d+ tests$".into()),
                 timeout: Some(600.0),
@@ -487,7 +500,8 @@ fn markdown() -> String {
          `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\n\
          running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\n\
          and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\n\
-         slash `commands`, `[name, description, hint]`).\n\n## Methods\n"
+         slash `commands`, `[name, description, hint]`); `parent` names the terminal that started it (absent\n\
+         without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
     );
     for method in Method::ALL {
         let (params, result) = example(method);
@@ -504,7 +518,7 @@ fn markdown() -> String {
         .unwrap();
     }
     md.push_str(
-        "\n## Events\n\nAn event names its terminal, carries its labels and counts up in `seq`; `event` is \
+        "\n## Events\n\nAn event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is \
          `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by \
          `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).\n\n\
          An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), \

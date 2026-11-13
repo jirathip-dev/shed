@@ -356,10 +356,10 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
             }
             Self::Ls => {
-                "List terminals, by name; `labels` keeps those that carry every given label."
+                "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal."
             }
             Self::Get => "One terminal.",
             Self::Read => {
@@ -381,7 +381,7 @@ impl Method {
                 "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen."
             }
             Self::Wait => {
-                "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls."
+                "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs)."
             }
             Self::Events => {
                 "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes."
@@ -512,6 +512,9 @@ pub struct RunParams {
     /// Start it on this machine, over its held link (`machine.links`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// The terminal that started it (`shed run` sends `$SHED`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Parent>,
     /// Rows; default the server's `$SHED_SIZE`, else 50.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows: Option<u16>,
@@ -520,12 +523,29 @@ pub struct RunParams {
     pub cols: Option<u16>,
 }
 
+/// A child's link to the terminal that started it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Parent {
+    /// The parent terminal's name.
+    pub name: String,
+    /// Keep running when the parent's program ends; otherwise the child is killed with it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outlive: bool,
+    /// Type a `[shed]` note into the parent when the child blocks, errors or ends, while the parent is not
+    /// working.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notify: bool,
+}
+
 /// `ls` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LsParams {
     /// Only terminals carrying every one of these labels.
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
+    /// Only the children of this terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// `get`, `kill` and `rm` params: the terminal's name.
@@ -634,8 +654,11 @@ pub struct Reported {
 /// `wait` params.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WaitParams {
-    /// The terminal's name.
+    /// The terminal's name; with `children`, the parent's.
     pub name: String,
+    /// Wait on the terminal's children instead of the terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children: Option<Children>,
     /// Reported states that end the wait.
     #[serde(default)]
     pub until: Vec<String>,
@@ -645,6 +668,16 @@ pub struct WaitParams {
     /// Give up after this many seconds; none waits for ever.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<f64>,
+}
+
+/// Which children end a `wait`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Children {
+    /// No child is working: each has exited or reports something other than `working`.
+    All,
+    /// The next child that reports `done`, `blocked` or `error`, or exits; the result names it.
+    Any,
 }
 
 /// How a `wait` ended.
@@ -689,6 +722,9 @@ pub struct Event {
     pub name: String,
     /// The terminal's labels.
     pub labels: BTreeMap<String, String>,
+    /// The terminal's parent, if it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     /// What happened.
     #[serde(flatten)]
     pub kind: EventKind,
@@ -999,6 +1035,9 @@ pub struct TerminalInfo {
     /// The ACP agent session, from the bridge's last `session` event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<AcpSession>,
+    /// The terminal that started it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Parent>,
 }
 
 /// `screen.watch` params.
