@@ -1,0 +1,5 @@
+Decided: merge origin/staging with a merge commit; in the registry.rs use-block keep staging's atomic and mpsc imports and this branch's UNIX_EPOCH
+Because: crates/shed-server/src/registry.rs:9
+Rejected: none
+Check: no src change beyond the merge; `just cap` reads 7989 / 10000 at this head
+Owner: brings the branch up to date with the latest staging; no behaviour change.
