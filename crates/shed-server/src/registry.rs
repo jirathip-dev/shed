@@ -463,7 +463,8 @@ impl Registry {
             if let Some(r) = reported
                 .as_ref()
                 .filter(|r| entry.info.reported.as_ref() != Some(*r))
-                && ["blocked", "error"].contains(&r.state.as_str())
+                && ["blocked", "waiting-approval", "rate-limited", "error"]
+                    .contains(&r.state.as_str())
             {
                 let what = [Some(&r.state), r.note.as_ref()].into_iter().flatten();
                 notes.extend(note(
@@ -908,7 +909,8 @@ impl Registry {
     }
 
     pub(crate) fn state(&mut self, p: StateParams) -> Result<TerminalInfo, RpcError> {
-        let acp = self.entry(&p.name)?.info.acp.is_some() && p.report.state == "hibernated";
+        let lane = crate::acp::LANE_STATES.contains(&p.report.state.as_str());
+        let acp = self.entry(&p.name)?.info.acp.is_some() && lane;
         if !acp && !STATES.contains(&p.report.state.as_str()) {
             return Err(RpcError::new(
                 ErrorCode::InvalidParams,

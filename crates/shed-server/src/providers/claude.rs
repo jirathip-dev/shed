@@ -1,6 +1,11 @@
-use super::{Hooks, Provider};
+use super::{Hooks, Limit, Provider};
 
 pub struct Claude;
+
+static LIMIT: Limit = Limit {
+    says: &["hit your limit", "usage limit reached"],
+    resets: &["resets "],
+};
 
 static HOOKS: Hooks = Hooks {
     agent: "claude",
@@ -25,5 +30,9 @@ impl Provider for Claude {
 
     fn hooks(&self) -> Option<&'static Hooks> {
         Some(&HOOKS)
+    }
+
+    fn limit(&self) -> Option<&'static Limit> {
+        Some(&LIMIT)
     }
 }

@@ -25,7 +25,7 @@ agent: `rm` it and `add` it again.
 ```sh
 shed run --acp claude-acp --label issue=7 --cwd /home/user/project
 shed send t1 "Fix the failing test"
-shed wait t1 --until done blocked error
+shed wait t1 --until done waiting-approval rate-limited error
 shed approve t1 allow-once        # an option id, or a kind: allow_once, reject_once, …
 shed read t1                      # > prompt, [tool] title (status), the final reply
 shed read t1 --events             # the same events drawn: › prompt, ✓ kind title, the reply styled
@@ -39,17 +39,17 @@ shed send t1 "/review src/"                       # a slash command is an ordina
 ```
 
 `--policy allow|deny|ask` (default `ask`) answers permission requests: `allow` and `deny` pick the first
-allow or reject option at once; `ask` reports `blocked` (note: the tool) until `shed approve`. With a command
+allow or reject option at once; `ask` reports `waiting-approval` (note: the tool) until `shed approve`. With a command
 after `--`, `run --acp <id> -- <cmd…>` runs that command as the adapter instead of the installed one.
 
-The state is `working` from `send` until the turn ends, `blocked` while a permission request waits, and `done`
-(note: the stop reason, e.g. `end_turn` or `cancelled`) after; an agent error is `error`. A turn also
+The state is `working` from `send` until the turn ends, and `done` (note: the stop reason, e.g. `end_turn` or
+`cancelled`) after; an agent error is `error`; [Lane states](#lane-states) has them all. A turn also
 ends as `error` when the agent's login failed (note `auth: <the line>`, see [Accounts](#accounts)) or when
 it hears nothing from the agent for `$SHED_TURN_IDLE_TIMEOUT` seconds in the environment of `shed serve`
 (default 1800; note `no response`). Anything the agent sends counts: every update (thought chunks, plans,
 usage, tool-call progress), any request, and each line it writes to stderr; a permission request waiting for
 `approve` does not time out. The default is long because a model thinking at high effort can send nothing
-for minutes on a healthy turn; an expired login is caught at once by its reply, so the watchdog is only a
+for minutes on a healthy turn, and the watchdog is off while a tool call is `pending` or `in_progress`; an expired login is caught at once by its reply, so the watchdog is only a
 backstop for an agent that really hangs. `shed events`
 streams `turn`, `text` (reply chunks), `tool_call` (each status change), `plan`, `mode`, `approval_request`,
 `approved`, `reply` (the whole reply and its `stop_reason`), `session` (its id, the current `model` and the
@@ -65,10 +65,44 @@ the transcript, so `read` shows the whole conversation. The session id survives 
 terminal's `shed get`. `shed model` (the `acp.model` method) sets the agent's `model` config option
 (`session/set_config_option`; the SDK shed uses has no `session/set_model`).
 
+### Lane states
+
+An ACP lane reports only these states (`shed ls`, `shed get`'s `reported`, `state` events), each from what shed
+itself sees:
+
+| state | meaning | source |
+|---|---|---|
+| `working` | a turn is open and the agent is producing output | ACP stream |
+| `running` | a tool call is `pending` or `in_progress` (note: its title), or the turn ended while a process the agent started is still alive (note: `running: <command> (<minutes>m)`) | ACP tool calls, process tree |
+| `waiting-approval` | a `session/request_permission` waits for `shed approve` (note: the tool) | ACP stream |
+| `rate-limited` | the agent hit its account limit (note: the reset time, when the agent states one) | the agent's limit pattern |
+| `done` | a clean turn end and no live process the agent started (note: the stop reason) | ACP stream |
+| `error` | the agent failed or exited (note: why) | ACP stream, exit |
+| `hibernated` | the agent's process stopped, its session kept; the next send wakes it | shed |
+
+A process counts as the agent's own when it was in the agent's process tree as a turn started (the adapter,
+its MCP servers); any other live descendant once the turn ended makes the lane `running`, the one nearest the
+agent named in the note, checked every 5 s until it exits. A tool call left open when the next turn starts is
+forgotten. `rate-limited` lasts until the next turn starts: shed neither retries, wakes nor continues the
+lane, nor switches its account. An agent's limit pattern is data, one entry per registry id in
+`crates/shed-server/src/providers/<agent>.rs`:
+
+```rust
+static LIMIT: Limit = Limit {
+    says: &["hit your limit", "usage limit reached"], // a reply or error line holding one of these
+    resets: &["resets "],                             // the reset time follows one of these on that line
+};
+```
+
+`claude-acp` (`You've hit your limit · resets 3pm` → `3pm`) and `codex-acp` (`You've hit your usage limit. …
+try again at 3:05 PM.` → `3:05 PM`) have entries. An agent without one never shows `rate-limited`; its limit
+text stays its reply (`done`) or error (`error`). Adding one is a data entry and one line in
+`providers/mod.rs`'s list, never a change to `acp.rs`.
+
 ### Hibernation
 
-An idle agent hibernates: once its session has had a turn (or was resumed), no turn runs and no permission
-request waits for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment of `shed serve` (default 600; `0`
+An idle agent hibernates: once its session has had a turn (or was resumed) and has been `done` (or, resumed,
+has had no turn yet) for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment of `shed serve` (default 600; `0`
 never), the bridge stops the agent's process tree and reports the state `hibernated` (a `state` event). The
 terminal, its session id, model, models and slash commands stay; only the bridge (about 8 MB) is left. The next
 send (a prompt, `model`, …) starts the agent again with the same command, folder and environment, loads the
@@ -173,7 +207,7 @@ Not run in CI (it needs a real login and network):
    set in the environment of `shed serve`.
 2. `shed run --acp claude-acp --name smoke --cwd <a scratch repo>`.
 3. `shed wait smoke --output "ACP session ready" --timeout 60`, then `shed send smoke "Say hello in one word"`.
-4. `shed wait smoke --until done blocked error --timeout 300`; `shed read smoke` shows the reply.
+4. `shed wait smoke --until done waiting-approval error --timeout 300`; `shed read smoke` shows the reply.
 5. The plan's usage page shows the request; nothing is billed to an API key.
 6. `shed kill smoke && shed rm smoke`.
 
