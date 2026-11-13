@@ -404,6 +404,7 @@ struct Session {
     meta: Option<Meta>,
     pid: Option<i32>,
     own: BTreeSet<i32>,
+    seen: BTreeSet<i32>,
     open: Vec<String>,
     ended: Option<String>,
     child: Option<String>,
@@ -475,13 +476,15 @@ impl Session {
         }
     }
 
-    fn tree(&self) -> Option<(i32, Vec<ProcessInfo>)> {
+    fn tree(&mut self) -> Option<(i32, Vec<ProcessInfo>)> {
         let pid = self.pid?;
         let procs = proctree::system().list().ok()?;
-        Some((pid, proctree::tree(&procs, pid, &BTreeSet::new())))
+        let tree = proctree::tree(&procs, pid, &BTreeSet::new());
+        self.seen = tree.iter().map(|p| p.pid).collect();
+        Some((pid, tree))
     }
 
-    fn spawned(&self) -> Option<String> {
+    fn spawned(&mut self) -> Option<String> {
         let (pid, tree) = self.tree()?;
         let new: Vec<_> = (tree.iter())
             .filter(|p| p.pid != pid && !self.own.contains(&p.pid))
@@ -508,8 +511,7 @@ impl Session {
                 self.reply.clear();
                 (self.ended, self.child) = (None, None);
                 self.open.clear();
-                let own = self.tree().map(|(_, tree)| tree).unwrap_or_default();
-                self.own.extend(own.iter().map(|p| p.pid));
+                self.own.extend(&self.seen);
                 self.emit(EventKind::Turn {
                     prompt: text.clone(),
                 });
@@ -824,6 +826,7 @@ async fn drive(
     };
     (s.shown.id, s.shown.mcp_servers) = (s.id.to_string(), redacted(&s.mcp));
     s.models(&options.unwrap_or_default())?;
+    s.tree();
     s.say(format!("shed: ACP session ready ({}); send a prompt", s.id))?;
     if let Some(input) = wake {
         if !matches!(input, Input::Prompt(_)) {
@@ -1217,6 +1220,7 @@ fn run(
             stirred,
             pid,
             own: BTreeSet::new(),
+            seen: BTreeSet::new(),
             ended: None,
             child: None,
             ..s
@@ -1245,6 +1249,7 @@ fn run(
             meta: meta.clone(),
             pid,
             own: BTreeSet::new(),
+            seen: BTreeSet::new(),
             open: Vec::new(),
             ended: None,
             child: None,
@@ -1428,6 +1433,7 @@ mod tests {
             meta: None,
             pid: None,
             own: BTreeSet::new(),
+            seen: BTreeSet::new(),
             open: Vec::new(),
             ended: None,
             child: None,
