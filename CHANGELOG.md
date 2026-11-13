@@ -34,56 +34,11 @@ All notable changes to this project are documented here. The format follows
   dropped link with none lost. `machine ls --json` and the `machine.links` method show each link (`up`,
   `reconnecting`, `down`, since when, why). Another version there is refused naming both. With no link up,
   `--on` uses one `ssh` per call as before.
-
-### Changed
-
-- `shed serve` saves its state file at most twice a second, compact and off the registry lock, and at once on
-  shutdown; `run`, `kill` and `rm` still answer only once the change is on disk. An ACP terminal's slash
-  `commands` and `models` are no longer saved (the agent resends them). Exited terminals are dropped from the
-  list a day after they end (`$SHED_PRUNE_AFTER` seconds of `shed serve`); their logs stay until the next start.
-
-- Release builds use fat LTO, one codegen unit and a stripped binary: 4.0 MB instead of 8.0 MB on macOS arm64.
-
-- `shed events --on M` with no held link is one plain stream over `ssh`: the client-side reconnect and its
-  `machine: reconnecting` / `machine: connected` lines are gone; the server's held link does the reconnecting.
-
-- The ACP path is faster per update: the bridge reads a text chunk straight from the agent's JSON instead of
-  the SDK's types, writes its notifications without a `Value` between, and the server parses each request line
-  once, straight into a request, and reads params without copying them.
-
-- The server runs on one tokio runtime: connections, streams and watchers are tasks instead of threads (20
-  terminals and 50 `events` clients: 24 threads instead of 143). Events go to every client from one shared log,
-  each client's new events written as one batch. The ACP bridge lost its two glue threads. The CLI and the
-  protocol are unchanged.
-
-- Server responses list object keys in field order instead of alphabetically (the SDK turns on serde_json's
-  `preserve_order`). The JSON is the same.
-
-- Renamed from berth to shed: the crates (`shed`, `shed-core`, `shed-proto`, `shed-server`), the binary,
-  the socket (`shed.sock`), the state and config dirs, the service units (`dev.shed.serve`,
-  `shed.service`) and the docs. Terminals get `$SHED`. The `hello`
-  carries `product: "shed"`, so a berth client or server is refused with `SHED_VERSION` instead of
-  half-working. OSC 7501 is unchanged.
-
-### Fixed
-
-- One server per state file: `shed serve` holds a lock (`state.lock` beside the state file) for its life, so a
-  second server is refused even when the first one's socket file is gone, instead of restoring the kept
-  terminals twice and taking the socket. A killed server's lock goes with it. Two `run --autostart` at once
-  share the one server that wins.
-- `shed rm` also removes an ACP terminal's transcript, and `shed serve` removes the logs and transcripts of
-  terminals its state file no longer names.
-- `shed machine add|rm` writes the config through a temp file of its own, so writers running at once no longer
-  fail on a shared one.
-
-### Added
-
 - ACP agents hibernate when idle: after `$SHED_ACP_HIBERNATE_AFTER` seconds (default 600) with no turn and no
   waiting permission request, shed stops the agent's processes and reports `hibernated`; the next send starts it
   again and loads its session (`session/load`) before delivering it. `run --acp … --no-hibernate` keeps one
   running. Ten idle fake agents: 197,248 KiB awake, 77,568 KiB hibernated; claude-agent-acp: 502,700 KiB to
   8,064 KiB, waking in about 2 s.
-
 - `shed run --acp … --mcp <file.json>` (the `run` method's `mcp_servers`): MCP servers in ACP's shapes (stdio,
   `http`, `sse`) passed to the agent in `session/new` and `session/load`. `http` and `sse` need the agent's
   `mcpCapabilities`, else the terminal ends as `error` naming the server; an unknown or malformed entry is
@@ -107,7 +62,6 @@ All notable changes to this project are documented here. The format follows
   base and the head, failing over 10% slower, plus the head's 1,000-update replay time. Beside it a shed-only
   bench: the fake agent writes 10,000 canned updates at once (`fake_acp.py --canned`), timed per update through
   the bridge and the server, median of 9, also failing over 10% slower.
-
 - `shed watch [--label k=v] [--on M]`: a full-screen live list of the terminals (a state dot, name, fleet,
   issue and role, age; grouped by machine and fleet; an exited one stays dim for 60 s) beside a read-only
   preview of the selected one's screen, at most 10 frames a second. ↑/↓ or j/k select, `/` filters by name
@@ -139,7 +93,6 @@ All notable changes to this project are documented here. The format follows
 - `shed serve` prints one line, `shed ready <version> <socket>`, to stdout once its socket accepts
   connections (it replaces the `listening on` stderr line). `serve --detach` and `run --autostart` wait for
   it and say whether the server exited first or was not ready within 10 s.
-
 - ACP turns no longer hang: a reply or adapter error with one of the agent's known auth-failure lines (for
   `claude-acp`: `Failed to authenticate`, `OAuth session expired`) ends the turn as `error`
   (`auth: <the line>`) after a `reply` with `stop_reason` `auth_error`, and a turn that hears nothing from
@@ -187,3 +140,38 @@ All notable changes to this project are documented here. The format follows
 - `shed-core` terminals (M1a): programs on real PTYs, a VT screen model with bounded scrollback,
   named keys, and process-tree kill (SIGTERM, a grace period, SIGKILL) with per-tree RSS/CPU.
 - The workspace skeleton (M0): `shed hello`, `--help`, `--version`, and every CI gate.
+
+### Changed
+
+- `shed serve` saves its state file at most twice a second, compact and off the registry lock, and at once on
+  shutdown; `run`, `kill` and `rm` still answer only once the change is on disk. An ACP terminal's slash
+  `commands` and `models` are no longer saved (the agent resends them). Exited terminals are dropped from the
+  list a day after they end (`$SHED_PRUNE_AFTER` seconds of `shed serve`); their logs stay until the next start.
+- Release builds use fat LTO, one codegen unit and a stripped binary: 4.0 MB instead of 8.0 MB on macOS arm64.
+- `shed events --on M` with no held link is one plain stream over `ssh`: the client-side reconnect and its
+  `machine: reconnecting` / `machine: connected` lines are gone; the server's held link does the reconnecting.
+- The ACP path is faster per update: the bridge reads a text chunk straight from the agent's JSON instead of
+  the SDK's types, writes its notifications without a `Value` between, and the server parses each request line
+  once, straight into a request, and reads params without copying them.
+- The server runs on one tokio runtime: connections, streams and watchers are tasks instead of threads (20
+  terminals and 50 `events` clients: 24 threads instead of 143). Events go to every client from one shared log,
+  each client's new events written as one batch. The ACP bridge lost its two glue threads. The CLI and the
+  protocol are unchanged.
+- Server responses list object keys in field order instead of alphabetically (the SDK turns on serde_json's
+  `preserve_order`). The JSON is the same.
+- Renamed from berth to shed: the crates (`shed`, `shed-core`, `shed-proto`, `shed-server`), the binary,
+  the socket (`shed.sock`), the state and config dirs, the service units (`dev.shed.serve`,
+  `shed.service`) and the docs. Terminals get `$SHED`. The `hello`
+  carries `product: "shed"`, so a berth client or server is refused with `SHED_VERSION` instead of
+  half-working. OSC 7501 is unchanged.
+
+### Fixed
+
+- One server per state file: `shed serve` holds a lock (`state.lock` beside the state file) for its life, so a
+  second server is refused even when the first one's socket file is gone, instead of restoring the kept
+  terminals twice and taking the socket. A killed server's lock goes with it. Two `run --autostart` at once
+  share the one server that wins.
+- `shed rm` also removes an ACP terminal's transcript, and `shed serve` removes the logs and transcripts of
+  terminals its state file no longer names.
+- `shed machine add|rm` writes the config through a temp file of its own, so writers running at once no longer
+  fail on a shared one.
