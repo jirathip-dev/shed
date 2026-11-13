@@ -126,9 +126,15 @@ impl Stats {
         while self.samples.front().is_some_and(|s| s.at <= cutoff) {
             self.samples.pop_front();
         }
-        let tmp = self.path.with_extension("json.tmp");
-        if serde_json::to_vec(&self.samples).is_ok_and(|b| fs::write(&tmp, b).is_ok()) {
-            fs::rename(&tmp, &self.path).ok();
+    }
+
+    pub(crate) fn saving(&self) -> impl FnOnce() + Send + use<> {
+        let (path, samples) = (self.path.clone(), self.samples.clone());
+        move || {
+            let tmp = path.with_extension("json.tmp");
+            if serde_json::to_vec(&samples).is_ok_and(|b| fs::write(&tmp, b).is_ok()) {
+                fs::rename(&tmp, &path).ok();
+            }
         }
     }
 
@@ -165,6 +171,7 @@ mod tests {
         assert_eq!(last, t0 + 25 * 3600 - 60);
         assert_eq!(kept[0].at, last - 1_439 * 60);
         assert_eq!(stats.since(last - 600).len(), 10);
+        stats.saving()();
         assert_eq!(Stats::load(&path).since(0), kept, "saved and loaded back");
     }
 

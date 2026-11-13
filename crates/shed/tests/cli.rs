@@ -106,6 +106,13 @@ fn hello_prints_the_version() {
 }
 
 #[test]
+fn schema_prints_the_committed_openrpc_document() {
+    let committed = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/shed.openrpc.json");
+    let committed = std::fs::read_to_string(committed).expect("docs/shed.openrpc.json");
+    assert_eq!(shed(&["schema"]), committed);
+}
+
+#[test]
 fn version_flag_prints_the_version() {
     assert_eq!(
         shed(&["--version"]),
@@ -117,8 +124,9 @@ fn version_flag_prints_the_version() {
 fn help_lists_every_command() {
     let help = shed(&["--help"]);
     for cmd in [
-        "hello", "serve", "run", "ls", "get", "read", "send", "keys", "kill", "rm", "attach",
-        "state", "wait", "events", "top", "approve", "cancel", "agents", "connect", "machine",
+        "hello", "schema", "serve", "run", "ls", "get", "read", "send", "keys", "kill", "rm",
+        "attach", "state", "wait", "events", "top", "approve", "cancel", "agents", "connect",
+        "machine",
     ] {
         assert!(
             help.contains(&format!("\n  {cmd} ")),

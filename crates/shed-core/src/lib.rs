@@ -33,6 +33,9 @@ pub enum Error {
     /// Opening, sizing or spawning on the PTY failed.
     #[error("pty: {0}")]
     Pty(#[from] pty_process::Error),
+    /// The program has not taken its input within the write timeout; the input stays queued.
+    #[error("stuck: the program has not taken its input; it stays queued")]
+    Stuck,
     /// An I/O error.
     #[error(transparent)]
     Io(#[from] std::io::Error),
