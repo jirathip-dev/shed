@@ -1,0 +1,12 @@
+Decided: `shed events --machine` passes lines that are not events (`reset`, `lagged`, the blank line before `lagged`) through unchanged; only real events get the machine prefix or the linked filter.
+Because: crates/shed/src/main.rs:773
+Rejected: skipping non-event lines — the client would never see that it lagged or that its `since` was reset, which is the point of those notices.
+Decided: heartbeats are opt-in per connection; the ACP bridge writer and machine links opt in.
+Because: "A heartbeat every 15 s in both directions; a peer that misses 2 is dropped."
+Rejected: enforcing heartbeats on every connection — `shed events`, attach, watch and outside clients send nothing after their request and would be cut off after 30 s.
+Decided: a subscriber more than 4,096 events behind is closed with a `lagged` line; a `since` older than the ring gets a `reset` line first.
+Because: "A subscriber more than N events behind is dropped with a `lagged` notice, and it resumes with `since` or gets a reset."
+Decided: main ring 4,096 non-text events; text in a 256-chunk ring per terminal.
+Because: crates/shed-server/src/events.rs:10
+Check: crates/shed/tests/machines.rs `events_on_a_machine_pass_reset_and_lagged_notices_through` fails with `missing field seq` on the old `?` parse.
+Owner: slow or silent clients of shed serve are now cut off instead of making the server hold every event in memory, and `shed events` on a machine shows the cut-off notice instead of failing.
