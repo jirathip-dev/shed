@@ -34,7 +34,7 @@ pub fn eventually(what: &str, mut check: impl FnMut() -> bool) {
     }
 }
 
-pub struct Server(Child);
+pub struct Server(pub Child);
 
 impl Server {
     pub fn start(dir: &Path) -> Self {

@@ -111,6 +111,15 @@ fn kill_escalates_to_sigkill_after_the_grace_period() {
 }
 
 #[test]
+fn a_subscriber_that_never_reads_is_dropped_while_the_program_runs() {
+    let t = sh("yes", SIZE);
+    let rx = t.subscribe();
+    eventually("the lagging subscriber dropped", || rx.is_closed());
+    assert!(rx.len() <= 256, "{} chunks held", rx.len());
+    assert!(t.try_wait().expect("status").is_none(), "still running");
+}
+
+#[test]
 fn subscribers_get_raw_output_until_the_pty_closes() {
     let t = sh("read line; printf \"got:$line\\033[1m\\n\"", SIZE);
     let mut rx = t.subscribe();

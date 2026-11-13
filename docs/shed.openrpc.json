@@ -660,7 +660,7 @@
     },
     {
       "name": "events",
-      "description": "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes.",
+      "description": "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{\"jsonrpc\":\"2.0\",\"method\":\"reset\",\"params\":{\"seq\":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{\"jsonrpc\":\"2.0\",\"method\":\"lagged\",\"params\":{\"seq\":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{\"jsonrpc\":\"2.0\",\"method\":\"heartbeat\"}` lines when idle.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1415,6 +1415,18 @@
           }
         }
       ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "heartbeat",
+      "description": "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection.",
+      "paramStructure": "by-name",
+      "params": [],
       "result": {
         "name": "result",
         "schema": {

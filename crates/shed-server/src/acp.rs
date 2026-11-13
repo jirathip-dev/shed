@@ -798,7 +798,16 @@ struct Writer {
 impl Writer {
     async fn run(mut self, mut outs: UnboundedReceiver<Out>) {
         let mut batch = Vec::new();
-        while outs.recv_many(&mut batch, 4096).await > 0 {
+        let mut beat = tokio::time::interval(crate::HEARTBEAT);
+        let heartbeat = crate::notification(Method::Heartbeat, &serde_json::json!({}));
+        loop {
+            tokio::select! {
+                n = outs.recv_many(&mut batch, 4096) => if n == 0 { return },
+                _ = beat.tick() => {
+                    self.send(heartbeat.as_deref().unwrap_or_default()).await;
+                    continue;
+                }
+            }
             let (mut redraw, mut calls) = (false, Vec::new());
             for out in batch.drain(..) {
                 let name = self.name.clone();
@@ -847,7 +856,8 @@ impl Writer {
             let Some(server) = &mut self.server else {
                 return;
             };
-            if server.write_all(calls).await.is_ok() {
+            let wrote = tokio::time::timeout(crate::WRITE_TIMEOUT, server.write_all(calls)).await;
+            if matches!(wrote, Ok(Ok(()))) {
                 return;
             }
             self.server = None;

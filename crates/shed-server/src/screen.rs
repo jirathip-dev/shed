@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use shed_core::{Color, Snapshot, Terminal, Wake};
 use shed_proto::{self as proto, Line, Run, ScreenUpdate};
-use tokio::io::AsyncWriteExt as _;
 use tokio::net::unix::OwnedWriteHalf;
 
 const EVERY: Duration = Duration::from_millis(50);
@@ -59,7 +58,7 @@ pub(crate) async fn watch(term: &Terminal, since: Option<u64>, out: &mut OwnedWr
         if let Some(update) = diff(last.as_ref(), &now, seq) {
             let mut line = serde_json::to_vec(&update).unwrap_or_default();
             line.push(b'\n');
-            if out.write_all(&line).await.is_err() {
+            if !crate::send(out, &line).await {
                 return;
             }
             tokio::time::sleep(EVERY).await;

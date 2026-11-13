@@ -272,13 +272,15 @@ pub enum Method {
     FileRead,
     /// Write a file: [`FileParams`] with `data` → `{}`.
     FileWrite,
+    /// Keep the connection alive: `{}` → `{}`, usually as a notification.
+    Heartbeat,
     /// The API as an `OpenRPC` document: `{}` → [`openrpc`].
     Discover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 27] = [
+    pub const ALL: [Self; 28] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -305,6 +307,7 @@ impl Method {
         Self::Exec,
         Self::FileRead,
         Self::FileWrite,
+        Self::Heartbeat,
         Self::Discover,
     ];
 
@@ -338,6 +341,7 @@ impl Method {
             Self::Exec => "exec",
             Self::FileRead => "file.read",
             Self::FileWrite => "file.write",
+            Self::Heartbeat => "heartbeat",
             Self::Discover => "rpc.discover",
         }
     }
@@ -384,7 +388,7 @@ impl Method {
                 "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs)."
             }
             Self::Events => {
-                "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes."
+                "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{\"jsonrpc\":\"2.0\",\"method\":\"reset\",\"params\":{\"seq\":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{\"jsonrpc\":\"2.0\",\"method\":\"lagged\",\"params\":{\"seq\":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{\"jsonrpc\":\"2.0\",\"method\":\"heartbeat\"}` lines when idle."
             }
             Self::Emit => {
                 "Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply`); its bridge (`shed run --acp`) calls this. Other events are refused."
@@ -417,6 +421,9 @@ impl Method {
             }
             Self::FileWrite => {
                 "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there."
+            }
+            Self::Heartbeat => {
+                "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection."
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
@@ -1159,6 +1166,7 @@ impl Method {
             Self::Exec => pair::<ExecParams, ExecResult>(g),
             Self::FileRead => pair::<FileParams, Vec<u8>>(g),
             Self::FileWrite => pair::<FileParams, Empty>(g),
+            Self::Heartbeat => pair::<Empty, Empty>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
         }
     }

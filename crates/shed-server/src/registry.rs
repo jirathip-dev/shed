@@ -19,9 +19,8 @@ use shed_proto::{
     RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
 };
 
-use tokio::io::AsyncWriteExt as _;
 use tokio::net::unix::OwnedWriteHalf;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::Receiver;
 
 use crate::events::{Events, Subscriber};
 use crate::stats::Stats;
@@ -32,24 +31,24 @@ const FILE_VERSION: u32 = 1;
 pub(crate) type Input = (Arc<Terminal>, Vec<u8>);
 
 pub(crate) enum Stream {
-    Output(Vec<u8>, UnboundedReceiver<Arc<[u8]>>),
+    Output(Vec<u8>, Receiver<Arc<[u8]>>),
     Events(Subscriber),
     Screen(Arc<Terminal>, Option<u64>),
 }
 
 impl Stream {
-    pub(crate) async fn run(self, mut out: OwnedWriteHalf) {
+    pub(crate) async fn run(self, mut out: OwnedWriteHalf, beats: bool) {
         match self {
             Self::Output(first, rx) => pump(&mut out, first, rx).await,
-            Self::Events(sub) => sub.stream(&mut out).await,
+            Self::Events(sub) => sub.stream(&mut out, beats).await,
             Self::Screen(term, since) => crate::screen::watch(&term, since, &mut out).await,
         }
     }
 }
 
-async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Arc<[u8]>>) {
+async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: Receiver<Arc<[u8]>>) {
     let mut batch = Vec::new();
-    while out.write_all(&bytes).await.is_ok() && rx.recv_many(&mut batch, 1024).await > 0 {
+    while crate::send(out, &bytes).await && rx.recv_many(&mut batch, 1024).await > 0 {
         bytes = batch.concat();
         batch.clear();
     }

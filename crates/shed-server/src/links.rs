@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
-use std::io::BufRead as _;
+use std::io::{BufRead as _, Write as _};
+use std::net::Shutdown;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -178,11 +180,19 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
                     labels: BTreeMap::new(),
                     since,
                 };
-                if events.call::<_, Value>(Method::Events, &params).is_ok() {
+                let beating = events.call::<_, Value>(Method::Heartbeat, &serde_json::json!({}));
+                if beating.is_ok() && events.call::<_, Value>(Method::Events, &params).is_ok() {
                     failures = 0;
                     *lock(&held.calls) = Some(calls);
                     held.set(LinkState::Up, None);
-                    for line in events.split().0.lines().map_while(Result::ok) {
+                    let (reader, writer) = events.split();
+                    reader
+                        .get_ref()
+                        .set_read_timeout(Some(crate::WRITE_TIMEOUT))
+                        .ok();
+                    std::thread::spawn(move || beat(&writer));
+                    let socket = reader.get_ref().try_clone();
+                    for line in reader.lines().map_while(Result::ok) {
                         let Ok(e) = serde_json::from_str::<Event>(&line) else {
                             continue;
                         };
@@ -191,6 +201,7 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
                         let parent = e.parent.map(|p| format!("{}/{p}", machine.name));
                         lock(registry).events.push(Event { name, parent, ..e });
                     }
+                    socket.and_then(|s| s.shutdown(Shutdown::Both)).ok();
                     *lock(&held.calls) = None;
                     held.set(LinkState::Reconnecting, None);
                 }
@@ -205,5 +216,13 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
         }
         shed_core::clock::sleep(machines::backoff(failures));
         failures += 1;
+    }
+}
+
+fn beat(mut writer: &UnixStream) {
+    let line = crate::notification(Method::Heartbeat, &serde_json::json!({}));
+    let line = line.unwrap_or_default();
+    while writer.write_all(&line).is_ok() {
+        shed_core::clock::sleep(crate::HEARTBEAT);
     }
 }
