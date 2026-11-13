@@ -98,6 +98,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: test
         run: cargo test --workspace --locked
+      - name: "TEMP #112: lock and reliability tests, 10 runs in a row"
+        if: matrix.os == 'ubuntu'
+        run: |
+          for i in $(seq 10); do
+            echo "::group::run $i"
+            cargo test --locked -p shed --test lock --test reliability || exit 1
+            echo "::endgroup::"
+            echo "run $i passed"
+          done
 
   # The event fan-out bench at the PR's base and head on one runner, median of 5 each; fails if the
   # head is more than 10% slower.
