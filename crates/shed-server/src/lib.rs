@@ -32,7 +32,7 @@ use proto::{
     WatchParams,
 };
 use registry::{Registry, Stream};
-use rustix::process::{Resource, Rlimit, getrlimit, setrlimit};
+use rustix::process::{Resource, Rlimit, Signal, getrlimit, setrlimit};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -241,10 +241,39 @@ pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         .worker_threads(workers)
         .enable_all()
         .build()?;
-    runtime.block_on(listen(paths, sample_every))
+    let served = runtime.block_on(listen(paths, sample_every));
+    runtime.shutdown_background();
+    served
+}
+
+fn stop_signals() -> io::Result<impl Future<Output = ()>> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let skipped = [
+        Signal::KILL,
+        Signal::STOP,
+        Signal::ILL,
+        Signal::FPE,
+        Signal::SEGV,
+    ]
+    .into_iter()
+    .chain([Signal::BUS, Signal::TRAP, Signal::SYS])
+    .map(Signal::as_raw)
+    .collect::<Vec<_>>();
+    for raw in (1..32).filter(|raw| !skipped.contains(raw)) {
+        drop(signal(SignalKind::from_raw(raw))?);
+    }
+    let mut term = signal(SignalKind::terminate())?;
+    let mut int = signal(SignalKind::interrupt())?;
+    Ok(async move {
+        tokio::select! {
+            _ = term.recv() => {}
+            _ = int.recv() => {}
+        }
+    })
 }
 
 async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
+    let stop = stop_signals()?;
     let registry = Arc::new(Mutex::new(Registry::load(&paths.state, &paths.socket)?));
     for term in lock(&registry).running() {
         watch(&registry, term);
@@ -278,14 +307,23 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         paths.socket.display()
     )
     .ok();
+    tokio::select! {
+        () = accept(&listener, &registry, &links) => {}
+        () = stop => {}
+    }
+    let running = lock(&registry).running();
+    let ends = running
+        .into_iter()
+        .map(|t| blocking(move || t.kill(registry::GRACE)));
+    futures::future::join_all(ends).await;
+    Ok(())
+}
+
+async fn accept(listener: &tokio::net::UnixListener, registry: &Shared, links: &Arc<links::Links>) {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                tokio::spawn(connection(
-                    Arc::clone(&registry),
-                    Arc::clone(&links),
-                    stream,
-                ));
+                tokio::spawn(connection(Arc::clone(registry), Arc::clone(links), stream));
             }
             Err(e) => {
                 writeln!(io::stderr(), "shed serve: accept: {e}").ok();
