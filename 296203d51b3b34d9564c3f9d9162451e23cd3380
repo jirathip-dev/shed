@@ -1,0 +1,11 @@
+Decided: the server hands the bridge a copy of its PTY master at spawn (socket pair as stderr, SCM_RIGHTS), and adopts it back on start from the bridge's pty-<name>.sock
+Because: "Either bridges are started outside serve's PTY session (double fork with setsid, with the PTY master kept by the bridge or handed over), or serve re-adopts them on start by pid and socket"
+Because: crates/shed-server/src/lib.rs:352 releases lanes on stop instead of killing them; the old code killed every running terminal there
+Rejected: double fork with setsid — the bridge is already a session leader; the new server would still need fd passing to get the PTY
+Rejected: inheriting the master by fd number — needs unsafe pre_exec or from_raw_fd, which the repo bans
+Decided: an adopted bridge's end is seen at PTY close and recorded as exit 0 (it is not serve's child, so its status is unknown)
+Decided: bridge redraws go to a non-blocking /dev/tty so a full PTY buffer with no server reading cannot stall the session
+Decided: test Server drop SIGKILLs its ACP lanes' groups, since lanes now outlive serve and would leak from every test
+Check: a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches fails at bf20242's parent and passes at head
+Check: resume_replays_the_history_once_marked_replay changed from exited to running after a restart, because the spec reverses that
+Owner: agent lanes now keep running through a shed server restart, update or crash
