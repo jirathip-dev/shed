@@ -8,6 +8,7 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 mod events;
+mod input;
 mod links;
 pub mod machines;
 mod providers;
@@ -300,6 +301,7 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     for (name, term) in lock(&registry).running() {
         watch(&registry, name, term);
     }
+    tokio::spawn(registry::keep_saved(Arc::clone(&registry)));
     tokio::spawn(sample(Arc::clone(&registry), sample_every));
     let first = record_stats(&registry).await;
     let recorder = Arc::clone(&registry);
@@ -333,6 +335,8 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         () = accept(&listener, &registry, &links) => {}
         () = stop => {}
     }
+    let saved = lock(&registry).close();
+    saved.await;
     let running = lock(&registry).running();
     let ends = running
         .into_iter()
@@ -416,7 +420,6 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
 }
 
 async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
-    let saver = lock(&registry).saver.clone();
     let mut session = Session {
         links: held,
         ..Session::default()
@@ -429,7 +432,8 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
             continue;
         }
         let response = respond(&registry, &mut session, &line).await;
-        saver.flushed().await;
+        let flushed = lock(&registry).saver.flushed();
+        flushed.await;
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
             bytes.push(b'\n');
@@ -618,17 +622,18 @@ async fn read(registry: &Shared, p: proto::ReadParams) -> Result<Value, RpcError
 }
 
 async fn input(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
-    let (term, bytes) = {
+    let input = {
         let mut reg = lock(registry);
         reg.refresh()?;
         match method {
-            Method::Keys | Method::TerminalKeys => reg.keys(&params(request)?)?,
+            Method::Keys => reg.keys(&params(request)?, false)?,
+            Method::TerminalKeys => reg.keys(&params(request)?, true)?,
             Method::Model => reg.model(params(request)?)?,
+            Method::Input => reg.typed(params(request)?)?,
             _ => reg.send(params(request)?)?,
         }
     };
-    let wrote = blocking(move || term.write(&bytes)).await?;
-    wrote.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
+    input.write().await?;
     Ok(empty())
 }
 

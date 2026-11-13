@@ -14,7 +14,7 @@ use common::{Server, temp_dir};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessTable as _};
 use shed_server::acp::{Input, frame};
-use shed_server::proto::{EventsParams, Method, SendParams};
+use shed_server::proto::{EventsParams, Method};
 use shed_server::{Client, Paths};
 
 const UPDATES: usize = 1_000;
@@ -84,10 +84,7 @@ fn best_turn<E>(
             let mut events = events(&dir);
             let text = frame(&Input::Prompt(format!("flood {updates}")));
             let sent = Instant::now();
-            let params = SendParams {
-                name: name.to_owned(),
-                text,
-            };
+            let params = serde_json::json!({ "name": name, "text": text });
             let _: Value = client.call(Method::Send, &params).expect("send");
             let (texts, first) = count(&mut events, sent);
             assert_eq!(texts, updates);

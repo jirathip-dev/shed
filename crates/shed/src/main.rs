@@ -77,10 +77,7 @@ enum Command {
         #[arg(long, requires = "events")]
         before: Option<u64>,
     },
-    Send {
-        name: String,
-        text: String,
-    },
+    Send(SendArgs),
     Keys {
         name: String,
         #[arg(required = true)]
@@ -166,7 +163,7 @@ impl Command {
         match self {
             Self::Get { name }
             | Self::Read { name, .. }
-            | Self::Send { name, .. }
+            | Self::Send(SendArgs { name, .. })
             | Self::Keys { name, .. }
             | Self::Kill { name }
             | Self::Rm { name }
@@ -252,7 +249,7 @@ impl Server<'_> {
                 | Command::Ls { .. }
                 | Command::Get { .. }
                 | Command::Read { .. }
-                | Command::Send { .. }
+                | Command::Send(_)
                 | Command::Keys { .. }
                 | Command::Kill { .. }
                 | Command::Rm { .. }
@@ -358,6 +355,18 @@ struct RunArgs {
     size: Option<(u16, u16)>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
+}
+
+#[derive(Args)]
+struct SendArgs {
+    name: String,
+    text: String,
+    #[arg(long)]
+    no_enter: bool,
+    #[arg(long)]
+    no_paste: bool,
+    #[arg(long, value_name = "SECONDS")]
+    draft_wait: Option<u64>,
 }
 
 #[derive(Args)]
@@ -469,7 +478,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             };
             read(&server, json, &params)?;
         }
-        Command::Send { name, text } => send(&server, json, name, text)?,
+        Command::Send(args) => send(&server, json, args)?,
         Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
@@ -619,24 +628,27 @@ fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> 
     print(json, &read, || format!("{}{end}", read.text))
 }
 
-fn send(server: &Server, json: bool, name: String, text: String) -> anyhow::Result<()> {
+fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
+    let mut params = SendParams {
+        name: args.name,
+        text: args.text,
+        no_enter: args.no_enter,
+        no_paste: args.no_paste,
+        draft_wait: args.draft_wait,
+    };
     let mut client = server.connect(None)?;
+    let name = params.name.clone();
     let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
-    let text = if info.acp.is_some() {
+    if info.acp.is_some() {
         let report = Reported {
             state: "working".to_owned(),
             ..Reported::default()
         };
-        let params = StateParams {
-            name: name.clone(),
-            report,
-        };
-        let _: TerminalInfo = client.call(Method::State, &params)?;
-        acp::frame(&Input::Prompt(text))
-    } else {
-        text
-    };
-    let done: Value = client.call(Method::Send, &SendParams { name, text })?;
+        let state = StateParams { name, report };
+        let _: TerminalInfo = client.call(Method::State, &state)?;
+        params.text = acp::frame(&Input::Prompt(std::mem::take(&mut params.text)));
+    }
+    let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
 }
 
@@ -660,7 +672,12 @@ fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::R
         bail!("{name} is not an ACP terminal (shed run --acp)");
     }
     let text = acp::frame(input);
-    let done: Value = client.call(Method::Send, &SendParams { name, text })?;
+    let params = SendParams {
+        name,
+        text,
+        ..SendParams::default()
+    };
+    let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
 }
 

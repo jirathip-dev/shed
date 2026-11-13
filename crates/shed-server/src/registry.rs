@@ -5,9 +5,7 @@ use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -21,15 +19,16 @@ use shed_proto::{
 
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::unix::OwnedWriteHalf;
+use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::events::{Events, Subscriber};
+use crate::input::{DRAFT_WAIT, Draft, Input};
 use crate::stats::Stats;
 
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
 const FILE_VERSION: u32 = 1;
-
-pub(crate) type Input = (Arc<Terminal>, Vec<u8>);
+const SAVE_EVERY: Duration = Duration::from_millis(500);
 
 pub(crate) enum Stream {
     Output(Vec<u8>, UnboundedReceiver<Arc<[u8]>>),
@@ -58,12 +57,22 @@ async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedRec
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     version: u32,
-    terminals: Vec<TerminalInfo>,
+    terminals: Vec<Saved>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    #[serde(flatten)]
+    info: TerminalInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exited_at: Option<u64>,
 }
 
 struct Entry {
     info: TerminalInfo,
     term: Option<Arc<Terminal>>,
+    draft: Arc<Draft>,
+    exited_at: Option<u64>,
     killing: bool,
     resources: Option<Resources>,
     emitted: Option<Resources>,
@@ -76,6 +85,8 @@ impl Entry {
         Self {
             info,
             term,
+            draft: Arc::default(),
+            exited_at: None,
             killing: false,
             resources: None,
             emitted: None,
@@ -90,43 +101,76 @@ impl Entry {
             ..self.info.clone()
         }
     }
+
+    fn saved(&self) -> Saved {
+        let mut info = self.info.clone();
+        if let Some(session) = &mut info.session {
+            (session.commands, session.models) = (Vec::new(), Vec::new());
+        }
+        Saved {
+            info,
+            exited_at: self.exited_at,
+        }
+    }
 }
 
-#[derive(Clone)]
 pub(crate) struct Saver {
-    files: Sender<(u64, StateFile)>,
-    queued: Arc<AtomicU64>,
-    written: tokio::sync::watch::Receiver<u64>,
+    dirty: Arc<Notify>,
+    urgent: Arc<Notify>,
+    changes: u64,
+    wanted: u64,
+    closing: bool,
+    written: tokio::sync::watch::Sender<u64>,
 }
 
 impl Saver {
-    fn start(path: &Path) -> Self {
-        let (files, queue) = std::sync::mpsc::channel::<(u64, StateFile)>();
-        let (done, written) = tokio::sync::watch::channel(0);
-        let at = path.to_owned();
-        std::thread::spawn(move || {
-            while let Ok(next) = queue.recv() {
-                let (generation, file) = queue.try_iter().last().unwrap_or(next);
-                write_state(&at, &file).ok();
-                done.send_replace(generation);
-            }
-        });
-        Self {
-            files,
-            queued: Arc::new(AtomicU64::new(0)),
-            written,
+    fn changed(&mut self, urgent: bool) {
+        self.changes += 1;
+        self.dirty.notify_one();
+        if urgent {
+            self.wanted = self.changes;
+            self.urgent.notify_one();
         }
     }
 
-    fn save(&self, file: StateFile) {
-        let generation = self.queued.fetch_add(1, Ordering::SeqCst) + 1;
-        self.files.send((generation, file)).ok();
+    pub(crate) fn flushed(&self) -> impl Future<Output = ()> + Send + use<> {
+        let (mut written, wanted) = (self.written.subscribe(), self.wanted);
+        async move {
+            written.wait_for(|w| *w >= wanted).await.ok();
+        }
     }
+}
 
-    pub(crate) async fn flushed(&self) {
-        let generation = self.queued.load(Ordering::SeqCst);
-        let mut written = self.written.clone();
-        written.wait_for(|w| *w >= generation).await.ok();
+pub(crate) async fn keep_saved(registry: Arc<Mutex<Registry>>) {
+    let (dirty, urgent) = {
+        let saver = &crate::lock(&registry).saver;
+        (Arc::clone(&saver.dirty), Arc::clone(&saver.urgent))
+    };
+    loop {
+        dirty.notified().await;
+        let (path, file, generation, closing) = {
+            let reg = crate::lock(&registry);
+            let saver = &reg.saver;
+            (
+                reg.path.clone(),
+                reg.state_file(),
+                saver.changes,
+                saver.closing,
+            )
+        };
+        let write = move || write_state(&path, &file).ok();
+        tokio::task::spawn_blocking(write).await.ok();
+        crate::lock(&registry)
+            .saver
+            .written
+            .send_replace(generation);
+        if closing {
+            return;
+        }
+        tokio::select! {
+            () = tokio::time::sleep(SAVE_EVERY) => {}
+            () = urgent.notified() => {}
+        }
     }
 }
 
@@ -153,7 +197,7 @@ fn write_state(path: &Path, file: &StateFile) -> io::Result<()> {
         .truncate(true)
         .mode(0o600)
         .open(&tmp)?;
-    serde_json::to_writer_pretty(&mut f, file)?;
+    serde_json::to_writer(&mut f, file)?;
     f.write_all(b"\n")?;
     f.sync_all()?;
     fs::rename(&tmp, path)
@@ -228,7 +272,7 @@ fn spawn(
     Ok(term)
 }
 
-fn end_left_over(state: &Path, terminals: &[TerminalInfo]) {
+fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalInfo>) {
     let dir = state.parent().unwrap_or(Path::new("."));
     let sample = crate::stats::system(dir);
     let booted = sample.at.saturating_sub(sample.uptime_s);
@@ -238,7 +282,7 @@ fn end_left_over(state: &Path, terminals: &[TerminalInfo]) {
         return;
     }
     let procs = proctree::system().list().unwrap_or_default();
-    for info in terminals.iter().filter(|i| i.state == State::Running) {
+    for info in terminals.filter(|i| i.state == State::Running) {
         let Some(pid) = info
             .pid
             .filter(|&p| u32::try_from(p).ok() != Some(shed_core::runner::pid()))
@@ -274,11 +318,16 @@ impl Registry {
             },
             Err(e) => return Err(e),
         };
-        end_left_over(path, &file.terminals);
+        end_left_over(path, file.terminals.iter().map(|s| &s.info));
         let shell = crate::config::var("SHELL").unwrap_or_else(|| "/bin/sh".to_owned());
         let mut entries = BTreeMap::new();
         let mut events = Events::default();
-        for mut info in file.terminals {
+        let now = shed_core::clock::unix_now();
+        for Saved {
+            mut info,
+            exited_at,
+        } in file.terminals
+        {
             let mut term = None;
             if info.state == State::Running {
                 if info.keep {
@@ -307,7 +356,15 @@ impl Registry {
             if term.is_some() {
                 events.emit(&info, EventKind::Started);
             }
-            entries.insert(info.name.clone(), Entry::new(info, term));
+            let exited_at = (info.state == State::Exited).then(|| exited_at.unwrap_or(now));
+            let name = info.name.clone();
+            entries.insert(
+                name,
+                Entry {
+                    exited_at,
+                    ..Entry::new(info, term)
+                },
+            );
         }
         for dir in ["history", "acp"] {
             for file in fs::read_dir(path.with_file_name(dir)).into_iter().flatten() {
@@ -321,7 +378,14 @@ impl Registry {
                 }
             }
         }
-        let saver = Saver::start(path);
+        let saver = Saver {
+            dirty: Arc::default(),
+            urgent: Arc::default(),
+            changes: 0,
+            wanted: 0,
+            closing: false,
+            written: tokio::sync::watch::Sender::new(0),
+        };
         let registry = Self {
             entries,
             path: path.to_owned(),
@@ -337,17 +401,33 @@ impl Registry {
     fn state_file(&self) -> StateFile {
         StateFile {
             version: FILE_VERSION,
-            terminals: self.entries.values().map(|e| e.info.clone()).collect(),
+            terminals: self.entries.values().map(Entry::saved).collect(),
         }
     }
 
-    fn save(&self) {
-        self.saver.save(self.state_file());
+    fn save(&mut self) {
+        self.saver.changed(false);
     }
 
-    fn saved<T>(&self, value: T) -> T {
-        self.save();
+    fn saved<T>(&mut self, value: T) -> T {
+        self.saver.changed(true);
         value
+    }
+
+    pub(crate) fn close(&mut self) -> impl Future<Output = ()> + Send + use<> {
+        self.saver.closing = true;
+        self.saver.changed(true);
+        self.saver.flushed()
+    }
+
+    pub(crate) fn prune(&mut self, now: u64) {
+        let after = crate::config::prune_after();
+        let before = self.entries.len();
+        let fresh = |t: u64| now.saturating_sub(t) < after;
+        self.entries.retain(|_, e| e.exited_at.is_none_or(fresh));
+        if self.entries.len() != before {
+            self.save();
+        }
     }
 
     pub(crate) fn refresh(&mut self) -> Result<&mut Self, RpcError> {
@@ -406,6 +486,7 @@ impl Registry {
         let code = exit_code(status);
         (entry.info.state, entry.info.exit) = (State::Exited, code);
         entry.info.pid = None;
+        entry.exited_at = Some(shed_core::clock::unix_now());
         entry.resources = None;
         if let Some(term) = &entry.term {
             entry.info.reported = term.report().map(to_reported);
@@ -557,6 +638,7 @@ impl Registry {
 
     pub(crate) fn record(&mut self, mut sample: Sample) -> impl FnOnce() + Send + use<> {
         self.refresh().ok();
+        self.prune(shed_core::clock::unix_now());
         sample.terminals = self.counts();
         self.stats.push(sample);
         self.stats.saving()
@@ -743,10 +825,34 @@ impl Registry {
     }
 
     pub(crate) fn send(&self, p: SendParams) -> Result<Input, RpcError> {
-        Ok((Arc::clone(self.live(&p.name)?), p.text.into_bytes()))
+        let term = Arc::clone(self.live(&p.name)?);
+        let entry = self.entry(&p.name)?;
+        let mut bytes = p.text.into_bytes();
+        if entry.info.acp.is_some() {
+            return Ok(Input::Now(term, bytes));
+        }
+        if !p.no_paste && term.bracketed_paste() {
+            bytes = [b"\x1b[200~".as_slice(), &bytes, b"\x1b[201~"].concat();
+        }
+        if !p.no_enter {
+            bytes.push(b'\r');
+        }
+        Ok(Input::Sent {
+            name: p.name,
+            term,
+            bytes,
+            draft: Arc::clone(&entry.draft),
+            wait: p.draft_wait.unwrap_or(DRAFT_WAIT),
+        })
     }
 
-    pub(crate) fn keys(&self, p: &KeysParams) -> Result<Input, RpcError> {
+    pub(crate) fn typed(&self, p: SendParams) -> Result<Input, RpcError> {
+        let term = Arc::clone(self.live(&p.name)?);
+        let draft = Arc::clone(&self.entry(&p.name)?.draft);
+        Ok(Input::Typed(term, p.text.into_bytes(), draft))
+    }
+
+    pub(crate) fn keys(&self, p: &KeysParams, person: bool) -> Result<Input, RpcError> {
         let term = self.live(&p.name)?;
         let bytes = p
             .keys
@@ -754,7 +860,12 @@ impl Registry {
             .map(|k| shed_core::keys::encode(k))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))?;
-        Ok((Arc::clone(term), bytes.concat()))
+        let (term, bytes) = (Arc::clone(term), bytes.concat());
+        Ok(if person {
+            Input::Typed(term, bytes, Arc::clone(&self.entry(&p.name)?.draft))
+        } else {
+            Input::Now(term, bytes)
+        })
     }
 
     pub(crate) fn resize(&self, p: &ResizeParams) -> Result<(), RpcError> {
@@ -821,7 +932,10 @@ impl Registry {
         let acp = self.entry(&p.name)?.info.acp.as_ref();
         acp.ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, why))?;
         let text = crate::acp::frame(&crate::acp::Input::Model(p.model));
-        self.send(SendParams { name: p.name, text })
+        Ok(Input::Now(
+            Arc::clone(self.live(&p.name)?),
+            text.into_bytes(),
+        ))
     }
 
     pub(crate) fn to_wait(
@@ -963,9 +1077,129 @@ mod tests {
         assert_eq!(exists(), [true, true, false, false, false]);
         registry.rm("kept.1").unwrap().1();
         assert_eq!(exists(), [false; 5]);
-        tokio::runtime::Builder::new_current_thread()
-            .build()
+    }
+
+    fn sleeper(registry: &mut Registry, name: &str) -> Arc<Terminal> {
+        let run = serde_json::json!({"name": name, "cwd": "/", "cmd": ["sleep", "100"]});
+        registry.run(serde_json::from_value(run).unwrap()).unwrap();
+        Arc::clone(registry.live(name).unwrap())
+    }
+
+    fn saved(path: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_thousand_changes_in_a_second_write_at_most_three_times_and_end_on_disk() {
+        let path = dir("burst").join("state.json");
+        let registry = Arc::new(Mutex::new(
+            Registry::load(&path, Path::new("shed.sock")).unwrap(),
+        ));
+        tokio::spawn(keep_saved(Arc::clone(&registry)));
+        let term = sleeper(&mut crate::lock(&registry), "busy");
+        let flushed = crate::lock(&registry).saver.flushed();
+        flushed.await;
+        let stamp = || {
+            let meta = fs::metadata(&path).unwrap();
+            (meta.modified().unwrap(), fs::read(&path).unwrap())
+        };
+        let (mut last, mut writes) = (stamp(), 0);
+        for n in 0..1000 {
+            let report = Reported {
+                state: (if n % 2 == 0 { "working" } else { "blocked" }).to_owned(),
+                note: Some(format!("change {n}")),
+                state_source: None,
+            };
+            let name = "busy".to_owned();
+            crate::lock(&registry)
+                .state(StateParams { name, report })
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            if stamp() != last {
+                (last, writes) = (stamp(), writes + 1);
+            }
+        }
+        tokio::time::sleep(SAVE_EVERY).await;
+        if stamp() != last {
+            writes += 1;
+        }
+        assert!((1..=3).contains(&writes), "{writes} writes");
+        let file = saved(&path);
+        let busy = &file["terminals"][0];
+        assert_eq!(busy["reported"]["note"], "change 999");
+        assert_eq!(busy["reported"]["state"], "blocked");
+        term.kill(GRACE).unwrap();
+    }
+
+    #[test]
+    fn seventy_acp_terminals_save_under_300_kb_without_commands_or_models() {
+        let path = dir("acp-size").join("state.json");
+        let commands: Vec<_> = (0..100)
+            .map(|n| [format!("command-{n}"), "d".repeat(170), "hint".to_owned()])
+            .collect();
+        let models = vec![["model-id".to_owned(), "Model".to_owned()]; 20];
+        let terminals: Vec<_> = (0..70)
+            .map(|n| {
+                serde_json::json!({
+                    "name": format!("acp{n}"), "labels": {"issue": "7"}, "cwd": "/home/user",
+                    "cmd": ["shed", "acp-bridge"], "keep": false, "state": "exited", "exit": 0,
+                    "pid": null, "acp": "agent",
+                    "session": {"id": format!("s{n}"), "model": "model-id", "models": models, "commands": commands},
+                })
+            })
+            .collect();
+        let old = serde_json::json!({"version": 1, "terminals": terminals});
+        fs::write(&path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
+        assert!(fs::metadata(&path).unwrap().len() > 1_000_000);
+        let registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        assert!(fs::metadata(&path).unwrap().len() < 300_000);
+        let file = saved(&path);
+        let acp69 = file["terminals"]
+            .as_array()
             .unwrap()
-            .block_on(registry.saver.flushed());
+            .iter()
+            .find(|t| t["name"] == "acp69");
+        let session = &acp69.unwrap()["session"];
+        assert_eq!(
+            *session,
+            serde_json::json!({"id": "s69", "model": "model-id"})
+        );
+        let live = registry.get("acp69").unwrap().session.unwrap();
+        assert_eq!(live.commands.len(), 100);
+    }
+
+    #[test]
+    fn an_exited_terminal_past_the_limit_is_pruned_and_a_running_one_kept() {
+        let root = dir("prune");
+        let path = root.join("state.json");
+        let now = shed_core::clock::unix_now();
+        let terminal = |name: &str, at: u64| {
+            format!(
+                r#"{{"name":"{name}","labels":{{}},"cwd":"/","cmd":["make"],"keep":false,"state":"exited","exit":0,"pid":null,"exited_at":{at}}}"#
+            )
+        };
+        let file = format!(
+            r#"{{"version":1,"terminals":[{},{}]}}"#,
+            terminal("old", now - 86_401),
+            terminal("new", now - 60)
+        );
+        fs::write(&path, file).unwrap();
+        fs::create_dir_all(root.join("history")).unwrap();
+        fs::write(root.join("history/old.log"), "x").unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let term = sleeper(&mut registry, "running");
+        let names = |r: &Registry| -> Vec<String> {
+            r.ls(&LsParams::default())
+                .into_iter()
+                .map(|t| t.name)
+                .collect()
+        };
+        assert_eq!(names(&registry), ["new", "old", "running"]);
+        registry.prune(now);
+        assert_eq!(names(&registry), ["new", "running"]);
+        assert!(root.join("history/old.log").exists());
+        registry.prune(now + 86_400);
+        assert_eq!(names(&registry), ["running"]);
+        term.kill(GRACE).unwrap();
     }
 }

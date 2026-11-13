@@ -213,6 +213,12 @@ impl Screen {
         self.grid.size()
     }
 
+    /// Whether the program has turned bracketed paste on (`ESC [ ? 2004 h`).
+    #[must_use]
+    pub fn bracketed_paste(&self) -> bool {
+        self.grid.paste
+    }
+
     /// Changes the size. Rows that no longer fit move into scrollback; lines are not re-wrapped.
     pub fn resize(&mut self, size: Size) {
         self.grid.resize(size);
@@ -307,6 +313,7 @@ struct Grid {
     answered: bool,
     reports: Vec<Report>,
     pen: Pen,
+    paste: bool,
 }
 
 impl Grid {
@@ -331,6 +338,7 @@ impl Grid {
             answered: false,
             reports: Vec::new(),
             pen: Pen::default(),
+            paste: false,
         }
     }
 
@@ -683,6 +691,9 @@ impl Perform for Grid {
                     .any(|p| matches!(p.first(), Some(47 | 1047 | 1049)))
             {
                 self.set_alt(action == 'h');
+            }
+            if matches!(action, 'h' | 'l') && params.iter().any(|p| p.first() == Some(&2004)) {
+                self.paste = action == 'h';
             }
             return;
         }
