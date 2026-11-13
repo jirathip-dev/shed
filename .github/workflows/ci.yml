@@ -70,7 +70,7 @@ jobs:
             tar -xz -C "$RUNNER_TEMP" actionlint
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: install herdsman
-        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging herdsman
+        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --rev 1534b233d711fd14169d82ebd5710b027e1b1d4c herdsman
       - name: actionlint (.github/workflows)
         run: just actionlint
       - name: arch-check (.herdsman/arch.toml)
