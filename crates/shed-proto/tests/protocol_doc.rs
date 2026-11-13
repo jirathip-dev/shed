@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value, json, to_value};
 use shed_proto::{
     AcpSession, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind, EventsParams,
-    Hello, KeysParams, Line, Link, LinkState, LsParams, MachineStats, Method, ModelParams,
-    ReadParams, ReadResult, Reported, Request, ResizeParams, Resources, Response, RpcError, Run,
-    RunParams, Sample, ScreenUpdate, SendParams, State, StateParams, StatsParams, Target,
-    TerminalInfo, TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams,
-    WaitResult, WatchParams, openrpc,
+    ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState, LsParams,
+    MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported, Request,
+    ResizeParams, Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams,
+    State, StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams,
+    VERSION, WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
 };
 
 fn info(state: State) -> TerminalInfo {
@@ -31,6 +31,15 @@ fn info(state: State) -> TerminalInfo {
         resources: (state == State::Running).then_some(RESOURCES),
         acp: None,
         session: None,
+        parent: Some(lead()),
+    }
+}
+
+fn lead() -> Parent {
+    Parent {
+        name: "lead".into(),
+        outlive: false,
+        notify: true,
     }
 }
 
@@ -112,6 +121,7 @@ fn events() -> Vec<Event> {
         seq,
         name: "build".into(),
         labels: info(State::Running).labels,
+        parent: Some("lead".into()),
         kind,
         replay: false,
     })
@@ -203,8 +213,10 @@ fn run_params() -> Value {
         policy: None,
         resume: None,
         mcp_servers: Vec::new(),
+        meta: None,
         no_hibernate: false,
         machine: None,
+        parent: Some(lead()),
         rows: None,
         cols: None,
     })
@@ -261,6 +273,7 @@ fn example(method: Method) -> (Value, Value) {
         Method::Ls => (
             to_value(LsParams {
                 labels: BTreeMap::from([("issue".into(), "7".into())]),
+                parent: Some("lead".into()),
             })
             .unwrap(),
             json!([running()]),
@@ -308,6 +321,7 @@ fn example(method: Method) -> (Value, Value) {
         Method::Wait => (
             to_value(WaitParams {
                 name: "build".into(),
+                children: None,
                 until: vec!["done".into(), "blocked".into()],
                 output: Some("^ok \\d+ tests$".into()),
                 timeout: Some(600.0),
@@ -339,6 +353,7 @@ fn example(method: Method) -> (Value, Value) {
             json!({}),
         ),
         Method::MachineLinks => links_example(),
+        Method::Exec | Method::FileRead | Method::FileWrite => exec_example(method),
         Method::Discover => {
             let doc = openrpc();
             (
@@ -346,6 +361,46 @@ fn example(method: Method) -> (Value, Value) {
                 json!({"openrpc": doc["openrpc"], "info": doc["info"]}),
             )
         }
+    }
+}
+
+fn exec_example(method: Method) -> (Value, Value) {
+    match method {
+        Method::Exec => (
+            to_value(ExecParams {
+                cmd: vec!["git".into(), "status".into(), "--short".into()],
+                cwd: Some(PathBuf::from("/home/user/project")),
+                timeout: Some(30.0),
+                stdin: Vec::new(),
+                machine: Some("box".into()),
+            })
+            .unwrap(),
+            to_value(ExecResult {
+                code: 0,
+                stdout: b" M src/lib.rs\n".to_vec(),
+                stderr: Vec::new(),
+            })
+            .unwrap(),
+        ),
+        Method::FileRead => (
+            to_value(FileParams {
+                path: PathBuf::from("/home/user/project/VERSION"),
+                data: None,
+                machine: None,
+            })
+            .unwrap(),
+            json!(b"1.2.0\n"),
+        ),
+        Method::FileWrite => (
+            to_value(FileParams {
+                path: PathBuf::from("/home/user/project/VERSION"),
+                data: Some(b"1.3.0\n".to_vec()),
+                machine: None,
+            })
+            .unwrap(),
+            json!({}),
+        ),
+        _ => unreachable!("{method:?}"),
     }
 }
 
@@ -440,11 +495,13 @@ fn markdown() -> String {
          A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is\n\
          the exit status (128 + N for signal N), `null` while running or when the program was lost in a server\n\
          restart; `pid` is set while running; `reported` is the state the program last reported (absent until\n\
-         then); `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory\n\
-         (MiB) and CPU (percent of one core) at the last sample, while running; an ACP terminal's `session` is its\n\
-         agent session (`id`, for `run`'s `resume`; the current `model` and the `models`, `[id, name]`; `run`'s\n\
-         `mcp_servers` with each env and header value as `***`; the agent's slash `commands`, `[name, description,\n\
-         hint]`).\n\n## Methods\n"
+         then), or `stuck` while the program has left input unread for over a second (`send`, `keys` and\n\
+         `acp.model` then fail, their input queued); `idle_after` is set when the `idle` fallback is on;\n\
+         `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\n\
+         running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\n\
+         and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\n\
+         slash `commands`, `[name, description, hint]`); `parent` names the terminal that started it (absent\n\
+         without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
     );
     for method in Method::ALL {
         let (params, result) = example(method);
@@ -461,7 +518,7 @@ fn markdown() -> String {
         .unwrap();
     }
     md.push_str(
-        "\n## Events\n\nAn event names its terminal, carries its labels and counts up in `seq`; `event` is \
+        "\n## Events\n\nAn event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is \
          `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by \
          `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).\n\n\
          An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), \

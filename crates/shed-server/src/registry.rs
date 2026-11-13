@@ -1,15 +1,15 @@
 use shed_core::runner::ExitStatus;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use shed_core::proctree::{self, ProcessInfo};
+use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_core::{History, Report, STATES, Size, Terminal};
 use shed_proto::{
     EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams, MachineStats,
@@ -19,6 +19,7 @@ use shed_proto::{
 
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::unix::OwnedWriteHalf;
+use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::events::{Events, Subscriber};
@@ -26,9 +27,12 @@ use crate::stats::Stats;
 
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
 const FILE_VERSION: u32 = 1;
+const SAVE_EVERY: Duration = Duration::from_millis(500);
+
+pub(crate) type Input = (Arc<Terminal>, Vec<u8>);
 
 pub(crate) enum Stream {
-    Output(Vec<u8>, UnboundedReceiver<Vec<u8>>),
+    Output(Vec<u8>, UnboundedReceiver<Arc<[u8]>>),
     Events(Subscriber),
     Screen(Arc<Terminal>, Option<u64>),
 }
@@ -43,7 +47,7 @@ impl Stream {
     }
 }
 
-async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Vec<u8>>) {
+async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Arc<[u8]>>) {
     let mut batch = Vec::new();
     while out.write_all(&bytes).await.is_ok() && rx.recv_many(&mut batch, 1024).await > 0 {
         bytes = batch.concat();
@@ -54,16 +58,26 @@ async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedRec
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     version: u32,
-    terminals: Vec<TerminalInfo>,
+    terminals: Vec<Saved>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Saved {
+    #[serde(flatten)]
+    info: TerminalInfo,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    exited_at: Option<u64>,
 }
 
 struct Entry {
     info: TerminalInfo,
     term: Option<Arc<Terminal>>,
+    exited_at: Option<u64>,
     killing: bool,
     resources: Option<Resources>,
     emitted: Option<Resources>,
     sampled: (Instant, Duration),
+    notes: Vec<String>,
 }
 
 impl Entry {
@@ -71,10 +85,12 @@ impl Entry {
         Self {
             info,
             term,
+            exited_at: None,
             killing: false,
             resources: None,
             emitted: None,
             sampled: (shed_core::clock::now(), Duration::ZERO),
+            notes: Vec::new(),
         }
     }
 
@@ -84,14 +100,106 @@ impl Entry {
             ..self.info.clone()
         }
     }
+
+    fn saved(&self) -> Saved {
+        let mut info = self.info.clone();
+        if let Some(session) = &mut info.session {
+            (session.commands, session.models) = (Vec::new(), Vec::new());
+        }
+        Saved {
+            info,
+            exited_at: self.exited_at,
+        }
+    }
+}
+
+pub(crate) struct Saver {
+    dirty: Arc<Notify>,
+    urgent: Arc<Notify>,
+    changes: u64,
+    wanted: u64,
+    closing: bool,
+    written: tokio::sync::watch::Sender<u64>,
+}
+
+impl Saver {
+    fn changed(&mut self, urgent: bool) {
+        self.changes += 1;
+        self.dirty.notify_one();
+        if urgent {
+            self.wanted = self.changes;
+            self.urgent.notify_one();
+        }
+    }
+
+    pub(crate) fn flushed(&self) -> impl Future<Output = ()> + Send + use<> {
+        let (mut written, wanted) = (self.written.subscribe(), self.wanted);
+        async move {
+            written.wait_for(|w| *w >= wanted).await.ok();
+        }
+    }
+}
+
+pub(crate) async fn keep_saved(registry: Arc<Mutex<Registry>>) {
+    let (dirty, urgent) = {
+        let saver = &crate::lock(&registry).saver;
+        (Arc::clone(&saver.dirty), Arc::clone(&saver.urgent))
+    };
+    loop {
+        dirty.notified().await;
+        let (path, file, generation, closing) = {
+            let reg = crate::lock(&registry);
+            let saver = &reg.saver;
+            (
+                reg.path.clone(),
+                reg.state_file(),
+                saver.changes,
+                saver.closing,
+            )
+        };
+        let write = move || write_state(&path, &file).ok();
+        tokio::task::spawn_blocking(write).await.ok();
+        crate::lock(&registry)
+            .saver
+            .written
+            .send_replace(generation);
+        if closing {
+            return;
+        }
+        tokio::select! {
+            () = tokio::time::sleep(SAVE_EVERY) => {}
+            () = urgent.notified() => {}
+        }
+    }
 }
 
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
     path: PathBuf,
     socket: PathBuf,
+    pub(crate) saver: Saver,
     pub(crate) events: Events,
     pub(crate) stats: Stats,
+}
+
+fn write_state(path: &Path, file: &StateFile) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&tmp)?;
+    serde_json::to_writer(&mut f, file)?;
+    f.write_all(b"\n")?;
+    f.sync_all()?;
+    fs::rename(&tmp, path)
 }
 
 fn not_found(name: &str) -> RpcError {
@@ -104,6 +212,15 @@ fn internal(e: impl std::fmt::Display) -> RpcError {
 
 fn moved(old: u64, new: u64) -> bool {
     new.abs_diff(old) * 10 > old
+}
+
+fn note(child: &TerminalInfo, what: &str) -> Option<(String, String)> {
+    let parent = child.parent.as_ref().filter(|p| p.notify)?;
+    Some((parent.name.clone(), format!("[shed] {} {what}", child.name)))
+}
+
+fn working(t: &TerminalInfo) -> bool {
+    t.reported.as_ref().is_some_and(|r| r.state == "working")
 }
 
 fn exit_code(status: ExitStatus) -> Option<i32> {
@@ -140,6 +257,35 @@ fn spawn(
     Ok(term)
 }
 
+fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalInfo>) {
+    let dir = state.parent().unwrap_or(Path::new("."));
+    let sample = crate::stats::system(dir);
+    let booted = sample.at.saturating_sub(sample.uptime_s);
+    let saved = fs::metadata(state).and_then(|m| m.modified());
+    let saved = saved.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+    if sample.uptime_s > 0 && saved.is_none_or(|t| t.as_secs() < booted) {
+        return;
+    }
+    let procs = proctree::system().list().unwrap_or_default();
+    for info in terminals.filter(|i| i.state == State::Running) {
+        let Some(pid) = info
+            .pid
+            .filter(|&p| u32::try_from(p).ok() != Some(shed_core::runner::pid()))
+        else {
+            continue;
+        };
+        let left = proctree::tree(&procs, pid, &BTreeSet::new()).len();
+        if left > 0 && proctree::kill_tree(&proctree::system(), pid, GRACE, || {}).is_ok() {
+            let name = &info.name;
+            writeln!(
+                io::stderr(),
+                "shed serve: ended terminal {name}'s process group {pid} ({left} processes), left running by the last server"
+            )
+            .ok();
+        }
+    }
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -157,10 +303,16 @@ impl Registry {
             },
             Err(e) => return Err(e),
         };
+        end_left_over(path, file.terminals.iter().map(|s| &s.info));
         let shell = crate::config::var("SHELL").unwrap_or_else(|| "/bin/sh".to_owned());
         let mut entries = BTreeMap::new();
         let mut events = Events::default();
-        for mut info in file.terminals {
+        let now = shed_core::clock::unix_now();
+        for Saved {
+            mut info,
+            exited_at,
+        } in file.terminals
+        {
             let mut term = None;
             if info.state == State::Running {
                 if info.keep {
@@ -187,9 +339,17 @@ impl Registry {
             }
             info.pid = term.as_ref().map(|t| t.pid());
             if term.is_some() {
-                events.emit(&info.name, &info.labels, EventKind::Started);
+                events.emit(&info, EventKind::Started);
             }
-            entries.insert(info.name.clone(), Entry::new(info, term));
+            let exited_at = (info.state == State::Exited).then(|| exited_at.unwrap_or(now));
+            let name = info.name.clone();
+            entries.insert(
+                name,
+                Entry {
+                    exited_at,
+                    ..Entry::new(info, term)
+                },
+            );
         }
         for dir in ["history", "acp"] {
             for file in fs::read_dir(path.with_file_name(dir)).into_iter().flatten() {
@@ -203,48 +363,60 @@ impl Registry {
                 }
             }
         }
+        let saver = Saver {
+            dirty: Arc::default(),
+            urgent: Arc::default(),
+            changes: 0,
+            wanted: 0,
+            closing: false,
+            written: tokio::sync::watch::Sender::new(0),
+        };
         let registry = Self {
             entries,
             path: path.to_owned(),
             socket: socket.to_owned(),
+            saver,
             events,
             stats: Stats::load(&path.with_file_name("stats.json")),
         };
-        registry.save()?;
+        write_state(path, &registry.state_file())?;
         Ok(registry)
     }
 
-    fn save(&self) -> io::Result<()> {
-        if let Some(dir) = self.path.parent() {
-            fs::DirBuilder::new()
-                .recursive(true)
-                .mode(0o700)
-                .create(dir)?;
-        }
-        let file = StateFile {
+    fn state_file(&self) -> StateFile {
+        StateFile {
             version: FILE_VERSION,
-            terminals: self.entries.values().map(|e| e.info.clone()).collect(),
-        };
-        let tmp = self.path.with_extension("json.tmp");
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
-        serde_json::to_writer_pretty(&mut f, &file)?;
-        f.write_all(b"\n")?;
-        f.sync_all()?;
-        fs::rename(&tmp, &self.path)
+            terminals: self.entries.values().map(Entry::saved).collect(),
+        }
     }
 
-    fn saved<T>(&self, value: T) -> Result<T, RpcError> {
-        self.save().map_err(internal)?;
-        Ok(value)
+    fn save(&mut self) {
+        self.saver.changed(false);
     }
 
-    pub(crate) fn refresh(&mut self) -> Result<(), RpcError> {
-        let mut changed = false;
+    fn saved<T>(&mut self, value: T) -> T {
+        self.saver.changed(true);
+        value
+    }
+
+    pub(crate) fn close(&mut self) -> impl Future<Output = ()> + Send + use<> {
+        self.saver.closing = true;
+        self.saver.changed(true);
+        self.saver.flushed()
+    }
+
+    pub(crate) fn prune(&mut self, now: u64) {
+        let after = crate::config::prune_after();
+        let before = self.entries.len();
+        let fresh = |t: u64| now.saturating_sub(t) < after;
+        self.entries.retain(|_, e| e.exited_at.is_none_or(fresh));
+        if self.entries.len() != before {
+            self.save();
+        }
+    }
+
+    pub(crate) fn refresh(&mut self) -> Result<&mut Self, RpcError> {
+        let (mut changed, mut notes) = (false, Vec::new());
         for entry in self.entries.values_mut() {
             let Some(term) = &entry.term else { continue };
             let reported = term.report().map(|r| Reported {
@@ -255,35 +427,92 @@ impl Registry {
             if entry.info.reported != reported {
                 entry.info.reported.clone_from(&reported);
                 if let Some(r) = reported {
-                    let (name, labels) = (&entry.info.name, &entry.info.labels);
-                    self.events.emit(name, labels, EventKind::State(r));
+                    if ["blocked", "error"].contains(&r.state.as_str()) {
+                        let what = [Some(&r.state), r.note.as_ref()].into_iter().flatten();
+                        notes.extend(note(
+                            &entry.info,
+                            &what.cloned().collect::<Vec<_>>().join(": "),
+                        ));
+                    }
+                    self.events.emit(&entry.info, EventKind::State(r));
                 }
                 changed = true;
             }
             if entry.info.state == State::Running
                 && let Some(status) = term.try_wait().map_err(internal)?
             {
-                Self::exited(&mut self.events, entry, status);
+                notes.extend(Self::exited(&mut self.events, entry, status));
                 changed = true;
             }
         }
+        self.deliver(notes);
         if changed {
-            self.save().map_err(internal)?;
+            self.save();
         }
-        Ok(())
+        Ok(self)
     }
 
-    fn exited(events: &mut Events, entry: &mut Entry, status: ExitStatus) {
+    fn exited(
+        events: &mut Events,
+        entry: &mut Entry,
+        status: ExitStatus,
+    ) -> Option<(String, String)> {
         let code = exit_code(status);
         (entry.info.state, entry.info.exit) = (State::Exited, code);
         entry.info.pid = None;
+        entry.exited_at = Some(shed_core::clock::unix_now());
         entry.resources = None;
-        let kind = if entry.killing {
-            EventKind::Killed
-        } else {
-            EventKind::Exited { code }
+        let (kind, what) = match code {
+            _ if entry.killing => (EventKind::Killed, "killed".to_owned()),
+            Some(n) => (EventKind::Exited { code }, format!("exited {n}")),
+            None => (EventKind::Exited { code }, "exited".to_owned()),
         };
-        events.emit(&entry.info.name, &entry.info.labels, kind);
+        events.emit(&entry.info, kind);
+        note(&entry.info, &what)
+    }
+
+    fn deliver(&mut self, notes: Vec<(String, String)>) {
+        for (parent, note) in notes {
+            if let Some(entry) = self.entries.get_mut(&parent) {
+                entry.notes.push(note);
+            }
+        }
+        for entry in self.entries.values_mut() {
+            let Some(term) = &entry.term else { continue };
+            if entry.notes.is_empty() || entry.info.state == State::Exited || working(&entry.info) {
+                continue;
+            }
+            let notes = std::mem::take(&mut entry.notes);
+            let text = if entry.info.acp.is_some() {
+                let state = "working".to_owned();
+                term.set_report(Report {
+                    state,
+                    note: None,
+                    source: None,
+                });
+                crate::acp::frame(&crate::acp::Input::Prompt(notes.join("\n")))
+            } else {
+                notes.into_iter().map(|n| n + "\r").collect()
+            };
+            let term = Arc::clone(term);
+            std::thread::spawn(move || term.write(text.as_bytes()).ok());
+        }
+    }
+
+    pub(crate) fn children(&self, name: &str) -> impl Iterator<Item = &TerminalInfo> {
+        let infos = self.entries.values().map(|e| &e.info);
+        infos.filter(move |t| t.parent.as_ref().is_some_and(|p| p.name == name))
+    }
+
+    pub(crate) fn busy_children(&self, name: &str) -> bool {
+        let running = |t: &&TerminalInfo| t.state == State::Running;
+        (self.children(name).filter(running)).any(|t| t.reported.is_none() || working(t))
+    }
+
+    pub(crate) fn orphans(&self, name: &str) -> Vec<String> {
+        let ended = (self.children(name)).filter(|t| t.parent.as_ref().is_some_and(|p| !p.outlive));
+        let running = ended.filter(|t| t.state == State::Running);
+        running.map(|t| t.name.clone()).collect()
     }
 
     pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) {
@@ -309,8 +538,7 @@ impl Registry {
                 .is_none_or(|old| moved(old.rss_mb, now.rss_mb) || moved(old.cpu_pct, now.cpu_pct))
             {
                 entry.emitted = Some(now);
-                let (name, labels) = (&entry.info.name, &entry.info.labels);
-                self.events.emit(name, labels, EventKind::Resources(now));
+                self.events.emit(&entry.info, EventKind::Resources(now));
             }
         }
     }
@@ -379,9 +607,12 @@ impl Registry {
         counts
     }
 
-    pub(crate) fn record(&mut self, mut sample: Sample) {
+    pub(crate) fn record(&mut self, mut sample: Sample) -> impl FnOnce() + Send + use<> {
+        self.refresh().ok();
+        self.prune(shed_core::clock::unix_now());
         sample.terminals = self.counts();
         self.stats.push(sample);
+        self.stats.saving()
     }
 
     pub(crate) fn machine_stats(&self, mut now: Sample, since: Option<u64>) -> MachineStats {
@@ -394,11 +625,11 @@ impl Registry {
         Stream::Events(self.events.subscribe(p))
     }
 
-    pub(crate) fn running(&self) -> Vec<Arc<Terminal>> {
+    pub(crate) fn running(&self) -> Vec<(String, Arc<Terminal>)> {
         self.entries
             .values()
             .filter(|e| e.info.state == State::Running)
-            .filter_map(|e| e.term.clone())
+            .filter_map(|e| Some((e.info.name.clone(), e.term.clone()?)))
             .collect()
     }
 
@@ -435,6 +666,15 @@ impl Registry {
             return Err(bad("label keys must be non-empty and have no '='"));
         }
         crate::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
+        if let Some(parent) = p.parent.as_ref().map(|p| &p.name) {
+            let gone = |_| {
+                RpcError::new(
+                    ErrorCode::NoSuchTerminal,
+                    format!("parent {parent} is not running"),
+                )
+            };
+            self.live(parent).map_err(gone)?;
+        }
         let name = match p.name {
             Some(name) if !valid_name(&name) => return Err(bad("name must match [A-Za-z0-9._-]+")),
             Some(name) if self.entries.contains_key(&name) => {
@@ -453,8 +693,10 @@ impl Registry {
         let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
         let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
         let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
+        let meta = serde_json::to_string(&p.meta).map_err(internal)?;
+        let meta = p.meta.is_some().then_some(("SHED_ACP_META", meta.as_str()));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
-        let acp: Vec<_> = resume.into_iter().chain(mcp).chain(awake).collect();
+        let acp: Vec<_> = [resume, mcp, meta, awake].into_iter().flatten().collect();
         let term = spawn(
             size(p.rows, p.cols),
             &p.cmd,
@@ -479,11 +721,12 @@ impl Registry {
             resources: None,
             acp: p.acp,
             session: None,
+            parent: p.parent,
         };
-        self.events.emit(&name, &info.labels, EventKind::Started);
+        self.events.emit(&info, EventKind::Started);
         let entry = Entry::new(info.clone(), Some(Arc::new(term)));
         self.entries.insert(name, entry);
-        self.saved(info)
+        Ok(self.saved(info))
     }
 
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
@@ -494,6 +737,10 @@ impl Registry {
                     .iter()
                     .all(|(k, v)| e.info.labels.get(k) == Some(v))
             })
+            .filter(|e| {
+                let parent = e.info.parent.as_ref().map(|p| &p.name);
+                p.parent.is_none() || parent == p.parent.as_ref()
+            })
             .map(Entry::view)
             .collect()
     }
@@ -502,52 +749,56 @@ impl Registry {
         Ok(self.entry(name)?.view())
     }
 
-    pub(crate) fn read(&self, p: &ReadParams) -> Result<ReadResult, RpcError> {
+    pub(crate) fn read(
+        &self,
+        p: ReadParams,
+    ) -> Result<impl FnOnce() -> Result<ReadResult, RpcError> + Send + use<>, RpcError> {
         let entry = self.entry(&p.name)?;
-        let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
+        let (state, term) = (self.path.clone(), entry.term.clone());
         let acp = entry.info.acp.is_some();
-        let file = || fs::read_to_string(crate::acp::transcript(&self.path, &p.name));
-        let mut text = match &entry.term {
-            _ if acp && !p.events => crate::acp::render(&file().unwrap_or_default()),
-            _ if acp => {
-                let (file, before) = (file().unwrap_or_default(), p.before.unwrap_or(u64::MAX));
-                let lines = (file.lines().zip(1..)).take_while(|&(_, seq)| seq < before);
-                let parsed =
-                    lines.filter_map(|(l, seq)| Some((seq, serde_json::from_str(l).ok()?)));
-                events = parsed.map(|(seq, kind)| Logged { seq, kind }).collect();
-                events.drain(..events.len().saturating_sub(p.n.unwrap_or(usize::MAX)));
-                String::new()
-            }
-            Some(term) if p.history => term.history(n),
-            Some(term) => term.screen(),
-            None => {
-                let screen = history(&self.path, &p.name)
-                    .restore(size(None, None))
-                    .map_err(internal)?;
-                if p.history {
-                    screen.history(n)
-                } else {
-                    screen.text()
+        Ok(move || {
+            let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
+            let file = || fs::read_to_string(crate::acp::transcript(&state, &p.name));
+            let mut text = match &term {
+                _ if acp && !p.events => crate::acp::render(&file().unwrap_or_default()),
+                _ if acp => {
+                    let (file, before) = (file().unwrap_or_default(), p.before.unwrap_or(u64::MAX));
+                    let lines = (file.lines().zip(1..)).take_while(|&(_, seq)| seq < before);
+                    let parsed =
+                        lines.filter_map(|(l, seq)| Some((seq, serde_json::from_str(l).ok()?)));
+                    events = parsed.map(|(seq, kind)| Logged { seq, kind }).collect();
+                    events.drain(..events.len().saturating_sub(p.n.unwrap_or(usize::MAX)));
+                    String::new()
                 }
+                Some(term) if p.history => term.history(n),
+                Some(term) => term.screen(),
+                None => {
+                    let screen = history(&state, &p.name)
+                        .restore(size(None, None))
+                        .map_err(internal)?;
+                    if p.history {
+                        screen.history(n)
+                    } else {
+                        screen.text()
+                    }
+                }
+            };
+            if acp || !p.history {
+                let lines: Vec<&str> = text.lines().collect();
+                text = lines
+                    .get(lines.len().saturating_sub(n)..)
+                    .unwrap_or_default()
+                    .join("\n");
             }
-        };
-        if acp || !p.history {
-            let lines: Vec<&str> = text.lines().collect();
-            text = lines
-                .get(lines.len().saturating_sub(n)..)
-                .unwrap_or_default()
-                .join("\n");
-        }
-        Ok(ReadResult { text, events })
+            Ok(ReadResult { text, events })
+        })
     }
 
-    pub(crate) fn send(&self, p: &SendParams) -> Result<(), RpcError> {
-        self.live(&p.name)?
-            .write(p.text.as_bytes())
-            .map_err(internal)
+    pub(crate) fn send(&self, p: SendParams) -> Result<Input, RpcError> {
+        Ok((Arc::clone(self.live(&p.name)?), p.text.into_bytes()))
     }
 
-    pub(crate) fn keys(&self, p: &KeysParams) -> Result<(), RpcError> {
+    pub(crate) fn keys(&self, p: &KeysParams) -> Result<Input, RpcError> {
         let term = self.live(&p.name)?;
         let bytes = p
             .keys
@@ -555,7 +806,7 @@ impl Registry {
             .map(|k| shed_core::keys::encode(k))
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))?;
-        term.write(&bytes.concat()).map_err(internal)
+        Ok((Arc::clone(term), bytes.concat()))
     }
 
     pub(crate) fn resize(&self, p: &ResizeParams) -> Result<(), RpcError> {
@@ -610,20 +861,19 @@ impl Registry {
             EventKind::Session(s) => info.session.replace(s.clone()).is_none_or(|old| old != *s),
             _ => false,
         };
-        let labels = info.labels.clone();
-        self.events.emit_as(&p.name, &labels, p.kind, p.replay);
+        self.events.emit_as(info, p.kind, p.replay);
         if session {
-            self.save().map_err(internal)?;
+            self.save();
         }
         Ok(())
     }
 
-    pub(crate) fn model(&self, p: ModelParams) -> Result<(), RpcError> {
+    pub(crate) fn model(&self, p: ModelParams) -> Result<Input, RpcError> {
         let why = format!("{} is not an ACP terminal", p.name);
         let acp = self.entry(&p.name)?.info.acp.as_ref();
         acp.ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, why))?;
         let text = crate::acp::frame(&crate::acp::Input::Model(p.model));
-        self.send(&SendParams { name: p.name, text })
+        self.send(SendParams { name: p.name, text })
     }
 
     pub(crate) fn to_wait(
@@ -651,22 +901,28 @@ impl Registry {
         if entry.info.state == State::Running
             && entry.term.as_ref().is_some_and(|t| Arc::ptr_eq(t, term))
         {
-            Self::exited(&mut self.events, entry, status);
+            let note = Self::exited(&mut self.events, entry, status);
+            self.deliver(note.into_iter().collect());
         }
-        let info = entry.view();
-        self.saved(info)
+        let info = self.entry(name)?.view();
+        Ok(self.saved(info))
     }
 
-    pub(crate) fn rm(&mut self, name: &str) -> Result<TerminalInfo, RpcError> {
+    pub(crate) fn rm(
+        &mut self,
+        name: &str,
+    ) -> Result<(TerminalInfo, impl FnOnce() + Send + use<>), RpcError> {
         if self.entry(name)?.info.state == State::Running {
             return Err(RpcError::new(ErrorCode::StillRunning, name));
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
-        if let Some(log) = history(&self.path, name).log {
-            fs::remove_file(log).ok();
-        }
-        fs::remove_file(crate::acp::transcript(&self.path, name)).ok();
-        self.saved(entry.info)
+        let transcript = Some(crate::acp::transcript(&self.path, name));
+        let files = [history(&self.path, name).log, transcript];
+        Ok((self.saved(entry.info), move || {
+            for file in files.into_iter().flatten() {
+                fs::remove_file(file).ok();
+            }
+        }))
     }
 }
 
@@ -757,7 +1013,131 @@ mod tests {
         let exists = || files.map(|f| root.join(f).exists());
         let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
         assert_eq!(exists(), [true, true, false, false, false]);
-        registry.rm("kept.1").unwrap();
+        registry.rm("kept.1").unwrap().1();
         assert_eq!(exists(), [false; 5]);
+    }
+
+    fn sleeper(registry: &mut Registry, name: &str) -> Arc<Terminal> {
+        let run = serde_json::json!({"name": name, "cwd": "/", "cmd": ["sleep", "100"]});
+        registry.run(serde_json::from_value(run).unwrap()).unwrap();
+        Arc::clone(registry.live(name).unwrap())
+    }
+
+    fn saved(path: &Path) -> serde_json::Value {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_thousand_changes_in_a_second_write_at_most_three_times_and_end_on_disk() {
+        let path = dir("burst").join("state.json");
+        let registry = Arc::new(Mutex::new(
+            Registry::load(&path, Path::new("shed.sock")).unwrap(),
+        ));
+        tokio::spawn(keep_saved(Arc::clone(&registry)));
+        let term = sleeper(&mut crate::lock(&registry), "busy");
+        let flushed = crate::lock(&registry).saver.flushed();
+        flushed.await;
+        let stamp = || {
+            let meta = fs::metadata(&path).unwrap();
+            (meta.modified().unwrap(), fs::read(&path).unwrap())
+        };
+        let (mut last, mut writes) = (stamp(), 0);
+        for n in 0..1000 {
+            let report = Reported {
+                state: (if n % 2 == 0 { "working" } else { "blocked" }).to_owned(),
+                note: Some(format!("change {n}")),
+                state_source: None,
+            };
+            let name = "busy".to_owned();
+            crate::lock(&registry)
+                .state(StateParams { name, report })
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            if stamp() != last {
+                (last, writes) = (stamp(), writes + 1);
+            }
+        }
+        tokio::time::sleep(SAVE_EVERY).await;
+        if stamp() != last {
+            writes += 1;
+        }
+        assert!((1..=3).contains(&writes), "{writes} writes");
+        let file = saved(&path);
+        let busy = &file["terminals"][0];
+        assert_eq!(busy["reported"]["note"], "change 999");
+        assert_eq!(busy["reported"]["state"], "blocked");
+        term.kill(GRACE).unwrap();
+    }
+
+    #[test]
+    fn seventy_acp_terminals_save_under_300_kb_without_commands_or_models() {
+        let path = dir("acp-size").join("state.json");
+        let commands: Vec<_> = (0..100)
+            .map(|n| [format!("command-{n}"), "d".repeat(170), "hint".to_owned()])
+            .collect();
+        let models = vec![["model-id".to_owned(), "Model".to_owned()]; 20];
+        let terminals: Vec<_> = (0..70)
+            .map(|n| {
+                serde_json::json!({
+                    "name": format!("acp{n}"), "labels": {"issue": "7"}, "cwd": "/home/user",
+                    "cmd": ["shed", "acp-bridge"], "keep": false, "state": "exited", "exit": 0,
+                    "pid": null, "acp": "agent",
+                    "session": {"id": format!("s{n}"), "model": "model-id", "models": models, "commands": commands},
+                })
+            })
+            .collect();
+        let old = serde_json::json!({"version": 1, "terminals": terminals});
+        fs::write(&path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
+        assert!(fs::metadata(&path).unwrap().len() > 1_000_000);
+        let registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        assert!(fs::metadata(&path).unwrap().len() < 300_000);
+        let file = saved(&path);
+        let acp69 = file["terminals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "acp69");
+        let session = &acp69.unwrap()["session"];
+        assert_eq!(
+            *session,
+            serde_json::json!({"id": "s69", "model": "model-id"})
+        );
+        let live = registry.get("acp69").unwrap().session.unwrap();
+        assert_eq!(live.commands.len(), 100);
+    }
+
+    #[test]
+    fn an_exited_terminal_past_the_limit_is_pruned_and_a_running_one_kept() {
+        let root = dir("prune");
+        let path = root.join("state.json");
+        let now = shed_core::clock::unix_now();
+        let terminal = |name: &str, at: u64| {
+            format!(
+                r#"{{"name":"{name}","labels":{{}},"cwd":"/","cmd":["make"],"keep":false,"state":"exited","exit":0,"pid":null,"exited_at":{at}}}"#
+            )
+        };
+        let file = format!(
+            r#"{{"version":1,"terminals":[{},{}]}}"#,
+            terminal("old", now - 86_401),
+            terminal("new", now - 60)
+        );
+        fs::write(&path, file).unwrap();
+        fs::create_dir_all(root.join("history")).unwrap();
+        fs::write(root.join("history/old.log"), "x").unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let term = sleeper(&mut registry, "running");
+        let names = |r: &Registry| -> Vec<String> {
+            r.ls(&LsParams::default())
+                .into_iter()
+                .map(|t| t.name)
+                .collect()
+        };
+        assert_eq!(names(&registry), ["new", "old", "running"]);
+        registry.prune(now);
+        assert_eq!(names(&registry), ["new", "running"]);
+        assert!(root.join("history/old.log").exists());
+        registry.prune(now + 86_400);
+        assert_eq!(names(&registry), ["running"]);
+        term.kill(GRACE).unwrap();
     }
 }

@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use super::tests::t;
 use super::*;
 
 const BURST: usize = 5_000;
@@ -18,9 +19,13 @@ fn fanout() {
                 let subs: Vec<_> = (0..n)
                     .map(|_| events.subscribe(EventsParams::default()))
                     .collect();
+                let terminal = TerminalInfo {
+                    name: "agent-terminal-1".into(),
+                    ..t(&labels)
+                };
                 let start = Instant::now();
                 for _ in 0..BURST {
-                    events.emit("agent-terminal-1", &labels, EventKind::Started);
+                    events.emit(&terminal, EventKind::Started);
                 }
                 drop(events);
                 let bytes: Vec<usize> = subs

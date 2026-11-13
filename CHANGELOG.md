@@ -11,6 +11,13 @@ All notable changes to this project are documented here. The format follows
 - `shed setup [<agent>…] [--dry-run] [--remove]` adds hooks that report an installed agent's state through
   `shed state` (a no-op outside shed) to its config file, keeping every other entry; `shed doctor` lists per
   agent whether they are in. Claude Code's are in `~/.claude/settings.json`; see `docs/hooks.md`.
+- Parent and child terminals: `shed run` inside a terminal (`$SHED`) records it as the child's `parent`
+  (`--parent T` sets it, `--no-parent` clears it); `get`, `ls --json` and every event show it, and
+  `ls --parent T` lists a terminal's children. When a parent's program ends or is killed its children are
+  killed too, unless started with `--outlive-parent`. `shed wait --children all|any [T]` waits until no child
+  is working, or for the next child that reports `done`, `blocked` or `error`, or exits. With `--notify` a
+  child that blocks, errors or ends types one `[shed] <name> …` line into its parent (a prompt for an ACP
+  parent), held while the parent reports `working`.
 - `shed read --events [--json]` (`read` with `events`, paged by `before` and `n`): an ACP terminal's transcript
   as events, each with its `seq`; `tool_call` events carry ACP's tool `kind` when the agent sends one.
 - An ACP terminal's screen (`attach`, the `shed watch` preview) draws its events readably: the prompt bold, one
@@ -24,6 +31,11 @@ All notable changes to this project are documented here. The format follows
   `--on` uses one `ssh` per call as before.
 
 ### Changed
+
+- `shed serve` saves its state file at most twice a second, compact and off the registry lock, and at once on
+  shutdown; `run`, `kill` and `rm` still answer only once the change is on disk. An ACP terminal's slash
+  `commands` and `models` are no longer saved (the agent resends them). Exited terminals are dropped from the
+  list a day after they end (`$SHED_PRUNE_AFTER` seconds of `shed serve`); their logs stay until the next start.
 
 - Release builds use fat LTO, one codegen unit and a stripped binary: 4.0 MB instead of 8.0 MB on macOS arm64.
 

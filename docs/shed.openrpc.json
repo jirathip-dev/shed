@@ -37,7 +37,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -151,6 +151,18 @@
           }
         },
         {
+          "name": "meta",
+          "required": false,
+          "schema": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "ACP: the session's options, sent unchanged as `_meta` on `session/new` and `session/load`;\nwhich keys exist is the agent's business. Callers: drover (herdsman#923) and cooee."
+          }
+        },
+        {
           "name": "no_hibernate",
           "required": false,
           "schema": {
@@ -167,6 +179,21 @@
               "null"
             ],
             "description": "Start it on this machine, over its held link (`machine.links`)."
+          }
+        },
+        {
+          "name": "parent",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Parent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terminal that started it (`shed run` sends `$SHED`)."
           }
         },
         {
@@ -207,7 +234,7 @@
     },
     {
       "name": "ls",
-      "description": "List terminals, by name; `labels` keeps those that carry every given label.",
+      "description": "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -220,6 +247,17 @@
             },
             "description": "Only terminals carrying every one of these labels.",
             "default": {}
+          }
+        },
+        {
+          "name": "parent",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only the children of this terminal."
           }
         }
       ],
@@ -551,7 +589,7 @@
     },
     {
       "name": "wait",
-      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls.",
+      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -559,7 +597,22 @@
           "required": true,
           "schema": {
             "type": "string",
-            "description": "The terminal's name."
+            "description": "The terminal's name; with `children`, the parent's."
+          }
+        },
+        {
+          "name": "children",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Children"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wait on the terminal's children instead of the terminal."
           }
         },
         {
@@ -1194,6 +1247,182 @@
       }
     },
     {
+      "name": "exec",
+      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cmd",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The program and its arguments."
+          }
+        },
+        {
+          "name": "cwd",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its working directory; default the server's."
+          }
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "End it after this many seconds."
+          }
+        },
+        {
+          "name": "stdin",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "Bytes fed to its stdin, then closed."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run it on this machine, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ExecResult"
+        }
+      }
+    },
+    {
+      "name": "file.read",
+      "description": "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "schema": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    {
+      "name": "file.write",
+      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "schema": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "rpc.discover",
       "description": "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.",
       "paramStructure": "by-name",
@@ -1243,6 +1472,27 @@
           }
         ],
         "description": "How an ACP bridge answers the agent's permission requests."
+      },
+      "Parent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The parent terminal's name."
+          },
+          "outlive": {
+            "type": "boolean",
+            "description": "Keep running when the parent's program ends; otherwise the child is killed with it."
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Type a `[shed]` note into the parent when the child blocks, errors or ends, while the parent is not\nworking."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "description": "A child's link to the terminal that started it."
       },
       "TerminalInfo": {
         "type": "object",
@@ -1341,6 +1591,17 @@
               }
             ],
             "description": "The ACP agent session, from the bridge's last `session` event."
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Parent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terminal that started it."
           }
         },
         "required": [
@@ -1794,6 +2055,21 @@
         "type": "object",
         "additionalProperties": false
       },
+      "Children": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "all",
+            "description": "No child is working: each has exited or reports something other than `working`."
+          },
+          {
+            "type": "string",
+            "const": "any",
+            "description": "The next child that reports `done`, `blocked` or `error`, or exits; the result names it."
+          }
+        ],
+        "description": "Which children end a `wait`."
+      },
       "WaitResult": {
         "type": "object",
         "properties": {
@@ -1851,6 +2127,13 @@
               "type": "string"
             },
             "description": "The terminal's labels."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal's parent, if it has one."
           },
           "replay": {
             "type": "boolean",
@@ -2482,6 +2765,42 @@
           }
         ],
         "description": "A held link's state."
+      },
+      "ExecResult": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The exit code, or 128 + the signal that ended it."
+          },
+          "stdout": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "What it wrote to stdout."
+          },
+          "stderr": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "What it wrote to stderr."
+          }
+        },
+        "required": [
+          "code",
+          "stdout",
+          "stderr"
+        ],
+        "description": "`exec` result."
       }
     },
     "errors": {
@@ -2536,6 +2855,10 @@
       "NO_LINK": {
         "code": -32007,
         "message": "NO_LINK"
+      },
+      "IO": {
+        "code": -32008,
+        "message": "IO"
       }
     }
   }

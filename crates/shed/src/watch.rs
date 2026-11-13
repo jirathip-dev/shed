@@ -123,7 +123,13 @@ pub(crate) fn run(
         }
         to.send(Msg::Closed).ok();
     });
-    let list: Vec<TerminalInfo> = connect()?.call(Method::Ls, &LsParams { labels })?;
+    let list: Vec<TerminalInfo> = connect()?.call(
+        Method::Ls,
+        &LsParams {
+            labels,
+            parent: None,
+        },
+    )?;
     let mut w = Watch::new(machine, list, tty.now());
     let (mut watching, mut preview, mut n) = (None, None::<UnixStream>, 0);
     w.reselect();
