@@ -751,11 +751,9 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
     if p.until.is_empty() && p.output.is_none() && p.children.is_none() {
         return Err(bad(&"give until, output or children"));
     }
-    if let Some(s) = p
-        .until
-        .iter()
-        .find(|s| !["idle", "hibernated"].contains(&s.as_str()) && !STATES.contains(&s.as_str()))
-    {
+    if let Some(s) = p.until.iter().find(|s| {
+        !(*s == "idle" || STATES.contains(&s.as_str()) || acp::LANE_STATES.contains(&s.as_str()))
+    }) {
         return Err(bad(&format!("unknown state {s:?}")));
     }
     if let Some(k) = p
@@ -828,7 +826,16 @@ async fn wait_children(
     let news = |e: &Event| {
         e.parent.as_deref() == Some(name)
             && match &e.kind {
-                EventKind::State(r) => ["done", "blocked", "error"].contains(&r.state.as_str()),
+                EventKind::State(r) => {
+                    let news = [
+                        "done",
+                        "blocked",
+                        "waiting-approval",
+                        "rate-limited",
+                        "error",
+                    ];
+                    news.contains(&r.state.as_str())
+                }
                 EventKind::Exited { .. } | EventKind::Killed => true,
                 _ => false,
             }

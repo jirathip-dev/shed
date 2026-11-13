@@ -218,7 +218,14 @@ fn a_turn_with_an_approval_matches_the_golden_event_log() {
         "10",
     ]);
     step(&["send", "a", "tool"]);
-    step(&["wait", "a", "--until", "blocked", "--timeout", "10"]);
+    step(&[
+        "wait",
+        "a",
+        "--until",
+        "waiting-approval",
+        "--timeout",
+        "10",
+    ]);
     step(&["approve", "a", "allow-once"]);
     step(&["wait", "a", "--until", "done", "--timeout", "10"]);
     step(&["read", "a"]);
@@ -333,7 +340,9 @@ fn the_deny_policy_rejects_permission_requests() {
         kinds,
         [
             json!(["state", "working"]),
+            json!(["state", "running"]),
             json!(["approved", "reject-once"]),
+            json!(["state", "working"]),
             json!(["state", "done"])
         ]
     );
@@ -393,7 +402,7 @@ fn an_expired_login_ends_the_turn_as_an_auth_error() {
     let line = "Failed to authenticate: OAuth session expired and could not be refreshed";
     let sent = std::time::Instant::now();
     ok(&dir, &["send", "x", "auth"]);
-    let until = ["wait", "x", "--until", "done", "blocked", "error"];
+    let until = ["wait", "x", "--until", "done", "waiting-approval", "error"];
     assert_eq!(
         ok(&dir, &[&until[..], &["--timeout", "10"]].concat()),
         "x error\n"
@@ -428,7 +437,7 @@ fn the_watchdog_ends_a_silent_turn_but_not_a_busy_one() {
         "w",
         "--until",
         "done",
-        "blocked",
+        "waiting-approval",
         "error",
         "--timeout",
         "10",
@@ -982,9 +991,9 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
     ok(&dir, &["cancel", "h"]);
     until(&dir, "h", "done");
     ok(&dir, &["send", "h", "tool"]);
-    until(&dir, "h", "blocked");
+    until(&dir, "h", "waiting-approval");
     past_the_delay();
-    assert_eq!(reported(&dir, "h")["state"], "blocked");
+    assert_eq!(reported(&dir, "h")["state"], "waiting-approval");
     assert_eq!(processes(&dir, "h"), 2);
     ok(&dir, &["approve", "h", "allow-once"]);
     until(&dir, "h", "done");

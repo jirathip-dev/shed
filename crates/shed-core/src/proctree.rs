@@ -134,6 +134,34 @@ fn parse_cpu_time(s: &str) -> Option<Duration> {
     Some(Duration::from_secs(days * 86_400 + secs) + Duration::from_millis(centis * 10))
 }
 
+/// The command line of process `pid` and how long it has run; `None` once it is gone.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn command(pid: i32) -> Option<(String, Duration)> {
+    let args = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args = String::from_utf8_lossy(&args).replace('\0', " ");
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let fields = stat.rsplit_once(") ")?.1;
+    let started = fields.split(' ').nth(19)?.parse::<u64>().ok()?;
+    let uptime = std::fs::read_to_string("/proc/uptime").ok()?;
+    let up = uptime.split_once('.')?.0.parse::<u64>().ok()?;
+    let ticks = rustix::param::clock_ticks_per_second().max(1);
+    let age = Duration::from_secs(up.saturating_sub(started / ticks));
+    Some((args.trim().to_owned(), age))
+}
+
+/// The command line of process `pid` and how long it has run; `None` once it is gone.
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+pub fn command(pid: i32) -> Option<(String, Duration)> {
+    let pid = pid.to_string();
+    let args = ["-o", "etime=,args=", "-p", &pid];
+    let out = crate::runner::output("ps", args, &[("LC_ALL", "C")]).ok()?;
+    let out = String::from_utf8_lossy(&out.stdout);
+    let (age, args) = out.trim().split_once(' ')?;
+    Some((args.trim().to_owned(), parse_cpu_time(age)?))
+}
+
 /// The platform's process table.
 #[must_use]
 pub fn system() -> impl ProcessTable {

@@ -1,6 +1,11 @@
-use super::{Hooks, Provider};
+use super::{Hooks, Limit, Provider};
 
 pub struct Fake;
+
+static LIMIT: Limit = Limit {
+    says: &["fake: limit hit"],
+    resets: &["back at "],
+};
 
 static HOOKS: Hooks = Hooks {
     agent: "fake",
@@ -19,5 +24,9 @@ impl Provider for Fake {
 
     fn hooks(&self) -> Option<&'static Hooks> {
         Some(&HOOKS)
+    }
+
+    fn limit(&self) -> Option<&'static Limit> {
+        Some(&LIMIT)
     }
 }

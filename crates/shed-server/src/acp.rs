@@ -43,6 +43,7 @@ use rustix::net::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_proto::{
     AcpSession, ApprovalOption, EmitParams, EventKind, Method, Reported, StateParams, TerminalInfo,
 };
@@ -59,6 +60,9 @@ type AcpResult<T> = Result<T, agent_client_protocol::Error>;
 type Asked = Responder<RequestPermissionResponse>;
 
 pub use shed_proto::Policy;
+
+/// The states only an ACP lane reports, beside `working`, `done` and `error`.
+pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited", "hibernated"];
 
 /// One framed input to the bridge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -459,6 +463,13 @@ struct Session {
     shown: AcpSession,
     mcp: Vec<McpServer>,
     meta: Option<Meta>,
+    pid: Option<i32>,
+    own: BTreeSet<i32>,
+    seen: BTreeSet<i32>,
+    open: Vec<String>,
+    ended: Option<String>,
+    child: Option<String>,
+    limit: Option<&'static crate::providers::Limit>,
 }
 
 impl Session {
@@ -472,6 +483,7 @@ impl Session {
     }
 
     fn state(&mut self, state: &str, note: Option<String>) {
+        self.heard = shed_core::clock::tokio_now();
         if state != "hibernated" {
             self.last = (state.to_owned(), note.clone());
         }
@@ -495,6 +507,10 @@ impl Session {
     fn fail(&mut self, why: String) -> AcpResult<()> {
         let cancelled = self.input(Input::Cancel);
         self.prompts.clear();
+        if let Some(reset) = self.limit.and_then(|l| l.hit(&why)) {
+            self.state("rate-limited", reset.resets);
+            return cancelled;
+        }
         let auth = self.auth(&why);
         if auth.is_some() {
             let (text, stop_reason) = (std::mem::take(&mut self.reply), "auth_error".to_owned());
@@ -502,6 +518,42 @@ impl Session {
         }
         self.state("error", Some(auth.unwrap_or(why)));
         cancelled
+    }
+
+    fn settle(&mut self) {
+        if !self.asks.is_empty() || ["error", "rate-limited"].contains(&self.last.0.as_str()) {
+            return;
+        }
+        let tool = (self.open.last()).and_then(|id| self.titles.get(id));
+        let (state, note) = match (tool, &self.ended, &self.child) {
+            (Some((title, _)), ..) => ("running", Some(title.clone())),
+            _ if !self.prompts.is_empty() => ("working", None),
+            (None, Some(_), Some(child)) => ("running", Some(child.clone())),
+            (None, Some(why), None) => ("done", Some(why.clone())),
+            (None, None, _) => return,
+        };
+        if self.last != (state.to_owned(), note.clone()) {
+            self.state(state, note);
+        }
+    }
+
+    fn tree(&mut self) -> Option<(i32, Vec<ProcessInfo>)> {
+        let pid = self.pid?;
+        let procs = proctree::system().list().ok()?;
+        let tree = proctree::tree(&procs, pid, &BTreeSet::new());
+        self.seen = tree.iter().map(|p| p.pid).collect();
+        Some((pid, tree))
+    }
+
+    fn spawned(&mut self) -> Option<String> {
+        let (pid, tree) = self.tree()?;
+        let new: Vec<_> = (tree.iter())
+            .filter(|p| p.pid != pid && !self.own.contains(&p.pid))
+            .collect();
+        let top = new.iter().find(|p| !new.iter().any(|q| q.pid == p.ppid))?;
+        let (cmd, age) = proctree::command(top.pid)?;
+        let cmd: String = cmd.chars().take(60).collect();
+        Some(format!("running: {cmd} ({}m)", age.as_secs() / 60))
     }
 
     fn answer(asked: Asked, id: Option<String>) -> AcpResult<()> {
@@ -518,6 +570,9 @@ impl Session {
         match input {
             Input::Prompt(text) => {
                 self.reply.clear();
+                (self.ended, self.child) = (None, None);
+                self.open.clear();
+                self.own.clone_from(&self.seen);
                 self.emit(EventKind::Turn {
                     prompt: text.clone(),
                 });
@@ -550,12 +605,7 @@ impl Session {
                 };
                 Self::answer(asked, Some(option.clone()))?;
                 self.emit(EventKind::Approved { option });
-                let state = if self.asks.is_empty() {
-                    "working"
-                } else {
-                    "blocked"
-                };
-                self.state(state, None);
+                self.settle();
             }
             Input::Cancel => {
                 if !self.prompts.is_empty() {
@@ -596,11 +646,15 @@ impl Session {
                 Ok(r) => {
                     let (text, stop_reason) =
                         (std::mem::take(&mut self.reply), wire(&r.stop_reason));
-                    self.emit(EventKind::Reply {
-                        text,
-                        stop_reason: stop_reason.clone(),
-                    });
-                    self.state("done", Some(stop_reason));
+                    let limited = self.limit.and_then(|l| l.hit(&text));
+                    let stop = stop_reason.clone();
+                    self.emit(EventKind::Reply { text, stop_reason });
+                    if let Some(reset) = limited {
+                        self.state("rate-limited", reset.resets);
+                    } else {
+                        (self.ended, self.child) = (Some(stop), self.spawned());
+                        self.settle();
+                    }
                     Ok(())
                 }
             },
@@ -641,14 +695,23 @@ impl Session {
                 let kind = (call.fields.kind.map(|k| wire(&k)).filter(|k| k != "other")).or(kind);
                 self.titles
                     .insert(id.clone(), (title.clone(), kind.clone()));
+                let given = call.fields.status.is_some() && !self.replay;
                 let status = wire(&call.fields.status.unwrap_or_default());
-                let call = EventKind::ToolCall {
+                if given {
+                    self.open.retain(|o| *o != id);
+                    if ["pending", "in_progress"].contains(&status.as_str()) {
+                        self.open.push(id.clone());
+                    }
+                }
+                self.emit(EventKind::ToolCall {
                     id,
                     title,
                     status,
                     kind,
-                };
-                self.emit(call);
+                });
+                if given {
+                    self.settle();
+                }
             }
             SessionUpdate::Plan(plan) => {
                 let entries = plan.entries.iter().map(serde_json::to_value);
@@ -736,7 +799,7 @@ impl Session {
         let kinds = match self.policy {
             Policy::Ask => {
                 self.asks.push_back((asked, options));
-                self.state("blocked", Some(tool));
+                self.state("waiting-approval", Some(tool));
                 return Ok(());
             }
             Policy::Allow => ["allow_once", "allow_always"],
@@ -824,6 +887,8 @@ async fn drive(
     };
     (s.shown.id, s.shown.mcp_servers) = (s.id.to_string(), redacted(&s.mcp));
     s.models(&options.unwrap_or_default())?;
+    (s.ended, s.child) = (None, None);
+    s.tree();
     s.say(format!("shed: ACP session ready ({}); send a prompt", s.id))?;
     if let Some(input) = wake {
         if !matches!(input, Input::Prompt(_)) {
@@ -833,7 +898,7 @@ async fn drive(
         s.input(input)?;
     }
     let sleep_after = hibernate_after().filter(|_| agent.load_session);
-    let mut typing = true;
+    let (mut typing, mut polled) = (true, shed_core::clock::tokio_now());
     loop {
         tokio::select! {
             biased;
@@ -847,11 +912,16 @@ async fn drive(
                 if s.stirred.swap(false, Ordering::Relaxed) {
                     s.heard = shed_core::clock::tokio_now();
                 }
+                if s.ended.is_some() && polled.elapsed() >= Duration::from_secs(5) {
+                    (s.child, polled) = (s.spawned(), shed_core::clock::tokio_now());
+                    s.settle();
+                }
                 let quiet = s.heard.elapsed();
                 if !s.asks.is_empty() {
-                } else if !s.prompts.is_empty() && quiet >= s.idle {
+                } else if !s.prompts.is_empty() && s.open.is_empty() && quiet >= s.idle {
                     s.fail("no response".to_owned())?;
                 } else if s.prompts.is_empty() && typing && (resumed || s.next > 0)
+                    && ["done", "idle"].contains(&s.last.0.as_str())
                     && sleep_after.is_some_and(|d| quiet >= d)
                 {
                     return Ok(Some(s));
@@ -982,7 +1052,7 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 /// `session/new`, both with the MCP servers in `$SHED_ACP_MCP` and the `_meta` in `$SHED_ACP_META`,
 /// then prompts, updates and permission requests until the agent exits. Returns the agent's exit code.
 ///
-/// After `$SHED_ACP_HIBERNATE_AFTER` idle seconds (default 600, `0` never) it stops the agent's process
+/// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, `0` never) it stops the agent's process
 /// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
 /// starts the agent again, loads the session and then delivers it.
 ///
@@ -1113,9 +1183,9 @@ fn start(
 
 fn stop(mut child: Child) {
     if let Some(pid) = child.id().and_then(|p| i32::try_from(p).ok()) {
-        let table = shed_core::proctree::system();
+        let table = proctree::system();
         let reap = || drop(child.try_wait());
-        shed_core::proctree::kill_tree(&table, pid, Duration::from_secs(2), reap);
+        proctree::kill_tree(&table, pid, Duration::from_secs(2), reap);
     }
 }
 
@@ -1182,6 +1252,13 @@ pub(crate) fn close(info: &TerminalInfo) -> Result<(), Error> {
     })
 }
 
+fn launch_options() -> Result<(Vec<McpServer>, Option<Meta>), Error> {
+    let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
+    let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
+    let meta = crate::config::var("SHED_ACP_META").and_then(|m| serde_json::from_str(&m).ok());
+    Ok((mcp_servers(&mcp).map_err(Error::Acp)?, meta))
+}
+
 fn run(
     cmd: &[String],
     cwd: &Path,
@@ -1191,10 +1268,7 @@ fn run(
     agent_id: &str,
     name: &str,
 ) -> Result<i32, Error> {
-    let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
-    let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
-    let mcp = mcp_servers(&mcp).map_err(Error::Acp)?;
-    let meta = crate::config::var("SHED_ACP_META").and_then(|m| serde_json::from_str(&m).ok());
+    let (mcp, meta) = launch_options()?;
     let reported = Arc::default();
     let lent = pty_socket(socket, name);
     if let Ok((master, _)) = take_over(io::stderr()) {
@@ -1214,12 +1288,12 @@ fn run(
         preview: Preview::default(),
     };
     let (typed, mut inputs) = unbounded_channel();
-    let idle = turn_idle_timeout();
-    let session = move |cx, back, stirred, kept: Option<Session>| match kept {
+    let session = move |cx, back, stirred, pid, kept: Option<Session>| match kept {
         Some(s) => Session {
             cx,
             back,
             stirred,
+            pid,
             ..s
         },
         None => Session {
@@ -1236,7 +1310,7 @@ fn run(
             auth: crate::providers::auth_failures(agent_id),
             heard: shed_core::clock::tokio_now(),
             stirred,
-            idle,
+            idle: turn_idle_timeout(),
             replay: false,
             waking: false,
             last: ("idle".to_owned(), None),
@@ -1244,6 +1318,13 @@ fn run(
             shown: AcpSession::default(),
             mcp: mcp.clone(),
             meta: meta.clone(),
+            pid,
+            own: BTreeSet::new(),
+            seen: BTreeSet::new(),
+            open: Vec::new(),
+            ended: None,
+            child: None,
+            limit: crate::providers::limit(agent_id),
         },
     };
     let mut resume = crate::config::var("SHED_ACP_RESUME");
@@ -1257,13 +1338,14 @@ fn run(
         let (mut kept, mut wake) = (None, None);
         loop {
             let (mut child, stdin, stdout, stderr) = start(cmd, cwd)?;
+            let pid = child.id().and_then(|p| i32::try_from(p).ok());
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
             let slept = connect(
                 stdin,
                 stdout,
                 stderr,
                 async |cx, back, from_agent, stirred| {
-                    let s = session(cx, back, stirred, prev);
+                    let s = session(cx, back, stirred, pid, prev);
                     drive(s, from_agent, rx, cwd, loaded, first).await
                 },
             )
@@ -1392,6 +1474,45 @@ mod tests {
         }
     }
 
+    fn session(
+        cx: ConnectionTo<Agent>,
+        back: UnboundedSender<FromAgent>,
+        out: UnboundedSender<Out>,
+        stirred: Arc<AtomicBool>,
+        idle: Duration,
+    ) -> Session {
+        Session {
+            cx,
+            back,
+            out,
+            id: SessionId::new(""),
+            policy: Policy::Ask,
+            prompts: BTreeSet::new(),
+            next: 0,
+            asks: VecDeque::new(),
+            titles: BTreeMap::new(),
+            reply: String::new(),
+            auth: &[],
+            heard: shed_core::clock::tokio_now(),
+            stirred,
+            idle,
+            replay: false,
+            waking: false,
+            last: ("idle".to_owned(), None),
+            model: None,
+            shown: AcpSession::default(),
+            mcp: Vec::new(),
+            meta: None,
+            pid: None,
+            own: BTreeSet::new(),
+            seen: BTreeSet::new(),
+            open: Vec::new(),
+            ended: None,
+            child: None,
+            limit: None,
+        }
+    }
+
     async fn turn(idle: Duration, beats: (Beat, u32), gap: Duration) -> (Reported, Duration) {
         let (bridge, agent) = tokio::io::duplex(1 << 16);
         let (err_agent, err_ours) = tokio::io::duplex(1 << 16);
@@ -1406,29 +1527,7 @@ mod tests {
             read,
             err_ours,
             async |cx, back, from_agent, stirred| {
-                let s = Session {
-                    cx,
-                    back,
-                    out,
-                    id: SessionId::new(""),
-                    policy: Policy::Ask,
-                    prompts: BTreeSet::new(),
-                    next: 0,
-                    asks: VecDeque::new(),
-                    titles: BTreeMap::new(),
-                    reply: String::new(),
-                    auth: &[],
-                    heard: shed_core::clock::tokio_now(),
-                    stirred,
-                    idle,
-                    replay: false,
-                    waking: false,
-                    last: ("idle".to_owned(), None),
-                    model: None,
-                    shown: AcpSession::default(),
-                    mcp: Vec::new(),
-                    meta: None,
-                };
+                let s = session(cx, back, out, stirred, idle);
                 drive(s, from_agent, &mut inputs, Path::new("/"), None, None).await
             },
         );
@@ -1487,6 +1586,211 @@ mod tests {
             took >= idle && took < idle + Duration::from_secs(1),
             "took {took:?}"
         );
+    }
+
+    enum Step {
+        Wait(u64),
+        Update(Value),
+        Ask(&'static str),
+        EndTurn(&'static str),
+        Spawn(tokio::process::ChildStdin),
+        Kill,
+    }
+
+    fn below(pid: i32) -> Vec<i32> {
+        let procs = proctree::system().list().unwrap();
+        let tree = proctree::tree(&procs, pid, &BTreeSet::new());
+        tree.iter().map(|p| p.pid).filter(|&p| p != pid).collect()
+    }
+
+    async fn scripted(stdio: tokio::io::DuplexStream, mut steps: Vec<Step>, pid: i32) {
+        let (read, mut write) = tokio::io::split(stdio);
+        let mut lines = BufReader::new(read).lines();
+        let update = |u: Value| {
+            json!({"method": "session/update",
+            "params": {"sessionId": "s", "update": u}})
+        };
+        while let Ok(Some(line)) = lines.next_line().await {
+            let msg: Value = serde_json::from_str(&line).unwrap();
+            let mut sent = Vec::new();
+            match msg["method"].as_str() {
+                Some("initialize") => sent.push(json!({"id": msg["id"], "result": {
+                    "protocolVersion": 1, "agentCapabilities": {"loadSession": true},
+                    "authMethods": []}})),
+                Some("session/new") => {
+                    sent.push(json!({"id": msg["id"], "result": {"sessionId": "s"}}));
+                }
+                Some("session/prompt") => {}
+                _ => continue,
+            }
+            let prompt = msg["method"] == "session/prompt";
+            let script = if prompt {
+                std::mem::take(&mut steps)
+            } else {
+                Vec::new()
+            };
+            for step in script {
+                match step {
+                    Step::Wait(secs) => tokio::time::sleep(Duration::from_secs(secs)).await,
+                    Step::Update(u) => sent.push(update(u)),
+                    Step::Ask(title) => sent.push(json!({"id": 99,
+                        "method": "session/request_permission", "params": {"sessionId": "s",
+                        "toolCall": {"toolCallId": "t", "title": title}, "options": [
+                        {"optionId": "ok", "name": "Allow", "kind": "allow_once"}]}})),
+                    Step::EndTurn(text) => {
+                        sent.push(update(json!({"sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": text}})));
+                        sent.push(json!({"id": msg["id"], "result": {"stopReason": "end_turn"}}));
+                    }
+                    Step::Spawn(mut input) => {
+                        input.write_all(b"go\n").await.unwrap();
+                        while below(pid).is_empty() {
+                            tokio::time::sleep(Duration::from_millis(10)).await;
+                        }
+                    }
+                    Step::Kill => {
+                        for p in below(pid)
+                            .into_iter()
+                            .filter_map(rustix::process::Pid::from_raw)
+                        {
+                            rustix::process::kill_process(p, rustix::process::Signal::KILL)
+                                .unwrap();
+                        }
+                    }
+                }
+                for mut m in sent.drain(..) {
+                    m["jsonrpc"] = json!("2.0");
+                    write.write_all(format!("{m}\n").as_bytes()).await.unwrap();
+                }
+            }
+            for mut m in sent {
+                m["jsonrpc"] = json!("2.0");
+                write.write_all(format!("{m}\n").as_bytes()).await.unwrap();
+            }
+        }
+    }
+
+    type States = Vec<(String, Option<String>)>;
+
+    async fn lane(steps: Vec<Step>, pid: Option<i32>, agent: &str) -> (States, Option<Duration>) {
+        let (bridge, fake) = tokio::io::duplex(1 << 16);
+        let (_, err_ours) = tokio::io::duplex(1 << 16);
+        tokio::spawn(scripted(fake, steps, pid.unwrap_or(0)));
+        let (read, write) = tokio::io::split(bridge);
+        let (out, mut outs) = unbounded_channel();
+        let (typed, mut inputs) = unbounded_channel();
+        typed.send(Input::Prompt("go".to_owned())).unwrap();
+        let started = shed_core::clock::tokio_now();
+        let lane = connect(
+            write,
+            read,
+            err_ours,
+            async |cx, back, from_agent, stirred| {
+                let mut s = session(cx, back, out, stirred, Duration::from_secs(5));
+                (s.pid, s.limit) = (pid, crate::providers::limit(agent));
+                drive(s, from_agent, &mut inputs, Path::new("/"), None, None).await
+            },
+        );
+        let slept = tokio::time::timeout(Duration::from_hours(2), lane).await;
+        let slept = matches!(slept, Ok(Ok(Some(_)))).then(|| started.elapsed());
+        let mut states = Vec::new();
+        while let Ok(o) = outs.try_recv() {
+            if let Out::State(r) = o {
+                states.push((r.state, r.note));
+            }
+        }
+        (states, slept)
+    }
+
+    fn st(state: &str, note: Option<&str>) -> (String, Option<String>) {
+        (state.to_owned(), note.map(str::to_owned))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps() {
+        let call = |status: &str| {
+            json!({"sessionUpdate": "tool_call_update",
+            "toolCallId": "t", "title": "cargo test", "status": status})
+        };
+        let steps = vec![
+            Step::Update(call("in_progress")),
+            Step::Wait(40),
+            Step::EndTurn("still testing"),
+            Step::Wait(700),
+            Step::Update(call("completed")),
+        ];
+        let (states, slept) = lane(steps, None, "fake-acp").await;
+        let running = st("running", Some("cargo test"));
+        let done = st("done", Some("end_turn"));
+        assert_eq!(states, [st("working", None), running, done]);
+        let slept = slept.expect("it hibernates once done");
+        assert!(
+            slept >= Duration::from_secs(740 + 600),
+            "slept at {slept:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits() {
+        let script = ["-c", "read _; sleep 900; :"];
+        let mut agent = shed_core::runner::piped("sh", script, Path::new("/"), &[]).unwrap();
+        let pid = agent.id().and_then(|p| i32::try_from(p).ok());
+        let stdin = agent.stdin.take().unwrap();
+        let steps = vec![
+            Step::Spawn(stdin),
+            Step::EndTurn("started it"),
+            Step::Wait(700),
+            Step::Kill,
+        ];
+        let (states, slept) = lane(steps, pid, "fake-acp").await;
+        agent.wait().await.unwrap();
+        let [working, running, done] = states.as_slice() else {
+            panic!("states {states:?}");
+        };
+        assert_eq!(
+            (working, done),
+            (&st("working", None), &st("done", Some("end_turn")))
+        );
+        assert_eq!(running.0, "running");
+        let note = running.1.as_deref().unwrap_or("");
+        assert!(note.starts_with("running: sleep 900 ("), "note {note:?}");
+        let slept = slept.expect("it hibernates once the child is gone");
+        assert!(
+            slept >= Duration::from_secs(700 + 600),
+            "slept at {slept:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern() {
+        let line = "fake: limit hit, back at 3pm.";
+        let (states, slept) = lane(vec![Step::EndTurn(line)], None, "fake-acp").await;
+        assert_eq!(
+            states,
+            [st("working", None), st("rate-limited", Some("3pm"))]
+        );
+        assert_eq!(slept, None, "a rate-limited lane never hibernates");
+        let (states, slept) = lane(vec![Step::EndTurn(line)], None, "unknown-acp").await;
+        assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
+        assert!(slept.is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_permission_request_waits_for_approval_and_never_times_out() {
+        let call = json!({"sessionUpdate": "tool_call", "toolCallId": "t", "title": "rm notes",
+            "status": "pending"});
+        let (states, slept) =
+            lane(vec![Step::Update(call), Step::Ask("rm notes")], None, "x").await;
+        let waiting = st("waiting-approval", Some("rm notes"));
+        assert_eq!(
+            states,
+            [
+                st("working", None),
+                st("running", Some("rm notes")),
+                waiting
+            ]
+        );
+        assert_eq!(slept, None);
     }
 
     #[test]

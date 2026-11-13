@@ -414,7 +414,8 @@ struct WaitArgs {
     #[arg(long, value_name = "all|any", value_parser = children, conflicts_with_all = ["until", "output"])]
     children: Option<Children>,
     #[arg(long, num_args = 1.., value_name = "STATE",
-          value_parser = ["working", "blocked", "done", "error", "idle", "hibernated"])]
+          value_parser = ["working", "blocked", "done", "error", "idle", "running",
+                          "waiting-approval", "rate-limited", "hibernated"])]
     until: Vec<String>,
     #[arg(long, value_parser = ["permission", "question", "auth"])]
     kind: Option<String>,

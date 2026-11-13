@@ -402,10 +402,10 @@ impl Watch {
                 continue;
             };
             let (color, dot) = match row.state.as_str() {
-                "working" => (33, '●'),
-                "blocked" => (35, '●'),
+                "working" | "running" => (33, '●'),
+                "blocked" | "waiting-approval" => (35, '●'),
                 "done" => (32, '●'),
-                "error" => (31, '●'),
+                "error" | "rate-limited" => (31, '●'),
                 _ => (90, '○'),
             };
             let issue = row.labels.get("issue").map(|i| format!("{fleet}#{i}"));
