@@ -22,6 +22,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `shed serve` saves its state file at most twice a second, compact and off the registry lock, and at once on
+  shutdown; `run`, `kill` and `rm` still answer only once the change is on disk. An ACP terminal's slash
+  `commands` and `models` are no longer saved (the agent resends them). Exited terminals are dropped from the
+  list a day after they end (`$SHED_PRUNE_AFTER` seconds of `shed serve`); their logs stay until the next start.
+
 - Release builds use fat LTO, one codegen unit and a stripped binary: 4.0 MB instead of 8.0 MB on macOS arm64.
 
 - `shed events --on M` with no held link is one plain stream over `ssh`: the client-side reconnect and its
