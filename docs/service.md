@@ -50,3 +50,7 @@ The state file keeps every terminal's name, labels, cwd, command, state and exit
 atomically (temp file, then rename). When the server starts again, terminals run with `keep` come back
 as a shell (`$SHELL`, else `/bin/sh`) in the cwd they were started in; their task never runs again.
 The others are listed as `exited` with no exit status.
+
+The file is written compactly at most every 500 ms, so a killed server loses at most the last half second;
+it is written at once on a normal stop, and before `run`, `kill` and `rm` answer. An exited terminal is
+dropped from the list `$SHED_PRUNE_AFTER` seconds (default a day) after it ended; its log stays on disk until the server next starts.
