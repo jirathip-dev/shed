@@ -1,0 +1,8 @@
+Decided: merged origin/staging bf677db, whose 4f986ae pins the herdsman install that broke CI's rules job
+Because: .github/workflows/ci.yml:73
+Rejected: editing ci.yml on this branch — staging already carries the fix, so the merge brings it
+Decided: #73's save test builds Reported with ..Reported::default() for the new fields
+Because: crates/shed-server/src/registry.rs:1111
+Check: the rules job's herdsman install succeeds and the job is green at this head
+Check: TMPDIR=<fresh short dir> cargo test --workspace --no-fail-fast fails only machine_stats_..._within_5_s, the known host uptime 0 failure
+Owner: the branch is current with staging again, which also fixes the broken CI tool install
