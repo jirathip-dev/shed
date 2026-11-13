@@ -1,0 +1,28 @@
+
+running 10 tests
+..... 5/10
+exited_sessions_release_their_fds --- FAILED
+.. 8/10
+serve_raises_a_lowered_soft_limit_so_many_sessions_spawn --- FAILED
+.
+failures:
+
+---- exited_sessions_release_their_fds stdout ----
+
+thread 'exited_sessions_release_their_fds' (102634566) panicked at crates/shed/tests/reliability.rs:420:66:
+cycle 183: SPAWN_FAILED: s183: pty: Device not configured (os error 6)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- serve_raises_a_lowered_soft_limit_so_many_sessions_spawn stdout ----
+
+thread 'serve_raises_a_lowered_soft_limit_so_many_sessions_spawn' (102720168) panicked at crates/shed/tests/reliability.rs:363:13:
+spawn s154 under a soft limit of 256: SPAWN_FAILED: s154: pty: Device not configured (os error 6)
+
+
+failures:
+    exited_sessions_release_their_fds
+    serve_raises_a_lowered_soft_limit_so_many_sessions_spawn
+
+test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 225.82s
+
+error: test failed, to rerun pass `-p shed --test reliability`

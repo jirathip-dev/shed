@@ -1,0 +1,19 @@
+
+running 1 test
+machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s --- FAILED
+
+failures:
+
+---- machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s stdout ----
+
+thread 'machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s' (101027568) panicked at crates/shed/tests/machines.rs:625:9:
+{"at":1794524052,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":55637,"cpus":12,"uptime_s":0,"terminals":{"exited":1,"working":1},"history":[{"at":1794524052,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":55661,"cpus":12,"uptime_s":0,"terminals":{}}]}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.75s
+
+error: test failed, to rerun pass `-p shed --test machines`
