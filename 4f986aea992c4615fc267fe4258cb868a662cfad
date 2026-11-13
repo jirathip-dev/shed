@@ -1,0 +1,5 @@
+Decided: pin the CI herdsman install to the staging commit just before its drover rename
+Because: .github/workflows/ci.yml:73
+Rejected: switch CI to drover now — a rename of the tool, its paths and the justfile calls is its own migration, not this issue
+Check: the rules job installs herdsman at 1534b233 and runs arch-check, lesson-check and actionlint green
+Owner: CI checks the repo rules again; moving them to the renamed tool is left for a separate issue
