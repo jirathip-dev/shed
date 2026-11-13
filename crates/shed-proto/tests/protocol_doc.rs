@@ -453,12 +453,13 @@ fn markdown() -> String {
          A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is\n\
          the exit status (128 + N for signal N), `null` while running or when the program was lost in a server\n\
          restart; `pid` is set while running; `reported` is the state the program last reported (absent until\n\
-         then); `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory\n\
-         (MiB) and CPU (percent of one core) at the last sample, while running; an ACP terminal's `session` is its\n\
-         agent session (`id`, for `run`'s `resume`; the current `model` and the `models`, `[id, name]`; `run`'s\n\
-         `mcp_servers` with each env and header value as `***`; the agent's slash `commands`, `[name, description,\n\
-         hint]`); `parent` names the terminal that started it (absent without one), with `outlive` and `notify` as \
-         `run` set them.\n\n## Methods\n"
+         then), or `stuck` while the program has left input unread for over a second (`send`, `keys` and\n\
+         `acp.model` then fail, their input queued); `idle_after` is set when the `idle` fallback is on;\n\
+         `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\n\
+         running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\n\
+         and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\n\
+         slash `commands`, `[name, description, hint]`); `parent` names the terminal that started it (absent\n\
+         without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
     );
     for method in Method::ALL {
         let (params, result) = example(method);
