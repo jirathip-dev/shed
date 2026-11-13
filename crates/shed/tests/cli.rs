@@ -100,7 +100,41 @@ impl Transcript {
 
 #[test]
 fn hello_prints_the_version() {
-    assert_eq!(shed(&["hello"]), format!("shed {LONG_VERSION}\n"));
+    let dir = temp_dir("hello");
+    let out = shed_in(&dir, &["hello"]);
+    assert_eq!(stdout(&out), format!("shed {LONG_VERSION}\n"));
+    let _server = Server::start(&dir);
+    assert_eq!(
+        stdout(&shed_in(&dir, &["hello"])),
+        format!("shed {LONG_VERSION}\n")
+    );
+}
+
+#[test]
+fn hello_reports_a_server_of_another_build() {
+    let dir = temp_dir("hello-build");
+    let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut hello = String::new();
+        BufReader::new(&stream)
+            .read_line(&mut hello)
+            .expect("hello");
+        let other = json!({"jsonrpc": "2.0", "id": 1, "result":
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL}});
+        std::io::Write::write_all(&mut stream, format!("{other}\n").as_bytes()).expect("reply");
+    });
+    let out = shed_in(&dir, &["hello"]);
+    server.join().expect("fake server");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout),
+        format!("shed {LONG_VERSION}\n")
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!("shed serve runs build 56de739, this is {BUILD}; restart shed serve\n")
+    );
 }
 
 #[test]
