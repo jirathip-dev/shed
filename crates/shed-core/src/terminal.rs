@@ -360,11 +360,15 @@ impl Terminal {
     }
 
     /// Ends the whole process tree: SIGTERM, then SIGKILL after `grace`; returns the program's exit status.
+    /// When the process table cannot be read (no file descriptors left), the program's process group
+    /// gets SIGKILL instead.
     ///
     /// # Errors
-    /// [`Error::Io`] when the process table or the exit status cannot be read.
+    /// [`Error::Io`] when the exit status cannot be read.
     pub fn kill(&self, grace: Duration) -> Result<ExitStatus, Error> {
-        proctree::kill_tree(&proctree::system(), self.pid, grace, || {})?;
+        if proctree::kill_tree(&proctree::system(), self.pid, grace, || {}).is_err() {
+            self.kill_group();
+        }
         loop {
             if let Some(status) = self.try_wait()? {
                 return Ok(status);
@@ -372,14 +376,18 @@ impl Terminal {
             crate::clock::sleep(REAP);
         }
     }
+
+    fn kill_group(&self) {
+        if let Some(group) = Pid::from_raw(self.pid) {
+            kill_process_group(group, Signal::KILL).ok();
+        }
+    }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        if matches!(self.try_wait(), Ok(None))
-            && let Some(group) = Pid::from_raw(self.pid)
-        {
-            kill_process_group(group, Signal::KILL).ok();
+        if matches!(self.try_wait(), Ok(None)) {
+            self.kill_group();
         }
     }
 }
