@@ -151,11 +151,13 @@ pub enum ErrorCode {
     ReadOnly,
     /// The machine a `<machine>/<name>` names has no link up (`machine.links` says why).
     NoLink,
+    /// `exec` or a file call failed: not found, denied, timed out, or its reply over [`REPLY_LIMIT`].
+    Io,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 14] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -169,6 +171,7 @@ impl ErrorCode {
         Self::SpawnFailed,
         Self::ReadOnly,
         Self::NoLink,
+        Self::Io,
     ];
 
     /// The numeric JSON-RPC code.
@@ -188,6 +191,7 @@ impl ErrorCode {
             Self::SpawnFailed => -32005,
             Self::ReadOnly => -32006,
             Self::NoLink => -32007,
+            Self::Io => -32008,
         }
     }
 
@@ -208,6 +212,7 @@ impl ErrorCode {
             Self::SpawnFailed => "SPAWN_FAILED",
             Self::ReadOnly => "READONLY",
             Self::NoLink => "NO_LINK",
+            Self::Io => "IO",
         }
     }
 }
@@ -261,13 +266,19 @@ pub enum Method {
     Model,
     /// The held links to the machines: `{}` → `{machine: Link}`.
     MachineLinks,
+    /// Run a program without a terminal: [`ExecParams`] → [`ExecResult`].
+    Exec,
+    /// Read a file: [`FileParams`] → its bytes.
+    FileRead,
+    /// Write a file: [`FileParams`] with `data` → `{}`.
+    FileWrite,
     /// The API as an `OpenRPC` document: `{}` → [`openrpc`].
     Discover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 27] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -291,6 +302,9 @@ impl Method {
         Self::MachineStats,
         Self::Model,
         Self::MachineLinks,
+        Self::Exec,
+        Self::FileRead,
+        Self::FileWrite,
         Self::Discover,
     ];
 
@@ -321,6 +335,9 @@ impl Method {
             Self::MachineStats => "machine.stats",
             Self::Model => "acp.model",
             Self::MachineLinks => "machine.links",
+            Self::Exec => "exec",
+            Self::FileRead => "file.read",
+            Self::FileWrite => "file.write",
             Self::Discover => "rpc.discover",
         }
     }
@@ -339,7 +356,7 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
             }
             Self::Ls => {
                 "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal."
@@ -391,6 +408,15 @@ impl Method {
             }
             Self::MachineLinks => {
                 "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since."
+            }
+            Self::Exec => {
+                "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link."
+            }
+            Self::FileRead => {
+                "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there."
+            }
+            Self::FileWrite => {
+                "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there."
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
@@ -476,6 +502,10 @@ pub struct RunParams {
     /// `{type: "http" | "sse", name, url, headers}`. Kept in memory only; send them again to resume.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_servers: Vec<Value>,
+    /// ACP: the session's options, sent unchanged as `_meta` on `session/new` and `session/load`;
+    /// which keys exist is the agent's business. Callers: drover (herdsman#923) and cooee.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub meta: Option<serde_json::Map<String, Value>>,
     /// ACP: never hibernate the agent when idle.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_hibernate: bool,
@@ -842,6 +872,52 @@ pub struct ModelParams {
     pub model: String,
 }
 
+/// The most bytes one `exec` or `file.read` reply carries: 8 MiB.
+pub const REPLY_LIMIT: u64 = 8 << 20;
+
+/// `exec` params.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ExecParams {
+    /// The program and its arguments.
+    pub cmd: Vec<String>,
+    /// Its working directory; default the server's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
+    /// End it after this many seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<f64>,
+    /// Bytes fed to its stdin, then closed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stdin: Vec<u8>,
+    /// Run it on this machine, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// `exec` result.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ExecResult {
+    /// The exit code, or 128 + the signal that ended it.
+    pub code: i32,
+    /// What it wrote to stdout.
+    pub stdout: Vec<u8>,
+    /// What it wrote to stderr.
+    pub stderr: Vec<u8>,
+}
+
+/// `file.read` and `file.write` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileParams {
+    /// The file.
+    pub path: PathBuf,
+    /// `file.write`: its new bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<u8>>,
+    /// The machine it is on, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
 /// `machine.stats` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct StatsParams {
@@ -1080,6 +1156,9 @@ impl Method {
             Self::MachineStats => pair::<StatsParams, MachineStats>(g),
             Self::Model => pair::<ModelParams, Empty>(g),
             Self::MachineLinks => pair::<Empty, BTreeMap<String, Link>>(g),
+            Self::Exec => pair::<ExecParams, ExecResult>(g),
+            Self::FileRead => pair::<FileParams, Vec<u8>>(g),
+            Self::FileWrite => pair::<FileParams, Empty>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
         }
     }
