@@ -203,6 +203,7 @@ fn run_params() -> Value {
         policy: None,
         resume: None,
         mcp_servers: Vec::new(),
+        meta: None,
         no_hibernate: false,
         machine: None,
         rows: None,

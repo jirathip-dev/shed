@@ -31,7 +31,7 @@ pub(crate) const GRACE: Duration = Duration::from_secs(2);
 const FILE_VERSION: u32 = 1;
 
 pub(crate) enum Stream {
-    Output(Vec<u8>, UnboundedReceiver<Vec<u8>>),
+    Output(Vec<u8>, UnboundedReceiver<Arc<[u8]>>),
     Events(Subscriber),
     Screen(Arc<Terminal>, Option<u64>),
 }
@@ -46,7 +46,7 @@ impl Stream {
     }
 }
 
-async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Vec<u8>>) {
+async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: UnboundedReceiver<Arc<[u8]>>) {
     let mut batch = Vec::new();
     while out.write_all(&bytes).await.is_ok() && rx.recv_many(&mut batch, 1024).await > 0 {
         bytes = batch.concat();
@@ -538,8 +538,10 @@ impl Registry {
         let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
         let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
         let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
+        let meta = serde_json::to_string(&p.meta).map_err(internal)?;
+        let meta = p.meta.is_some().then_some(("SHED_ACP_META", meta.as_str()));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
-        let acp: Vec<_> = resume.into_iter().chain(mcp).chain(awake).collect();
+        let acp: Vec<_> = [resume, mcp, meta, awake].into_iter().flatten().collect();
         let term = spawn(
             size(p.rows, p.cols),
             &p.cmd,

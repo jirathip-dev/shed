@@ -37,7 +37,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -148,6 +148,18 @@
             "type": "array",
             "items": true,
             "description": "ACP: MCP servers for the agent, in ACP's shapes: stdio `{name, command, args, env}`, or\n`{type: \"http\" | \"sse\", name, url, headers}`. Kept in memory only; send them again to resume."
+          }
+        },
+        {
+          "name": "meta",
+          "required": false,
+          "schema": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "ACP: the session's options, sent unchanged as `_meta` on `session/new` and `session/load`;\nwhich keys exist is the agent's business. Callers: drover (herdsman#923) and cooee."
           }
         },
         {
