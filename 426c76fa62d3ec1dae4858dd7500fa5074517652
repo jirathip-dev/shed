@@ -1,0 +1,12 @@
+Decided: setup edits the config as text, inserting compact entries right after the list's opening bracket
+Because: "It only adds its own marked entries and leaves the rest of the file as it was"
+Decided: remove deletes exactly the inserted text; new members use `"E":[ {` so a user's `"E":[]` is never removed
+Because: "`--remove` restores the file byte for byte"
+Rejected: serde round-trip with pretty printing — reformats any non-canonical file (round 1 FAIL)
+Decided: shed's entry is recognised by equality with its group, not a substring of the group's JSON
+Because: crates/shed-server/src/hooks.rs:42
+Decided: keep PostToolUse → working, so the state leaves blocked once a permission is granted
+Because: crates/shed-server/src/providers/claude.rs:10
+Check: hooks::tests covers four non-canonical files; the reviewer's repro through the binary gives cmp exit 0
+Check: just cap is 7971/10000 after #106 (q1556); workspace tests fail only machine_stats (base too) and a load-timed acp test that passes alone
+Owner: `shed setup` no longer reformats your settings file, and `--remove` gives back exactly what was there.
