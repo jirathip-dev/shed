@@ -1,0 +1,9 @@
+Decided: merged origin/staging afc2107 (#76); rm takes staging's helper and still closes the ACP session after the removal
+Because: "`rm` of an ACP terminal closes its session (`session/close`) when the agent supports it"
+Because: crates/shed-server/src/lib.rs:558
+Decided: EventKind::Session is boxed and AcpSession.usage is plain, so an event is smaller than on staging
+Because: "Every gate is green and the line cap holds."
+Rejected: keeping only usage boxed — CI bench-fanout put the head at 115% of base at 9ef332c
+Check: scripts/bench-fanout.sh against staging afc2107: head/base 100%, exit 0
+Check: lock::killing_a_program_that_ignores_sigterm_holds_up_no_list failed once (ls 125ms) under the full suite and passed alone and on the rerun; staging's #76 test
+Owner: The branch is up to date with staging again and no longer slows down event delivery.
