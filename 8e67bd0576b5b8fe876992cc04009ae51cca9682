@@ -1,0 +1,13 @@
+Decided: heartbeats are opt-in per connection: one that sends `heartbeat` must send a line every 30 s and gets `heartbeat` lines in its idle events stream; the ACP bridge writer and machine links opt in.
+Because: "A heartbeat every 15 s in both directions; a peer that misses 2 is dropped."
+Rejected: enforcing heartbeats on every connection — `shed events`, attach, watch and outside clients send nothing after their request and would be cut off after 30 s.
+Decided: a subscriber more than 4,096 events behind is closed with a `lagged` line; a `since` older than the ring gets a `reset` line first; the log no longer waits for slow cursors.
+Because: "A subscriber more than N events behind is dropped with a `lagged` notice, and it resumes with `since` or gets a reset."
+Decided: main ring 4,096 non-text events; text in a 256-chunk ring per terminal, dropped once the main ring has moved past it.
+Because: crates/shed-server/src/events.rs:10
+Rejected: 8,192 — serve grew 10.5 MB on the 100k-event test; the measured load (23.5k non-text events over 142 lane transcripts on this host, about 166 per lane) puts 14 lanes near 2,300, so 4,096 holds them with margin at about 5.7 MB.
+Decided: every server write (responses, events, attach output, screen updates) and the bridge's writes to the server time out after 30 s; attach output channels hold 256 chunks.
+Because: "Bounded channels everywhere a peer can be slow, plus a per-write timeout."
+Rejected: bounding the bridge's `outs` — its producer is the agent session and its consumer writes the local transcript; the slow peer is the server, and the write timeout keeps the writer draining it.
+Check: a write that is cut by `lagged` may leave half a line before the notice; the notice starts with a newline, and clients already skip lines that are not events.
+Owner: slow or silent clients of shed serve are now cut off instead of making the server hold every event in memory.
