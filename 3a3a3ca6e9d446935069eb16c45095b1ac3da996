@@ -1,0 +1,10 @@
+Decided: remove deletes the file only while it is exactly the text setup wrote into a missing file
+Because: "`--remove` restores the file byte for byte"
+Decided: a missing file is written as `{\n"hooks":{ ...}\n}\n`, which no insertion into an existing file produces
+Because: crates/shed-server/src/hooks.rs:110
+Rejected: deleting any file left `{}\n` after remove — loses a user's own `{}\n` file (round 2 FAIL)
+Decided: doctor prints a FAIL hooks line and fails when a config cannot be read
+Because: crates/shed/src/service.rs:162
+Check: hooks::tests now covers `{}\n` and `{\n\n}\n` and fails on the round-2 code; the reviewer's repro gives cmp exit 0
+Check: just test fails only machine_stats, which fails on the base on this host too
+Owner: `shed setup --remove` no longer deletes a settings file you already had; doctor flags a broken one.
