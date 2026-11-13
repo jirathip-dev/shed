@@ -81,6 +81,42 @@ fn a_terminal_that_never_reads_its_input_holds_up_no_other_and_is_reported_stuck
 }
 
 #[test]
+fn a_state_save_that_never_finishes_holds_up_no_other_request() {
+    let dir = temp_dir("lock-save");
+    let _server = Server::start(&dir);
+    let mut c = client(&dir);
+    run(&mut c, &dir, "other", "echo ready; exec cat >/dev/null");
+    let tmp = Paths::in_dir(&dir).state.with_extension("json.tmp");
+    let made = std::process::Command::new("mkfifo").arg(&tmp).status();
+    assert!(made.expect("mkfifo").success());
+    let cwd = dir.clone();
+    let saving = in_thread(&dir, move |c| {
+        let params = json!({"name": "late", "cwd": cwd, "cmd": ["sleep", "100"]});
+        call(c, Method::Run, &params)
+    });
+    let others = in_thread(&dir, |c| {
+        eventually("late listed", || {
+            let list = call(c, Method::Ls, &json!({}));
+            list.as_array()
+                .is_some_and(|l| l.iter().any(|t| t["name"] == "late"))
+        });
+        call(c, Method::Send, &json!({"name": "other", "text": "hi\r"}));
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !others.is_finished() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let answered = others.is_finished();
+    let mut saved = String::new();
+    std::io::Read::read_to_string(&mut std::fs::File::open(&tmp).expect("fifo"), &mut saved)
+        .expect("drain the save");
+    others.join().expect("others");
+    assert_eq!(saving.join().expect("run")["name"], "late");
+    assert!(answered, "ls and send waited for another request's save");
+    assert!(saved.contains("late"), "{saved}");
+}
+
+#[test]
 fn killing_a_program_that_ignores_sigterm_holds_up_no_list() {
     let dir = temp_dir("lock-kill");
     let _server = Server::start(&dir);
