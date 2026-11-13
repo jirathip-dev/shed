@@ -1,0 +1,24 @@
+scripts/line-cap.sh
+9249 / cap 10000
+scripts/dep-direction.sh
+shed-core has no workspace deps
+scripts/hygiene.sh
+no setup-specific names
+scripts/neutral-core.sh
+core names no agent or provider
+! scripts/neutral-core.sh ci/fixtures/leaky-core
+ci/fixtures/leaky-core/crates/core/src/lib.rs:3: pub const AGENT: &str = "codex-acp";
+agent or provider names in core code; move them to providers/<name>.rs
+scripts/comment-rule.py
+comments follow the rule
+! scripts/comment-rule.py ci/fixtures/comment-plain
+ci/fixtures/comment-plain/crates/core/src/lib.rs:5:5: // a plain comment
+comments break the rule (.herdsman/rules.md): no // or /* */ but // SAFETY: and // TODO(#N); /// only on public API
+! scripts/comment-rule.py ci/fixtures/comment-private-doc
+ci/fixtures/comment-private-doc/crates/core/src/lib.rs:8:1: /// A private item, so this doc breaks the rule.
+comments break the rule (.herdsman/rules.md): no // or /* */ but // SAFETY: and // TODO(#N); /// only on public API
+scripts/comment-rule.py ci/fixtures/comment-allowed
+comments follow the rule
+actionlint
+sh: actionlint: command not found
+error: recipe `actionlint` failed on line 48 with exit code 127
