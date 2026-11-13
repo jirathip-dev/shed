@@ -1,0 +1,5 @@
+Decided: merged origin/staging 4254d78 (#84); refresh keeps per-record state events and adds #84's parent notes on blocked or error
+Because: crates/shed-server/src/registry.rs:357
+Rejected: none
+Check: TMPDIR=<fresh short dir> cargo test --workspace fails only machine_stats_..._within_5_s, plus one load-timed lock miss that passes 5/5 alone and 4/4 in its suite, same as staging
+Owner: the branch is current with staging again; child terminals and the full status protocol work together
