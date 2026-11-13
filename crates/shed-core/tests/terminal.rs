@@ -117,7 +117,7 @@ fn subscribers_get_raw_output_until_the_pty_closes() {
     t.write(b"x\n").expect("write");
     let mut out = Vec::new();
     while let Some(chunk) = rx.blocking_recv() {
-        out.extend(chunk);
+        out.extend_from_slice(&chunk);
     }
     let out = String::from_utf8(out).expect("utf-8");
     assert!(

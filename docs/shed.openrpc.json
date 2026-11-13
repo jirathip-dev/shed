@@ -37,7 +37,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `no_hibernate` keeps the agent running when idle.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -148,6 +148,18 @@
             "type": "array",
             "items": true,
             "description": "ACP: MCP servers for the agent, in ACP's shapes: stdio `{name, command, args, env}`, or\n`{type: \"http\" | \"sse\", name, url, headers}`. Kept in memory only; send them again to resume."
+          }
+        },
+        {
+          "name": "meta",
+          "required": false,
+          "schema": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": true,
+            "description": "ACP: the session's options, sent unchanged as `_meta` on `session/new` and `session/load`;\nwhich keys exist is the agent's business. Callers: drover (herdsman#923) and cooee."
           }
         },
         {
@@ -1270,6 +1282,182 @@
           "additionalProperties": {
             "$ref": "#/components/schemas/Link"
           }
+        }
+      }
+    },
+    {
+      "name": "exec",
+      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cmd",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The program and its arguments."
+          }
+        },
+        {
+          "name": "cwd",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its working directory; default the server's."
+          }
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "End it after this many seconds."
+          }
+        },
+        {
+          "name": "stdin",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "Bytes fed to its stdin, then closed."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run it on this machine, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ExecResult"
+        }
+      }
+    },
+    {
+      "name": "file.read",
+      "description": "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "schema": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    {
+      "name": "file.write",
+      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "schema": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
         }
       }
     },
@@ -2614,6 +2802,42 @@
           }
         ],
         "description": "A held link's state."
+      },
+      "ExecResult": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The exit code, or 128 + the signal that ended it."
+          },
+          "stdout": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "What it wrote to stdout."
+          },
+          "stderr": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "What it wrote to stderr."
+          }
+        },
+        "required": [
+          "code",
+          "stdout",
+          "stderr"
+        ],
+        "description": "`exec` result."
       }
     },
     "errors": {
@@ -2668,6 +2892,10 @@
       "NO_LINK": {
         "code": -32007,
         "message": "NO_LINK"
+      },
+      "IO": {
+        "code": -32008,
+        "message": "IO"
       }
     }
   }

@@ -2,7 +2,7 @@
 //! which a restart reads only the tail.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Seek, SeekFrom, Write as _};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 
@@ -66,17 +66,26 @@ impl History {
 ///
 /// # Errors
 /// [`io::Error`] when `r` cannot be read.
-pub fn tail(mut r: impl Read + Seek, max: u64) -> io::Result<Vec<u8>> {
+pub fn tail(r: impl Read + Seek, max: u64) -> io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    copy_tail(r, max, &mut bytes)?;
+    Ok(bytes)
+}
+
+fn copy_tail(mut r: impl Read + Seek, max: u64, out: &mut impl Write) -> io::Result<u64> {
     let len = r.seek(SeekFrom::End(0))?;
     let cut = len.saturating_sub(max);
     r.seek(SeekFrom::Start(cut))?;
-    let mut bytes = Vec::new();
-    r.take(max).read_to_end(&mut bytes)?;
-    if cut > 0 {
-        let partial = bytes.iter().take(3).take_while(|b| *b & 0xc0 == 0x80);
-        bytes.drain(..partial.count());
-    }
-    Ok(bytes)
+    let mut r = r.take(max);
+    let mut head = Vec::new();
+    (&mut r).take(3).read_to_end(&mut head)?;
+    let partial = head
+        .iter()
+        .take_while(|b| cut > 0 && *b & 0xc0 == 0x80)
+        .count();
+    let head = head.get(partial..).unwrap_or_default();
+    out.write_all(head)?;
+    Ok(u64::try_from(head.len()).unwrap_or(u64::MAX) + io::copy(&mut r, out)?)
 }
 
 pub(crate) struct Log {
@@ -118,13 +127,11 @@ impl Log {
         self.file.write_all(bytes)?;
         self.len += u64::try_from(bytes.len()).unwrap_or(u64::MAX);
         if self.len > self.max.saturating_mul(2) {
-            let kept = tail(File::open(&self.path)?, self.max)?;
             let tmp = self.path.with_extension("log.tmp");
             fs::remove_file(&tmp).ok();
-            create(&tmp)?.write_all(&kept)?;
+            self.len = copy_tail(File::open(&self.path)?, self.max, &mut create(&tmp)?)?;
             fs::rename(&tmp, &self.path)?;
             self.file = create(&self.path)?;
-            self.len = u64::try_from(kept.len()).unwrap_or(u64::MAX);
         }
         Ok(())
     }

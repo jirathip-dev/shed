@@ -145,8 +145,11 @@ impl Screen {
             self.grid.answered = false;
             let n = self.parser.advance_until_terminated(&mut self.grid, bytes);
             let (done, rest) = bytes.split_at_checked(n).unwrap_or((bytes, &[]));
-            let query = done.iter().rposition(|&b| b == 0x1b);
-            let keep = query.filter(|_| self.grid.answered).unwrap_or(done.len());
+            let answered = self
+                .grid
+                .answered
+                .then(|| done.iter().rposition(|&b| b == 0x1b));
+            let keep = answered.flatten().unwrap_or(done.len());
             out.extend_from_slice(done.get(..keep).unwrap_or(done));
             bytes = rest;
         }
@@ -174,8 +177,16 @@ impl Screen {
     /// The last `n` lines of scrollback followed by the visible screen, as plain text.
     #[must_use]
     pub fn history(&self, n: usize) -> String {
-        let mut lines: Vec<String> = self.grid.history.iter().cloned().collect();
-        lines.extend(self.grid.visible());
+        let g = &self.grid;
+        let mut at = 0;
+        let mut lines: Vec<String> = (g.lens.iter())
+            .map(|&len| {
+                let line: Vec<u8> = g.history.range(at..at + len).copied().collect();
+                at += len;
+                String::from_utf8_lossy(&line).into_owned()
+            })
+            .collect();
+        lines.extend(g.visible());
         trim_blank_tail(&mut lines);
         let skip = lines.len().saturating_sub(n);
         lines.drain(..skip);
@@ -191,7 +202,7 @@ impl Screen {
         Snapshot {
             size: g.size(),
             cursor: (clamp(g.row), clamp(g.col)),
-            scrollback: g.history.len(),
+            scrollback: g.lens.len(),
             rows,
         }
     }
@@ -224,8 +235,25 @@ fn chars(glyph: &Glyph) -> impl Iterator<Item = char> + '_ {
 }
 
 fn line_text(row: &[Cell]) -> String {
-    let s: String = row.iter().flat_map(|c| chars(&c.0)).collect();
-    s.trim_end().to_owned()
+    let mut s = String::new();
+    write_line(&mut s, row);
+    s
+}
+
+fn write_line(s: &mut String, row: &[Cell]) {
+    let end = row
+        .iter()
+        .rposition(|c| c.0 != glyph(' '))
+        .map_or(0, |i| i + 1);
+    s.clear();
+    s.reserve(end);
+    for (glyph, _) in row.iter().take(end) {
+        match glyph {
+            [c, '\0', ..] if *c != '\0' => s.push(*c),
+            _ => s.extend(chars(glyph)),
+        }
+    }
+    s.truncate(s.trim_end().len());
 }
 
 fn runs(row: &[Cell]) -> Vec<Run> {
@@ -254,6 +282,12 @@ fn space() -> Cell {
 }
 type Cells = Vec<Vec<Cell>>;
 
+fn reach(line: &mut Vec<Cell>, len: usize) {
+    if line.len() < len {
+        line.resize(len, space());
+    }
+}
+
 struct Grid {
     rows: usize,
     cols: usize,
@@ -264,8 +298,9 @@ struct Grid {
     top: usize,
     bottom: usize,
     saved: (usize, usize),
-    history: VecDeque<String>,
-    history_bytes: usize,
+    history: VecDeque<u8>,
+    lens: VecDeque<usize>,
+    line: String,
     limit: (usize, usize),
     primary: Option<(Cells, (usize, usize))>,
     replies: Vec<u8>,
@@ -280,7 +315,7 @@ impl Grid {
         Self {
             rows,
             cols,
-            cells: vec![vec![space(); cols]; rows],
+            cells: vec![Vec::new(); rows],
             row: 0,
             col: 0,
             wrap_next: false,
@@ -288,7 +323,8 @@ impl Grid {
             bottom: rows - 1,
             saved: (0, 0),
             history: VecDeque::new(),
-            history_bytes: 0,
+            lens: VecDeque::new(),
+            line: String::new(),
             limit,
             primary: None,
             replies: Vec::new(),
@@ -311,31 +347,41 @@ impl Grid {
     }
 
     fn blank(&self) -> Vec<Cell> {
-        vec![space(); self.cols]
+        Vec::with_capacity(self.cols)
     }
 
-    fn push_history(&mut self, line: String) {
+    fn push_history(&mut self, row: usize) {
         let (lines, bytes) = self.limit;
-        if self.primary.is_some() || lines == 0 || line.len() > bytes {
+        if self.primary.is_some() || lines == 0 {
             return;
         }
-        while self.history.len() >= lines || self.history_bytes + line.len() > bytes {
-            let Some(old) = self.history.pop_front() else {
+        write_line(
+            &mut self.line,
+            self.cells.get(row).map_or(&[], Vec::as_slice),
+        );
+        let len = self.line.len();
+        if len > bytes {
+            return;
+        }
+        while self.lens.len() >= lines || self.history.len() + len > bytes {
+            let Some(old) = self.lens.pop_front() else {
                 break;
             };
-            self.history_bytes -= old.len();
+            self.history.drain(..old);
         }
-        self.history_bytes += line.len();
-        self.history.push_back(line);
+        self.history.extend(self.line.as_bytes());
+        self.lens.push_back(len);
     }
 
     fn scroll_up(&mut self, n: usize) {
         for _ in 0..n.min(self.bottom - self.top + 1) {
-            let line = self.cells.remove(self.top);
             if self.top == 0 {
-                self.push_history(line_text(&line));
+                self.push_history(0);
             }
-            self.cells.insert(self.bottom, self.blank());
+            if let Some(rows) = self.cells.get_mut(self.top..=self.bottom) {
+                rows.rotate_left(1);
+                rows.last_mut().into_iter().for_each(Vec::clear);
+            }
         }
     }
 
@@ -369,8 +415,12 @@ impl Grid {
     }
 
     fn erase(&mut self, row: usize, from: usize, to: usize) {
-        let to = to.min(self.cols);
-        if let Some(cells) = self.cells.get_mut(row).and_then(|r| r.get_mut(from..to)) {
+        let Some(line) = self.cells.get_mut(row) else {
+            return;
+        };
+        if to >= line.len() {
+            line.truncate(from);
+        } else if let Some(cells) = line.get_mut(from..to) {
             cells.fill(space());
         }
     }
@@ -396,7 +446,7 @@ impl Grid {
                 }
                 if mode == 3 {
                     self.history.clear();
-                    self.history_bytes = 0;
+                    self.lens.clear();
                 }
             }
             _ => {}
@@ -420,7 +470,11 @@ impl Grid {
 
     fn chars_at_cursor(&mut self, n: usize, insert: bool) {
         let (col, cols) = (self.col, self.cols);
-        let Some(line) = self.cells.get_mut(self.row).and_then(|l| l.get_mut(col..)) else {
+        let Some(line) = self.cells.get_mut(self.row) else {
+            return;
+        };
+        reach(line, cols);
+        let Some(line) = line.get_mut(col..) else {
             return;
         };
         let n = n.min(cols - col);
@@ -448,7 +502,7 @@ impl Grid {
         let (rows, cols) = (usize::from(size.rows.max(1)), usize::from(size.cols.max(1)));
         let fit = |cells: &mut Cells| {
             for line in cells.iter_mut() {
-                line.resize(cols, space());
+                line.truncate(cols);
             }
         };
         fit(&mut self.cells);
@@ -460,14 +514,14 @@ impl Grid {
             self.cells.pop();
         }
         while self.cells.len() > rows {
-            let line = self.cells.remove(0);
-            self.push_history(line_text(&line));
+            self.push_history(0);
+            self.cells.remove(0);
             self.row = self.row.saturating_sub(1);
         }
-        self.cells.resize(rows, vec![space(); cols]);
+        self.cells.resize(rows, Vec::new());
         if let Some((cells, _)) = &mut self.primary {
             fit(cells);
-            cells.resize(rows, vec![space(); cols]);
+            cells.resize(rows, Vec::new());
         }
         self.rows = rows;
         self.top = 0;
@@ -485,6 +539,9 @@ impl Grid {
         let Some(line) = self.cells.get_mut(self.row) else {
             return;
         };
+        if span == 1 && line.len() == col {
+            return line.push((glyph(c), pen));
+        }
         if line.get(col).is_some_and(|c| c.0 == TAIL)
             && let Some(head) = line.get_mut(col.saturating_sub(1))
         {
@@ -493,6 +550,7 @@ impl Grid {
         if let Some(tail) = line.get_mut(col + span).filter(|c| c.0 == TAIL) {
             *tail = space();
         }
+        reach(line, col + span);
         for (i, cell) in line.iter_mut().skip(col).take(span).enumerate() {
             *cell = (if i == 0 { glyph(c) } else { TAIL }, pen);
         }
@@ -508,6 +566,7 @@ impl Grid {
         if line.get(col).is_some_and(|c| c.0 == TAIL) {
             col = col.saturating_sub(1);
         }
+        reach(line, col + 1);
         let cell = line.get_mut(col);
         if let Some(slot) = cell.and_then(|c| c.0.iter_mut().find(|s| **s == '\0')) {
             *slot = c;
@@ -858,9 +917,9 @@ mod tests {
         let mut s = Screen::bounded(Size { rows: 1, cols: 10 }, 100, 7);
         s.feed("é1\r\né2\r\né3\r\né4".as_bytes());
         assert_eq!(s.history(100), "é2\né3\né4");
-        assert_eq!(s.grid.history_bytes, 6);
+        assert_eq!(s.grid.history.len(), 6);
         s.feed(b"\x1b[3J");
-        assert_eq!(s.grid.history_bytes, 0);
+        assert_eq!((s.grid.history.len(), s.grid.lens.len()), (0, 0));
     }
 
     #[test]
@@ -1046,6 +1105,22 @@ mod tests {
     fn a_wide_character_at_the_last_column_wraps_whole() {
         assert_eq!(screen(3, 5, 0, "abcd日x").text(), "abcd\n日x");
         assert_eq!(screen(3, 5, 0, "abcde\u{301}日").text(), "abcde\u{301}\n日");
+    }
+
+    #[test]
+    fn rows_past_their_written_cells_read_as_blanks() {
+        let mut s = screen(
+            3,
+            10,
+            5,
+            "ab\x1b[1;6Hx\x1b[1;3H\x1b[2@\x1b[2;4H\u{301}\x1b[3;9Hyz",
+        );
+        s.feed(b"\x1b[3;2H\x1b[3P\x1b[1;9H\x1b[X");
+        assert_eq!(s.text(), "ab     x\n   \u{301}\n     yz");
+        s.resize(Size { rows: 2, cols: 12 });
+        s.feed(b"\x1b[2;12Hq\x1b[1;1H\x1b[K");
+        assert_eq!(s.text(), "\n     yz    q");
+        assert_eq!(s.history(5), "ab     x\n\n     yz    q");
     }
 
     #[test]
