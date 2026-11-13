@@ -1,0 +1,20 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running tests/reliability.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-117/debug/deps/reliability-b5469b7e629bf674)
+
+running 13 tests
+test malformed_requests_are_denied_with_a_reason_and_never_pass_the_handshake ... ok
+test a_program_gets_default_signals_from_a_serve_that_ignores_sighup ... ok
+test a_first_start_menu_is_seen_read_and_answered ... ok
+test a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over ... ok
+test a_terminal_replaced_under_the_same_name_gets_the_messages ... ok
+test the_next_start_ends_a_tree_a_killed_serve_left_behind ... ok
+test kill_ends_only_its_own_tree_and_the_other_terminals_survive ... ok
+test sigterm_to_serve_ends_every_tree_even_one_that_ignores_sighup ... ok
+test two_autostarts_at_once_share_one_server ... ok
+test a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream ... ok
+test emfile_fails_the_spawn_and_the_daemon_and_other_sessions_live_on ... ok
+test exited_sessions_release_their_fds ... ok
+test serve_raises_a_lowered_soft_limit_so_many_sessions_spawn ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.91s
+
