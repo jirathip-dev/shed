@@ -1,0 +1,10 @@
+Decided: AC3 is settled by the owner's M4 run of scripts/bench-drain.sh, merge if plain and colour reach 150
+Because: q1567
+Decided: merged origin/staging 38c6449 so the M4 run measures the current head
+Because: crates/shed-core/src/terminal.rs:149
+Decided: docs/bench.md claims output parity only through the existing golden tests
+Because: docs/bench.md:61
+Check: serve_raises_a_lowered_soft_limit_so_many_sessions_spawn passes alone at head and staging; it failed once in the full run when the host ran out of PTYs
+Check: machine_stats fails on this host only (uptime_s 0), as at base
+Rejected: more tuning on the shared M6 — the owner chose an M4 run over more optimisation (q1567)
+Owner: run the drain bench on the M4 at f519417; merge if plain and colour reach 150 MB/s
