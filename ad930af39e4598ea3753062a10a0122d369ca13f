@@ -1,0 +1,6 @@
+Decided: merge origin/staging and push; no code change for the red msrv check
+Because: crates/shed/src/main.rs:442
+Rejected: collapsing the two Doctor arms to shorten run() — staging already shortened run() to 95 lines, so the merge alone fixes clippy
+Check: clippy 1.97.1 passes at the head; run() is 96 lines after the merge, it was 102 at 3a3a3ca
+Check: the stable (ubuntu) fd test and the two local load failures pass alone and are outside this PR's files
+Owner: the branch is up to date with staging again and the failing lint check is fixed by that update.
