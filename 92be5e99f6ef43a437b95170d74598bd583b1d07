@@ -1,0 +1,8 @@
+Decided: the macOS CI red is PTY exhaustion (os error 6), not this branch; no code change for it
+Because: crates/shed/tests/reliability.rs:364
+Decided: merged origin/staging 4de49d0 (#87, #88); the terminal doc sentence keeps the OSC 7501 fields and #88's usage
+Because: docs/protocol.md:15
+Rejected: lowering the 300-session test's count — it is staging's test, outside this issue
+Check: cargo test -p shed --test reliability exits 0 twice at this head; no leftover shed servers after the run
+Check: CI stable (macos) at this head; staging passes the same reliability tests
+Owner: the branch is current with staging again; the earlier macOS failure was the CI machine running out of terminals
