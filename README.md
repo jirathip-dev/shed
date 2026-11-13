@@ -42,7 +42,7 @@ around lanes:
 | `shed ls [--label k=v] [--json]` | List terminals: name, labels, cwd, state, pid tree, RSS/CPU, age. |
 | `shed get <t>` | One terminal as JSON. |
 | `shed read <t> [--lines N] [--screen\|--history]` | The current screen, or scrollback, as plain text. |
-| `shed send <t> <text>` / `shed keys <t> enter esc ctrl+c…` | Type text or press keys. |
+| `shed send <t> <text> [--no-paste] [--no-enter] [--draft-wait S]` / `shed keys <t> enter esc ctrl+c…` | Paste text then press enter (bracketed when the program asks for it), or press keys. Sends go in whole, one at a time, and wait while a person attached has an unsent line (60 s by default, then the send fails and writes nothing). |
 | `shed wait <t> [--until working\|idle\|done\|blocked] [--output RE] [--timeout S]` | Block until the state or output matches. |
 | `shed state <t> working\|blocked\|done\|error [--note TEXT]` | Report state (also via `$SHED` + OSC 7501-compatible escape). |
 | `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |

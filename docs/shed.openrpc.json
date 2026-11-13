@@ -371,7 +371,7 @@
     },
     {
       "name": "send",
-      "description": "Type text into the terminal.",
+      "description": "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -388,6 +388,35 @@
           "schema": {
             "type": "string",
             "description": "The text, sent as UTF-8."
+          }
+        },
+        {
+          "name": "no_enter",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: no enter after the text."
+          }
+        },
+        {
+          "name": "no_paste",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: the text as typed keys even when the program has turned bracketed paste on."
+          }
+        },
+        {
+          "name": "draft_wait",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "`send`: seconds after a person's last key that their unsent line holds the send (default 60, 0 off)."
           }
         }
       ],
@@ -517,7 +546,7 @@
     },
     {
       "name": "attach",
-      "description": "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection.",
+      "description": "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1050,15 +1079,44 @@
     },
     {
       "name": "terminal.input",
-      "description": "Type text into the terminal, as `send`.",
+      "description": "Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.",
       "paramStructure": "by-name",
       "params": [
+        {
+          "name": "draft_wait",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "`send`: seconds after a person's last key that their unsent line holds the send (default 60, 0 off)."
+          }
+        },
         {
           "name": "text",
           "required": true,
           "schema": {
             "type": "string",
             "description": "The text, sent as UTF-8."
+          }
+        },
+        {
+          "name": "no_enter",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: no enter after the text."
+          }
+        },
+        {
+          "name": "no_paste",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: the text as typed keys even when the program has turned bracketed paste on."
           }
         },
         {
@@ -1079,7 +1137,7 @@
     },
     {
       "name": "terminal.keys",
-      "description": "Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.",
+      "description": "Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2871,6 +2929,10 @@
       "IO": {
         "code": -32008,
         "message": "IO"
+      },
+      "DRAFT_HELD": {
+        "code": -32009,
+        "message": "DRAFT_HELD"
       }
     }
   }
