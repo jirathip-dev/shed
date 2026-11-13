@@ -8,6 +8,7 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 mod events;
+mod input;
 mod links;
 pub mod machines;
 mod providers;
@@ -620,17 +621,18 @@ async fn read(registry: &Shared, p: proto::ReadParams) -> Result<Value, RpcError
 }
 
 async fn input(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
-    let (term, bytes) = {
+    let input = {
         let mut reg = lock(registry);
         reg.refresh()?;
         match method {
-            Method::Keys | Method::TerminalKeys => reg.keys(&params(request)?)?,
+            Method::Keys => reg.keys(&params(request)?, false)?,
+            Method::TerminalKeys => reg.keys(&params(request)?, true)?,
             Method::Model => reg.model(params(request)?)?,
+            Method::Input => reg.typed(params(request)?)?,
             _ => reg.send(params(request)?)?,
         }
     };
-    let wrote = blocking(move || term.write(&bytes)).await?;
-    wrote.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
+    input.write().await?;
     Ok(empty())
 }
 

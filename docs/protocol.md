@@ -72,10 +72,10 @@ The visible screen, or with `history` the scrollback and screen, as plain text; 
 
 ### `send`
 
-Type text into the terminal.
+Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint\n"}}
+{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
@@ -117,7 +117,7 @@ Resize the terminal; the program gets SIGWINCH.
 
 ### `attach`
 
-Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection.
+Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"attach","params":{"name":"build"}}
@@ -171,7 +171,7 @@ Stream a running terminal's screen. After the response the server writes screen 
 
 ### `terminal.input`
 
-Type text into the terminal, as `send`.
+Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.input","params":{"terminal":"build","text":"make lint"}}
@@ -180,7 +180,7 @@ Type text into the terminal, as `send`.
 
 ### `terminal.keys`
 
-Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.
+Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
@@ -320,6 +320,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32006 | `READONLY` |
 | -32007 | `NO_LINK` |
 | -32008 | `IO` |
+| -32009 | `DRAFT_HELD` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 / server 56de739: protocol 2 vs 1; restart shed serve"}}

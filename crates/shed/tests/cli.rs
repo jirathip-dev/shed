@@ -207,7 +207,6 @@ fn run_read_send_exit_ls_and_labels_match_the_golden() {
     t.run(&["read", "shell"]);
     t.run(&["--json", "read", "shell", "--lines", "1"]);
     t.run(&["send", "shell", "exit"]);
-    t.run(&["keys", "shell", "enter"]);
     eventually("the shell to exit", || {
         stdout(&shed_in(&dir, &["get", "shell"])).contains("\"exited\"")
     });
@@ -258,7 +257,7 @@ fn a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each() {
     ]);
     t.run(&["read", "agent"]);
     t.run(&["read", "agent", "--history"]);
-    t.run(&["send", "agent", "\n"]);
+    t.run(&["send", "agent", ""]);
     t.run(&[
         "--json",
         "wait",
@@ -272,7 +271,7 @@ fn a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each() {
     t.run(&["state", "agent", "blocked", "--note", "needs review"]);
     t.run(&["--json", "get", "agent"]);
     t.run(&["state", "agent", "sleeping"]);
-    t.run(&["send", "agent", "\n"]);
+    t.run(&["send", "agent", ""]);
     t.run(&["wait", "agent", "--until", "working"]);
     t.check();
 }
@@ -594,14 +593,27 @@ fn timing_report() {
     let _server = Server::start(&dir);
     stdout(&shed_in(
         &dir,
-        &["run", "--name", "t", "--cwd", d, "--", "sleep", "100"],
+        &[
+            "run",
+            "--name",
+            "t",
+            "--cwd",
+            d,
+            "--",
+            "sh",
+            "-c",
+            "exec cat >/dev/null",
+        ],
     ));
-    for args in [
+    let calls = [
         &["ls"][..],
         &["get", "t"],
         &["read", "t"],
+        &["send", "t", "x"],
+        &["keys", "t", "enter"],
         &["exec", "--", "true"],
-    ] {
+    ];
+    for args in calls {
         let mut ms: Vec<f64> = (0..CALLS)
             .map(|_| {
                 let start = Instant::now();
