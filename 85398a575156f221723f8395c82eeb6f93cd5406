@@ -1,0 +1,5 @@
+Decided: merged origin/staging b4ef743 (#89, #79, #94, #95); imports keep both sides and the shared start helper unsets SHED_ACP_MCP and SHED_ACP_META
+Because: crates/shed-server/src/acp.rs:1033
+Rejected: none
+Check: scripts/bench-fanout.sh against staging b4ef743: head/base 98%, exit 0; just cap 8402/10000
+Owner: The branch is up to date with staging again, keeping the new session options alongside token use, session list and close.
