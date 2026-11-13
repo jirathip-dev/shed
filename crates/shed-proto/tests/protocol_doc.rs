@@ -313,11 +313,9 @@ fn send_example() -> (Value, Value) {
 fn example(method: Method) -> (Value, Value) {
     let running = || to_value(info(State::Running)).unwrap();
     let exited = || to_value(info(State::Exited)).unwrap();
+    let hello = || to_value(peer("4254d78", PROTOCOL)).unwrap();
     match method {
-        Method::Hello => {
-            let hello = to_value(peer("4254d78", PROTOCOL)).unwrap();
-            (hello.clone(), hello)
-        }
+        Method::Hello => (hello(), hello()),
         Method::Run => (run_params(), running()),
         Method::Ls => (
             to_value(LsParams {
@@ -394,6 +392,7 @@ fn example(method: Method) -> (Value, Value) {
         ),
         Method::MachineLinks => links_example(),
         Method::Exec | Method::FileRead | Method::FileWrite => exec_example(method),
+        Method::Heartbeat => (json!({}), json!({})),
         Method::Discover => {
             let doc = openrpc();
             (

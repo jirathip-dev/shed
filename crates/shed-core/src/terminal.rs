@@ -18,6 +18,7 @@ use crate::{Error, keys};
 
 const REAP: Duration = Duration::from_millis(20);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const OUTPUT_BEHIND: usize = 256;
 
 /// Why [`Terminal::wait_until`] returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,7 +98,7 @@ pub struct Terminal {
     pid: i32,
 }
 
-type Outputs = Mutex<Option<Vec<mpsc::UnboundedSender<Arc<[u8]>>>>>;
+type Outputs = Mutex<Option<Vec<mpsc::Sender<Arc<[u8]>>>>>;
 type Input = (Vec<u8>, SyncSender<std::io::Result<()>>);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -316,10 +317,10 @@ impl Terminal {
     }
 
     /// The program's raw output from now on, chunk by chunk, each chunk shared by all subscribers; the
-    /// channel closes when the PTY does.
+    /// channel closes when the PTY does, or, for a receiver 256 chunks behind, after those chunks.
     #[must_use]
-    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<Arc<[u8]>> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    pub fn subscribe(&self) -> mpsc::Receiver<Arc<[u8]>> {
+        let (tx, rx) = mpsc::channel(OUTPUT_BEHIND);
         if let Some(subs) = lock(&self.outputs).as_mut() {
             subs.push(tx);
         }
@@ -506,7 +507,7 @@ fn feed_loop(
         };
         if let Some(subs) = lock(outputs).as_mut().filter(|s| !s.is_empty()) {
             let shared: Arc<[u8]> = relayed.as_slice().into();
-            subs.retain(|tx| tx.send(Arc::clone(&shared)).is_ok());
+            subs.retain(|tx| tx.try_send(Arc::clone(&shared)).is_ok());
         }
         if log.as_ref().is_some_and(|l| l.send(relayed).is_err()) {
             log = None;

@@ -833,8 +833,9 @@ fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
     let mut out = io::stdout().lock();
     for line in client.split().0.lines() {
         let mut line = line?;
-        if let Some(m) = &server.on {
-            let mut event: Event = serde_json::from_str(&line)?;
+        if let Some(m) = &server.on
+            && let Ok(mut event) = serde_json::from_str::<Event>(&line)
+        {
             let prefix = format!("{}/", m.name);
             if server.linked && !event.name.starts_with(&prefix) {
                 continue;

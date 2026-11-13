@@ -162,6 +162,16 @@ impl Paths {
 
 type Shared = Arc<Mutex<Registry>>;
 
+pub(crate) const HEARTBEAT: Duration = Duration::from_secs(15);
+pub(crate) const WRITE_TIMEOUT: Duration = HEARTBEAT.saturating_mul(2);
+
+async fn send(out: &mut tokio::net::unix::OwnedWriteHalf, bytes: &[u8]) -> bool {
+    matches!(
+        tokio::time::timeout(WRITE_TIMEOUT, out.write_all(bytes)).await,
+        Ok(Ok(()))
+    )
+}
+
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -395,6 +405,7 @@ fn raise_open_files() {
 #[derive(Default)]
 struct Session {
     hello: bool,
+    beats: bool,
     stream: Option<Stream>,
     watching: Option<String>,
     readonly: BTreeSet<String>,
@@ -428,7 +439,21 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
     let (read, out) = stream.into_split();
     let (mut out, mut streaming) = (Some(out), tokio::task::JoinSet::new());
     let mut lines = tokio::io::BufReader::new(read).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    loop {
+        let read = async {
+            if session.beats {
+                tokio::time::timeout(WRITE_TIMEOUT, lines.next_line()).await
+            } else {
+                Ok(lines.next_line().await)
+            }
+        };
+        let next = tokio::select! {
+            next = read => next,
+            Some(_) = streaming.join_next() => return,
+        };
+        let Ok(Ok(Some(line))) = next else {
+            return;
+        };
         if line.trim().is_empty() {
             continue;
         }
@@ -439,14 +464,14 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
             bytes.push(b'\n');
-            if out.write_all(&bytes).await.is_err() {
+            if !send(out, &bytes).await {
                 return;
             }
         }
         if let Some(stream) = session.stream.take()
             && let Some(out) = out.take()
         {
-            streaming.spawn(stream.run(out));
+            streaming.spawn(stream.run(out, session.beats));
         }
     }
 }
@@ -540,6 +565,10 @@ async fn dispatch(
             ErrorCode::NoHello,
             "send hello with your version first",
         ));
+    }
+    if method == Method::Heartbeat {
+        session.beats = true;
+        return Ok(empty());
     }
     if let Some(name) = readonly(method, request, session) {
         return Err(RpcError::new(ErrorCode::ReadOnly, name));
@@ -971,4 +1000,61 @@ fn temp_dir(name: &str) -> PathBuf {
     fs::create_dir_all(&dir).expect("temp dir");
     MADE.with(|m| m.0.borrow_mut().push(dir.clone()));
     dir
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::unix::OwnedWriteHalf;
+
+    async fn peer(name: &str, beat: bool) -> (tokio::task::JoinHandle<()>, OwnedWriteHalf) {
+        let dir = temp_dir(name);
+        let reg = Registry::load(&dir.join("state.json"), &dir.join("shed.sock"));
+        let registry = Arc::new(Mutex::new(reg.expect("a registry")));
+        let (server, client) = tokio::net::UnixStream::pair().expect("pair");
+        let conn = tokio::spawn(connection(registry, Arc::default(), server));
+        let (read, mut write) = client.into_split();
+        let hello = Request::new(
+            1,
+            Method::Hello,
+            serde_json::to_value(Hello::ours()).expect("hello"),
+        );
+        let mut line = serde_json::to_vec(&hello).expect("json");
+        line.push(b'\n');
+        write.write_all(&line).await.expect("hello sent");
+        let mut lines = tokio::io::BufReader::new(read).lines();
+        let answer = lines
+            .next_line()
+            .await
+            .expect("read")
+            .expect("a hello back");
+        assert!(answer.contains(r#""result""#), "{answer}");
+        if beat {
+            let heartbeat = notification(Method::Heartbeat, &empty()).expect("json");
+            write.write_all(&heartbeat).await.expect("heartbeat sent");
+        }
+        (conn, write)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_peer_is_dropped_after_two_missed_heartbeats() {
+        let (served, _write) = peer("silent", true).await;
+        let start = clock::tokio_now();
+        tokio::time::sleep((HEARTBEAT * 2).saturating_sub(Duration::from_millis(1))).await;
+        assert!(!served.is_finished(), "kept through the second beat");
+        served.await.expect("the connection ends");
+        assert_eq!(start.elapsed(), HEARTBEAT * 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_beating_peer_is_kept_and_one_that_never_beat_is_never_timed_out() {
+        let (beating, mut write) = peer("beating", true).await;
+        let (quiet, _write) = peer("quiet", false).await;
+        let heartbeat = notification(Method::Heartbeat, &empty()).expect("json");
+        for _ in 0..8 {
+            tokio::time::sleep(HEARTBEAT).await;
+            write.write_all(&heartbeat).await.expect("heartbeat sent");
+        }
+        assert!(!beating.is_finished() && !quiet.is_finished());
+    }
 }

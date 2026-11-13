@@ -47,7 +47,7 @@ around lanes:
 | `shed state <t> working\|blocked\|done\|error [--note TEXT]` | Report state (also via `$SHED` + OSC 7501-compatible escape). |
 | `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
-| `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays the last 1,000. |
+| `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
 | `shed top` | The terminals by memory use, largest first. |
 | `shed watch [--label k=v]` | A live list of the terminals beside a read-only preview of the selected one; Enter attaches, `Ctrl+\` comes back, `/` filters, `q` quits. |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
