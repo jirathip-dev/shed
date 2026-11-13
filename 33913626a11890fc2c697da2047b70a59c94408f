@@ -1,0 +1,12 @@
+Decided: when the process table cannot be read, kill sends SIGKILL to the terminal's process group instead of failing.
+Because: crates/shed-core/src/terminal.rs:369
+Rejected: retrying the kill in the EMFILE test — it hides that a server at its fd limit cannot end a session on Linux, where listing processes opens /proc files.
+Decided: the bounded-output test floods with a shell loop of small writes instead of `yes`.
+Because: crates/shed-core/tests/terminal.rs:115
+Rejected: a longer deadline — `yes` makes the feed loop parse large merged batches in a debug build, 5.5 s here and over 10 s on the macOS runner.
+Decided: heartbeats are opt-in per connection; the ACP bridge writer and machine links opt in.
+Because: "A heartbeat every 15 s in both directions; a peer that misses 2 is dropped."
+Decided: a subscriber more than 4,096 events behind is closed with a `lagged` line; a `since` older than the ring gets a `reset` line first.
+Because: "A subscriber more than N events behind is dropped with a `lagged` notice, and it resumes with `since` or gets a reset."
+Check: reliability.rs emfile test failed the same way on staging run 43345942623, so it predates this branch; the fallback removes its race.
+Owner: slow or silent clients of shed serve are cut off instead of filling memory, and a session can still be killed when the server has run out of open files.
