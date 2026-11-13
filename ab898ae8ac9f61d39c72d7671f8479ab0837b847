@@ -1,0 +1,14 @@
+Decided: a reply waits only for the urgent saves its own request made (task-local), never for another client's or a refresh's save
+Because: crates/shed-server/src/registry.rs:132
+Because: crates/shed-server/src/lib.rs:433
+Decided: lock.rs flake was real: ls waited ~210 ms on another request's state-file fsync, slow on Ubuntu; no timing bound was relaxed
+Because: "Fix the cause where there is one."
+Decided: kill_tree signals and watches the process group when the process table cannot be read, so kill works out of fds
+Because: crates/shed-core/src/proctree.rs:207
+Rejected: retrying kill in the EMFILE test — kill must work when the server is out of fds
+Decided: the fd-release test compares <= baseline: its baseline could count the readiness probe's server-side socket still closing (also failed on staging 62e565a)
+Because: crates/shed/tests/reliability.rs:428
+Decided: kept drover over staging's pin of the pre-rename herdsman; the merge kept staging's debounced saver and scoped its wait per request
+Check: commit 1 fails both new tests; head passes; Ubuntu 10-run loop log: actions run 43361288177 job 131675146427
+Check: on staging's saver without the scoping, a_state_save_that_never_finishes_holds_up_no_other_request fails
+Owner: Staging CI green again; two real server bugs fixed, the rules job uses drover
