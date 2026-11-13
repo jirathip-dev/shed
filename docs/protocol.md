@@ -15,11 +15,12 @@ product or version is refused with `SHED_VERSION: client shed x, server shed y; 
 A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is
 the exit status (128 + N for signal N), `null` while running or when the program was lost in a server
 restart; `pid` is set while running; `reported` is the state the program last reported (absent until
-then); `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory
-(MiB) and CPU (percent of one core) at the last sample, while running; an ACP terminal's `session` is its
-agent session (`id`, for `run`'s `resume`; the current `model` and the `models`, `[id, name]`; `run`'s
-`mcp_servers` with each env and header value as `***`; the agent's slash `commands`, `[name, description,
-hint]`).
+then), or `stuck` while the program has left input unread for over a second (`send`, `keys` and
+`acp.model` then fail, their input queued); `idle_after` is set when the `idle` fallback is on;
+`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while
+running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`
+and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
+slash `commands`, `[name, description, hint]`).
 
 ## Methods
 
@@ -228,6 +229,15 @@ Each configured machine's held link: `up`, `reconnecting` or `down`, since when,
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
 {"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+```
+
+### `rpc.discover`
+
+The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0"},"openrpc":"1.3.2"}}
 ```
 
 ## Events
