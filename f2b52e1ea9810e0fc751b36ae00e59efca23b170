@@ -1,0 +1,9 @@
+Decided: a turn's baseline of the agent's own processes is the tree from the latest scan (session ready, turn end, 5 s poll), not a scan at prompt start
+Because: crates/shed-server/src/acp.rs:575
+Rejected: a scan when the prompt is sent — it sat between send and the agent and made bench-acp throughput 151% of base
+Rejected: scans on a blocking task — paused-clock tests would race the scan against the scripted kill
+Decided: the macOS reliability failure (pty ENXIO at s62) is runner pty exhaustion in a terminal test this PR does not touch
+Check: bench-acp on CI is within 110% at the new head
+Decided: a woken session clears ended and child at ready, by the baseline scan, and each prompt sets own to the latest tree, so run stays under 100 lines
+Check: a helper the agent starts between two scans counts as spawned for that turn only, as before
+Owner: the lane-state change no longer slows every ACP turn; nothing else changes
