@@ -1,0 +1,12 @@
+Decided: run, kill and rm replies still wait for disk; state, session and refresh saves are debounced to 500 ms
+Because: "at most one save per 500 ms, and an immediate save on shutdown"
+Rejected: every reply waits for disk as #72 did — each bridge state RPC would force a write and AC2 could not hold
+Decided: the final save runs before terminals are ended at shutdown
+Because: crates/shed-server/src/lib.rs:316
+Rejected: saving after the kills — keep terminals would be saved exited and never come back as shells
+Decided: exited_at lives in a private flattened Saved wrapper, so the wire TerminalInfo is unchanged
+Because: crates/shed-server/src/registry.rs:65
+Decided: prune keeps history and transcript files; the existing orphan sweep at the next start removes them
+Because: "with their transcripts kept on disk under their existing cap"
+Check: the burst test counts real file writes on a paused clock; with the wait set to zero it sees 1000 writes
+Owner: the server saves its state at most twice a second and drops exited terminals a day after they end
