@@ -1,5 +1,5 @@
 use shed_core::runner::ExitStatus;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
-use shed_core::proctree::{self, ProcessInfo};
+use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_core::{History, Report, STATES, Size, Terminal};
 use shed_proto::{
     EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams, MachineStats,
@@ -203,6 +203,35 @@ fn spawn(
     Ok(term)
 }
 
+fn end_left_over(state: &Path, terminals: &[TerminalInfo]) {
+    let dir = state.parent().unwrap_or(Path::new("."));
+    let sample = crate::stats::system(dir);
+    let booted = sample.at.saturating_sub(sample.uptime_s);
+    let saved = fs::metadata(state).and_then(|m| m.modified());
+    let saved = saved.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok());
+    if sample.uptime_s > 0 && saved.is_none_or(|t| t.as_secs() < booted) {
+        return;
+    }
+    let procs = proctree::system().list().unwrap_or_default();
+    for info in terminals.iter().filter(|i| i.state == State::Running) {
+        let Some(pid) = info
+            .pid
+            .filter(|&p| u32::try_from(p).ok() != Some(shed_core::runner::pid()))
+        else {
+            continue;
+        };
+        let left = proctree::tree(&procs, pid, &BTreeSet::new()).len();
+        if left > 0 && proctree::kill_tree(&proctree::system(), pid, GRACE, || {}).is_ok() {
+            let name = &info.name;
+            writeln!(
+                io::stderr(),
+                "shed serve: ended terminal {name}'s process group {pid} ({left} processes), left running by the last server"
+            )
+            .ok();
+        }
+    }
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -220,6 +249,7 @@ impl Registry {
             },
             Err(e) => return Err(e),
         };
+        end_left_over(path, &file.terminals);
         let shell = crate::config::var("SHELL").unwrap_or_else(|| "/bin/sh".to_owned());
         let mut entries = BTreeMap::new();
         let mut events = Events::default();
@@ -507,8 +537,10 @@ impl Registry {
         let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
         let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
         let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
+        let meta = serde_json::to_string(&p.meta).map_err(internal)?;
+        let meta = p.meta.is_some().then_some(("SHED_ACP_META", meta.as_str()));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
-        let acp: Vec<_> = resume.into_iter().chain(mcp).chain(awake).collect();
+        let acp: Vec<_> = [resume, mcp, meta, awake].into_iter().flatten().collect();
         let term = spawn(
             size(p.rows, p.cols),
             &p.cmd,
