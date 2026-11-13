@@ -1,0 +1,5 @@
+Decided: merged origin/staging a2befd9 (#80); feed_loop applies every OSC 7501 report and writes the probe reply
+Because: crates/shed-core/src/terminal.rs:492
+Rejected: keeping this branch's read_loop body — #80 moved screen feeding to its own thread
+Check: TMPDIR=<fresh dir> cargo test --workspace --no-fail-fast fails only machine_stats_..._within_5_s, the known host uptime 0 failure; temp-left exits 0
+Owner: the branch is current with staging again; status reports still reach the terminal after the faster output path
