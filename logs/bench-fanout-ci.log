@@ -1,0 +1,468 @@
+﻿2026-11-13T00:00:28.9145875Z Current runner version: '2.338.2'
+2026-11-13T00:00:28.9165099Z ##[group]Runner Image Provisioner
+2026-11-13T00:00:28.9165723Z Hosted Compute Agent
+2026-11-13T00:00:28.9166098Z Version: 20261028.624
+2026-11-13T00:00:28.9166523Z Commit: 54898b74c23fde5556c9b3c3a2290865feef0dfe
+2026-11-13T00:00:28.9167001Z Build Date: 2026-10-28T21:51:42Z
+2026-11-13T00:00:28.9167425Z Worker ID: {5877da4b-d96d-4cae-87a9-6298b3c52e25}
+2026-11-13T00:00:28.9167843Z Region: centralus
+2026-11-13T00:00:28.9168278Z Cloud: Azure
+2026-11-13T00:00:28.9168651Z ##[endgroup]
+2026-11-13T00:00:28.9169548Z ##[group]Operating System
+2026-11-13T00:00:28.9169925Z Ubuntu
+2026-11-13T00:00:28.9170381Z 24.04.5
+2026-11-13T00:00:28.9170751Z LTS
+2026-11-13T00:00:28.9171106Z ##[endgroup]
+2026-11-13T00:00:28.9171471Z ##[group]Runner Image
+2026-11-13T00:00:28.9171872Z Image: ubuntu-24.04
+2026-11-13T00:00:28.9172224Z Version: 20261101.360.1
+2026-11-13T00:00:28.9173096Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261101.360/images/ubuntu/Ubuntu2404-Readme.md
+2026-11-13T00:00:28.9174020Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261101.360
+2026-11-13T00:00:28.9174630Z ##[endgroup]
+2026-11-13T00:00:28.9175391Z ##[group]GITHUB_TOKEN Permissions
+2026-11-13T00:00:28.9176837Z Contents: read
+2026-11-13T00:00:28.9177197Z Metadata: read
+2026-11-13T00:00:28.9177622Z Packages: read
+2026-11-13T00:00:28.9177973Z ##[endgroup]
+2026-11-13T00:00:28.9179451Z Secret source: Actions
+2026-11-13T00:00:28.9180051Z Cache mode: write
+2026-11-13T00:00:28.9181000Z Prepare workflow directory
+2026-11-13T00:00:28.9446670Z Prepare all required actions
+2026-11-13T00:00:28.9479887Z Getting action download info
+2026-11-13T00:00:29.1829385Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-11-13T00:00:29.2738803Z Download action repository 'dtolnay/rust-toolchain@1.97.1' (SHA:59a558e8c538bf4a23bbffa19e5a278b703f2920)
+2026-11-13T00:00:29.5362281Z Complete job name: bench-fanout
+2026-11-13T00:00:29.5992479Z ##[group]Run actions/checkout@v4
+2026-11-13T00:00:29.5992896Z with:
+2026-11-13T00:00:29.5993140Z   repository: jirathip-dev/shed
+2026-11-13T00:00:29.5995199Z   token: ***
+2026-11-13T00:00:29.5995434Z   ssh-strict: true
+2026-11-13T00:00:29.5995671Z   ssh-user: git
+2026-11-13T00:00:29.5995973Z   persist-credentials: true
+2026-11-13T00:00:29.5996378Z   clean: true
+2026-11-13T00:00:29.5996645Z   sparse-checkout-cone-mode: true
+2026-11-13T00:00:29.5996958Z   fetch-depth: 1
+2026-11-13T00:00:29.5997326Z   fetch-tags: false
+2026-11-13T00:00:29.5997720Z   show-progress: true
+2026-11-13T00:00:29.5998059Z   lfs: false
+2026-11-13T00:00:29.5998421Z   submodules: false
+2026-11-13T00:00:29.5998765Z   set-safe-directory: true
+2026-11-13T00:00:29.5999156Z   allow-unsafe-pr-checkout: false
+2026-11-13T00:00:29.5999762Z env:
+2026-11-13T00:00:29.6000086Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:29.6000598Z ##[endgroup]
+2026-11-13T00:00:29.8362144Z Syncing repository: jirathip-dev/shed
+2026-11-13T00:00:29.8364962Z ##[group]Getting Git version info
+2026-11-13T00:00:29.8365882Z Working directory is '/home/runner/work/shed/shed'
+2026-11-13T00:00:29.8367379Z [command]/usr/bin/git version
+2026-11-13T00:00:29.8429118Z git version 2.56.0
+2026-11-13T00:00:29.8445045Z ##[endgroup]
+2026-11-13T00:00:29.8456880Z Temporarily overriding HOME='/home/runner/work/_temp/b25f0078-3336-46ea-b6ea-29bccfa65ac2' before making global git config changes
+2026-11-13T00:00:29.8457878Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T00:00:29.8461378Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/shed/shed
+2026-11-13T00:00:29.8518110Z Deleting the contents of '/home/runner/work/shed/shed'
+2026-11-13T00:00:29.8521516Z ##[group]Initializing the repository
+2026-11-13T00:00:29.8524578Z [command]/usr/bin/git init /home/runner/work/shed/shed
+2026-11-13T00:00:29.8616857Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-13T00:00:29.8618206Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-13T00:00:29.8618837Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-13T00:00:29.8619349Z hint: call:
+2026-11-13T00:00:29.8619592Z hint:
+2026-11-13T00:00:29.8619916Z hint: 	git config --global init.defaultBranch <name>
+2026-11-13T00:00:29.8620510Z hint:
+2026-11-13T00:00:29.8620851Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-13T00:00:29.8621438Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-13T00:00:29.8621879Z hint:
+2026-11-13T00:00:29.8622133Z hint: 	git branch -m <name>
+2026-11-13T00:00:29.8622416Z hint:
+2026-11-13T00:00:29.8622786Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-13T00:00:29.8628604Z Initialized empty Git repository in /home/runner/work/shed/shed/.git/
+2026-11-13T00:00:29.8638624Z [command]/usr/bin/git remote add origin https://github.com/jirathip-dev/shed
+2026-11-13T00:00:29.8684544Z ##[endgroup]
+2026-11-13T00:00:29.8685091Z ##[group]Disabling automatic garbage collection
+2026-11-13T00:00:29.8688164Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-13T00:00:29.8724841Z ##[endgroup]
+2026-11-13T00:00:29.8725339Z ##[group]Setting up auth
+2026-11-13T00:00:29.8731832Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T00:00:29.8767897Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T00:00:29.9135828Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T00:00:29.9174614Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T00:00:29.9377820Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T00:00:29.9425325Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T00:00:29.9647198Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-13T00:00:29.9698795Z ##[endgroup]
+2026-11-13T00:00:29.9699490Z ##[group]Fetching the repository
+2026-11-13T00:00:29.9711092Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +9fbf8409ed31689b22341eb59a95bfab3b8594fc:refs/remotes/pull/107/merge
+2026-11-13T00:00:30.5325708Z From https://github.com/jirathip-dev/shed
+2026-11-13T00:00:30.5327359Z  * [new ref]         9fbf8409ed31689b22341eb59a95bfab3b8594fc -> pull/107/merge
+2026-11-13T00:00:30.5338281Z ##[endgroup]
+2026-11-13T00:00:30.5339422Z ##[group]Determining the checkout info
+2026-11-13T00:00:30.5341019Z ##[endgroup]
+2026-11-13T00:00:30.5344376Z [command]/usr/bin/git sparse-checkout disable
+2026-11-13T00:00:30.5397194Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-13T00:00:30.5475975Z ##[group]Checking out the ref
+2026-11-13T00:00:30.5478674Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/107/merge
+2026-11-13T00:00:30.5656652Z Note: switching to 'refs/remotes/pull/107/merge'.
+2026-11-13T00:00:30.5657490Z 
+2026-11-13T00:00:30.5657994Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-13T00:00:30.5659266Z changes and commit them, and you can discard any commits you make in this
+2026-11-13T00:00:30.5660735Z state without impacting any branches by switching back to a branch.
+2026-11-13T00:00:30.5661438Z 
+2026-11-13T00:00:30.5661913Z If you want to create a new branch to retain commits you create, you may
+2026-11-13T00:00:30.5663190Z do so (now or later) by using -c with the switch command. Example:
+2026-11-13T00:00:30.5664386Z 
+2026-11-13T00:00:30.5664752Z   git switch -c <new-branch-name>
+2026-11-13T00:00:30.5665305Z 
+2026-11-13T00:00:30.5665693Z Or undo this operation with:
+2026-11-13T00:00:30.5666301Z 
+2026-11-13T00:00:30.5666707Z   git switch -
+2026-11-13T00:00:30.5667228Z 
+2026-11-13T00:00:30.5668021Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-13T00:00:30.5669165Z 
+2026-11-13T00:00:30.5670756Z HEAD is now at 9fbf840 Merge 9ef332c78d5a31a54449e2b48db869a881e653e9 into b5a69b2741ba57f5a58ed4d43b17f9d15344100d
+2026-11-13T00:00:30.5751995Z ##[endgroup]
+2026-11-13T00:00:30.5754429Z [command]/usr/bin/git log -1 --format=%H
+2026-11-13T00:00:30.5755914Z 9fbf8409ed31689b22341eb59a95bfab3b8594fc
+2026-11-13T00:00:30.6066956Z ##[group]Run actions/checkout@v4
+2026-11-13T00:00:30.6067639Z with:
+2026-11-13T00:00:30.6068222Z   ref: b5a69b2741ba57f5a58ed4d43b17f9d15344100d
+2026-11-13T00:00:30.6068991Z   path: base
+2026-11-13T00:00:30.6069558Z   repository: jirathip-dev/shed
+2026-11-13T00:00:30.6075347Z   token: ***
+2026-11-13T00:00:30.6075889Z   ssh-strict: true
+2026-11-13T00:00:30.6076450Z   ssh-user: git
+2026-11-13T00:00:30.6077021Z   persist-credentials: true
+2026-11-13T00:00:30.6077644Z   clean: true
+2026-11-13T00:00:30.6078216Z   sparse-checkout-cone-mode: true
+2026-11-13T00:00:30.6078903Z   fetch-depth: 1
+2026-11-13T00:00:30.6079463Z   fetch-tags: false
+2026-11-13T00:00:30.6080030Z   show-progress: true
+2026-11-13T00:00:30.6080718Z   lfs: false
+2026-11-13T00:00:30.6081245Z   submodules: false
+2026-11-13T00:00:30.6081830Z   set-safe-directory: true
+2026-11-13T00:00:30.6082490Z   allow-unsafe-pr-checkout: false
+2026-11-13T00:00:30.6083154Z env:
+2026-11-13T00:00:30.6083667Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:30.6084327Z ##[endgroup]
+2026-11-13T00:00:30.6694789Z Syncing repository: jirathip-dev/shed
+2026-11-13T00:00:30.6699719Z ##[group]Getting Git version info
+2026-11-13T00:00:30.6701096Z Working directory is '/home/runner/work/shed/shed/base'
+2026-11-13T00:00:30.6719437Z [command]/usr/bin/git version
+2026-11-13T00:00:30.6755089Z git version 2.56.0
+2026-11-13T00:00:30.6768945Z ##[endgroup]
+2026-11-13T00:00:30.6778236Z Temporarily overriding HOME='/home/runner/work/_temp/00b3edce-4774-48f9-abc1-89a4407d5b4c' before making global git config changes
+2026-11-13T00:00:30.6781313Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T00:00:30.6783923Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/shed/shed/base
+2026-11-13T00:00:30.6818713Z ##[group]Initializing the repository
+2026-11-13T00:00:30.6821064Z [command]/usr/bin/git init /home/runner/work/shed/shed/base
+2026-11-13T00:00:30.6858350Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-13T00:00:30.6860718Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-13T00:00:30.6863450Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-13T00:00:30.6865174Z hint: call:
+2026-11-13T00:00:30.6866153Z hint:
+2026-11-13T00:00:30.6867798Z hint: 	git config --global init.defaultBranch <name>
+2026-11-13T00:00:30.6869203Z hint:
+2026-11-13T00:00:30.6870681Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-13T00:00:30.6872984Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-13T00:00:30.6874656Z hint:
+2026-11-13T00:00:30.6875658Z hint: 	git branch -m <name>
+2026-11-13T00:00:30.6876716Z hint:
+2026-11-13T00:00:30.6878154Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-13T00:00:30.6880395Z Initialized empty Git repository in /home/runner/work/shed/shed/base/.git/
+2026-11-13T00:00:30.6884097Z [command]/usr/bin/git remote add origin https://github.com/jirathip-dev/shed
+2026-11-13T00:00:30.6900364Z ##[endgroup]
+2026-11-13T00:00:30.6901838Z ##[group]Disabling automatic garbage collection
+2026-11-13T00:00:30.6904528Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-13T00:00:30.6936024Z ##[endgroup]
+2026-11-13T00:00:30.6937704Z ##[group]Setting up auth
+2026-11-13T00:00:30.6941545Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T00:00:30.6975118Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T00:00:30.7193107Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T00:00:30.7237180Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T00:00:30.7443120Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T00:00:30.7482910Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T00:00:30.7676008Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-13T00:00:30.7864358Z ##[endgroup]
+2026-11-13T00:00:30.7865629Z ##[group]Fetching the repository
+2026-11-13T00:00:30.7871832Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin b5a69b2741ba57f5a58ed4d43b17f9d15344100d
+2026-11-13T00:00:31.2781877Z From https://github.com/jirathip-dev/shed
+2026-11-13T00:00:31.2782859Z  * branch            b5a69b2741ba57f5a58ed4d43b17f9d15344100d -> FETCH_HEAD
+2026-11-13T00:00:31.2784678Z ##[endgroup]
+2026-11-13T00:00:31.2785228Z ##[group]Determining the checkout info
+2026-11-13T00:00:31.2785695Z ##[endgroup]
+2026-11-13T00:00:31.2787946Z [command]/usr/bin/git sparse-checkout disable
+2026-11-13T00:00:31.2925664Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-13T00:00:31.2982851Z ##[group]Checking out the ref
+2026-11-13T00:00:31.2985524Z [command]/usr/bin/git checkout --progress --force b5a69b2741ba57f5a58ed4d43b17f9d15344100d
+2026-11-13T00:00:31.3283236Z Note: switching to 'b5a69b2741ba57f5a58ed4d43b17f9d15344100d'.
+2026-11-13T00:00:31.3284070Z 
+2026-11-13T00:00:31.3286037Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-13T00:00:31.3286447Z changes and commit them, and you can discard any commits you make in this
+2026-11-13T00:00:31.3286834Z state without impacting any branches by switching back to a branch.
+2026-11-13T00:00:31.3287050Z 
+2026-11-13T00:00:31.3287236Z If you want to create a new branch to retain commits you create, you may
+2026-11-13T00:00:31.3289112Z do so (now or later) by using -c with the switch command. Example:
+2026-11-13T00:00:31.3289415Z 
+2026-11-13T00:00:31.3289577Z   git switch -c <new-branch-name>
+2026-11-13T00:00:31.3289808Z 
+2026-11-13T00:00:31.3289961Z Or undo this operation with:
+2026-11-13T00:00:31.3290298Z 
+2026-11-13T00:00:31.3290429Z   git switch -
+2026-11-13T00:00:31.3290619Z 
+2026-11-13T00:00:31.3290895Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-13T00:00:31.3291242Z 
+2026-11-13T00:00:31.3291456Z HEAD is now at b5a69b2 cap: raise line_cap to 10000 (#106) (#109)
+2026-11-13T00:00:31.3298118Z ##[endgroup]
+2026-11-13T00:00:31.3390652Z [command]/usr/bin/git log -1 --format=%H
+2026-11-13T00:00:31.3449139Z b5a69b2741ba57f5a58ed4d43b17f9d15344100d
+2026-11-13T00:00:31.3702032Z ##[group]Run dtolnay/rust-toolchain@1.97.1
+2026-11-13T00:00:31.3702289Z with:
+2026-11-13T00:00:31.3702471Z env:
+2026-11-13T00:00:31.3702667Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:31.3702877Z ##[endgroup]
+2026-11-13T00:00:31.3748191Z ##[start-action display=Parse toolchain version;id=__dtolnay_rust-toolchain.parse]
+2026-11-13T00:00:31.3833176Z ##[group]Run if [[ -z $toolchain ]]; then
+2026-11-13T00:00:31.3833607Z if [[ -z $toolchain ]]; then
+2026-11-13T00:00:31.3834012Z   # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070
+2026-11-13T00:00:31.3834581Z   echo "'toolchain' is a required input" >&2
+2026-11-13T00:00:31.3834821Z   exit 1
+2026-11-13T00:00:31.3835087Z elif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then
+2026-11-13T00:00:31.3835393Z   if [[ Linux == macOS ]]; then
+2026-11-13T00:00:31.3835807Z     echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT
+2026-11-13T00:00:31.3836161Z   else
+2026-11-13T00:00:31.3836457Z     echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT
+2026-11-13T00:00:31.3836771Z   fi
+2026-11-13T00:00:31.3837012Z elif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then
+2026-11-13T00:00:31.3837374Z   echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT
+2026-11-13T00:00:31.3837715Z elif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then
+2026-11-13T00:00:31.3838085Z   echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT
+2026-11-13T00:00:31.3838429Z else
+2026-11-13T00:00:31.3838610Z   delimiter=EOF
+2026-11-13T00:00:31.3838860Z   while [[ $toolchain == *$delimiter* ]]; do delimiter+=_; done
+2026-11-13T00:00:31.3839221Z   printf 'toolchain<<%s\n%s\n%s\n' "$delimiter" "$toolchain" "$delimiter" >> $GITHUB_OUTPUT
+2026-11-13T00:00:31.3839521Z fi
+2026-11-13T00:00:31.3859329Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:31.3859593Z env:
+2026-11-13T00:00:31.3859779Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:31.3859980Z   toolchain: 1.97.1
+2026-11-13T00:00:31.3860321Z ##[endgroup]
+2026-11-13T00:00:31.3935028Z ##[end-action id=__dtolnay_rust-toolchain.parse;outcome=success;conclusion=success;duration_ms=18]
+2026-11-13T00:00:31.3938423Z ##[start-action display=Set $CARGO_HOME;id=__dtolnay_rust-toolchain.__run]
+2026-11-13T00:00:31.3967395Z ##[group]Run echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+2026-11-13T00:00:31.3967752Z echo CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV
+2026-11-13T00:00:31.3983184Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:31.3983594Z env:
+2026-11-13T00:00:31.3983837Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:31.3984105Z ##[endgroup]
+2026-11-13T00:00:31.4026338Z ##[end-action id=__dtolnay_rust-toolchain.__run;outcome=success;conclusion=success;duration_ms=8]
+2026-11-13T00:00:31.4028117Z ##[start-action display=Install rustup if needed;id=__dtolnay_rust-toolchain.__run_2]
+2026-11-13T00:00:31.4051812Z ##[group]Run if ! command -v rustup &>/dev/null; then
+2026-11-13T00:00:31.4052104Z if ! command -v rustup &>/dev/null; then
+2026-11-13T00:00:31.4052633Z   curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y
+2026-11-13T00:00:31.4053147Z   echo "$CARGO_HOME/bin" >> $GITHUB_PATH
+2026-11-13T00:00:31.4053380Z fi
+2026-11-13T00:00:31.4067752Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:31.4068005Z env:
+2026-11-13T00:00:31.4068361Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:31.4068581Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:31.4068792Z ##[endgroup]
+2026-11-13T00:00:31.4126680Z ##[end-action id=__dtolnay_rust-toolchain.__run_2;outcome=success;conclusion=success;duration_ms=9]
+2026-11-13T00:00:31.4128516Z ##[start-action display=Install rustup if needed on windows;id=__dtolnay_rust-toolchain.__run_3]
+2026-11-13T00:00:31.4134664Z ##[end-action id=__dtolnay_rust-toolchain.__run_3;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-13T00:00:31.4144890Z ##[start-action display=rustup toolchain install 1.97.1;id=__dtolnay_rust-toolchain.__run_4]
+2026-11-13T00:00:31.4164448Z ##[group]Run set -f  # split targets and components on commas and whitespace, without glob expansion
+2026-11-13T00:00:31.4164919Z set -f  # split targets and components on commas and whitespace, without glob expansion
+2026-11-13T00:00:31.4165238Z flags=()
+2026-11-13T00:00:31.4165487Z for t in ${targets//,/ }; do flags+=(--target "$t"); done
+2026-11-13T00:00:31.4165800Z for c in ${components//,/ }; do flags+=(--component "$c"); done
+2026-11-13T00:00:31.4166166Z if [[ $toolchain == nightly && -n $components ]]; then flags+=(--allow-downgrade); fi
+2026-11-13T00:00:31.4166477Z log=$(mktemp)
+2026-11-13T00:00:31.4166690Z trap 'rm -f "$log"' EXIT
+2026-11-13T00:00:31.4166910Z for attempt in 1 2 3 4 5; do
+2026-11-13T00:00:31.4167315Z   if rustup toolchain install "$toolchain" "${flags[@]}" --profile minimal --no-self-update --force-non-host 2>&1 | tee "$log"; then
+2026-11-13T00:00:31.4167721Z     break
+2026-11-13T00:00:31.4167906Z   else
+2026-11-13T00:00:31.4168096Z     status=$?
+2026-11-13T00:00:31.4168290Z   fi
+2026-11-13T00:00:31.4168536Z   if [[ $attempt == 5 ]] || ! grep -Fq 'checksum failed for ' "$log" \
+2026-11-13T00:00:31.4168939Z       || ! grep -Fq 'this is likely due to an ongoing update of the official release server' "$log"; then
+2026-11-13T00:00:31.4169284Z     exit "$status"
+2026-11-13T00:00:31.4169483Z   fi
+2026-11-13T00:00:31.4169757Z   echo "Retrying rustup toolchain install in 30 seconds (retry $attempt of 4)" >&2
+2026-11-13T00:00:31.4170065Z   sleep 30
+2026-11-13T00:00:31.4170398Z done
+2026-11-13T00:00:31.4185117Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:31.4185370Z env:
+2026-11-13T00:00:31.4185552Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:31.4185766Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:31.4185988Z   toolchain: 1.97.1
+2026-11-13T00:00:31.4186175Z   targets: 
+2026-11-13T00:00:31.4186352Z   components: 
+2026-11-13T00:00:31.4186546Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-11-13T00:00:31.4186751Z ##[endgroup]
+2026-11-13T00:00:31.4637380Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-11-13T00:00:31.6331442Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-11-13T00:00:31.6332702Z info: downloading 3 components
+2026-11-13T00:00:38.0429065Z 
+2026-11-13T00:00:38.0491571Z   1.97.1-x86_64-unknown-linux-gnu installed - rustc 1.97.1 (8bab26f4f 2026-07-14)
+2026-11-13T00:00:38.0491959Z 
+2026-11-13T00:00:38.0623099Z ##[end-action id=__dtolnay_rust-toolchain.__run_4;outcome=success;conclusion=success;duration_ms=6647]
+2026-11-13T00:00:38.0629808Z ##[start-action display=rustup default 1.97.1;id=__dtolnay_rust-toolchain.__run_5]
+2026-11-13T00:00:38.0647710Z ##[group]Run rustup default "$toolchain" --force-non-host
+2026-11-13T00:00:38.0647957Z rustup default "$toolchain" --force-non-host
+2026-11-13T00:00:38.0664529Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.0664715Z env:
+2026-11-13T00:00:38.0664830Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.0664967Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.0665107Z   toolchain: 1.97.1
+2026-11-13T00:00:38.0665228Z ##[endgroup]
+2026-11-13T00:00:38.0733526Z info: using existing install for 1.97.1-x86_64-unknown-linux-gnu
+2026-11-13T00:00:38.0740025Z info: default toolchain set to 1.97.1-x86_64-unknown-linux-gnu
+2026-11-13T00:00:38.0740295Z 
+2026-11-13T00:00:38.0797874Z   1.97.1-x86_64-unknown-linux-gnu unchanged - rustc 1.97.1 (8bab26f4f 2026-07-14)
+2026-11-13T00:00:38.0798149Z 
+2026-11-13T00:00:38.0798549Z info: note that the toolchain '1.97.1-x86_64-unknown-linux-gnu' is currently in use (overridden by '/home/runner/work/shed/shed/rust-toolchain.toml')
+2026-11-13T00:00:38.0814695Z ##[end-action id=__dtolnay_rust-toolchain.__run_5;outcome=success;conclusion=success;duration_ms=18]
+2026-11-13T00:00:38.0817987Z ##[start-action display=Create cachekey;id=__dtolnay_rust-toolchain.rustc-version]
+2026-11-13T00:00:38.0834561Z ##[group]Run DATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+2026-11-13T00:00:38.0835066Z DATE=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')
+2026-11-13T00:00:38.0835452Z HASH=$(rustc +"$toolchain" --version --verbose | sed -ne 's/^commit-hash: //p')
+2026-11-13T00:00:38.0835741Z echo "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT
+2026-11-13T00:00:38.0855381Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.0855567Z env:
+2026-11-13T00:00:38.0855683Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.0855820Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.0855959Z   toolchain: 1.97.1
+2026-11-13T00:00:38.0856077Z ##[endgroup]
+2026-11-13T00:00:38.1103690Z ##[end-action id=__dtolnay_rust-toolchain.rustc-version;outcome=success;conclusion=success;duration_ms=28]
+2026-11-13T00:00:38.1105697Z ##[start-action display=Disable incremental compilation;id=__dtolnay_rust-toolchain.__run_6]
+2026-11-13T00:00:38.1123027Z ##[group]Run if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+2026-11-13T00:00:38.1123267Z if [ -z "${CARGO_INCREMENTAL+set}" ]; then
+2026-11-13T00:00:38.1123451Z   echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV
+2026-11-13T00:00:38.1123614Z fi
+2026-11-13T00:00:38.1139829Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.1140013Z env:
+2026-11-13T00:00:38.1140129Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.1140424Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.1140565Z ##[endgroup]
+2026-11-13T00:00:38.1174835Z ##[end-action id=__dtolnay_rust-toolchain.__run_6;outcome=success;conclusion=success;duration_ms=6]
+2026-11-13T00:00:38.1176187Z ##[start-action display=Enable colors in Cargo output;id=__dtolnay_rust-toolchain.__run_7]
+2026-11-13T00:00:38.1191925Z ##[group]Run if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+2026-11-13T00:00:38.1192132Z if [ -z "${CARGO_TERM_COLOR+set}" ]; then
+2026-11-13T00:00:38.1192317Z   echo CARGO_TERM_COLOR=always >> $GITHUB_ENV
+2026-11-13T00:00:38.1192481Z fi
+2026-11-13T00:00:38.1206495Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.1206675Z env:
+2026-11-13T00:00:38.1206792Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.1206927Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.1207067Z   CARGO_INCREMENTAL: 0
+2026-11-13T00:00:38.1207190Z ##[endgroup]
+2026-11-13T00:00:38.1239014Z ##[end-action id=__dtolnay_rust-toolchain.__run_7;outcome=success;conclusion=success;duration_ms=6]
+2026-11-13T00:00:38.1241901Z ##[start-action display=Enable Cargo sparse registry;id=__dtolnay_rust-toolchain.__run_8]
+2026-11-13T00:00:38.1257545Z ##[group]Run # implemented in 1.66, stabilized in 1.68, made default in 1.70
+2026-11-13T00:00:38.1257840Z # implemented in 1.66, stabilized in 1.68, made default in 1.70
+2026-11-13T00:00:38.1258228Z if [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then
+2026-11-13T00:00:38.1258786Z   if rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[89]\.'; then
+2026-11-13T00:00:38.1259152Z     touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true
+2026-11-13T00:00:38.1259449Z     echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV
+2026-11-13T00:00:38.1259744Z   elif rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.6[67]\.'; then
+2026-11-13T00:00:38.1260061Z     touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true
+2026-11-13T00:00:38.1260541Z     echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV
+2026-11-13T00:00:38.1260837Z   fi
+2026-11-13T00:00:38.1260948Z fi
+2026-11-13T00:00:38.1275022Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.1275207Z env:
+2026-11-13T00:00:38.1275344Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.1275539Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.1275684Z   CARGO_INCREMENTAL: 0
+2026-11-13T00:00:38.1275816Z   toolchain: 1.97.1
+2026-11-13T00:00:38.1275944Z ##[endgroup]
+2026-11-13T00:00:38.1504712Z ##[end-action id=__dtolnay_rust-toolchain.__run_8;outcome=success;conclusion=success;duration_ms=26]
+2026-11-13T00:00:38.1508094Z ##[start-action display=Work around spurious network errors in curl 8.0;id=__dtolnay_rust-toolchain.__run_9]
+2026-11-13T00:00:38.1525132Z ##[group]Run # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+2026-11-13T00:00:38.1525573Z # https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation
+2026-11-13T00:00:38.1525936Z if rustc +"$toolchain" --version --verbose | grep -q '^release: 1\.7[01]\.'; then
+2026-11-13T00:00:38.1526205Z   echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV
+2026-11-13T00:00:38.1526378Z fi
+2026-11-13T00:00:38.1542827Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.1543015Z env:
+2026-11-13T00:00:38.1543145Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.1543291Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.1543458Z   CARGO_INCREMENTAL: 0
+2026-11-13T00:00:38.1543579Z   toolchain: 1.97.1
+2026-11-13T00:00:38.1543696Z ##[endgroup]
+2026-11-13T00:00:38.1676285Z ##[end-action id=__dtolnay_rust-toolchain.__run_9;outcome=success;conclusion=success;duration_ms=16]
+2026-11-13T00:00:38.1680063Z ##[start-action display=rustc +1.97.1 --version --verbose;id=__dtolnay_rust-toolchain.__run_10]
+2026-11-13T00:00:38.1747276Z ##[group]Run rustc +"$toolchain" --version --verbose
+2026-11-13T00:00:38.1747511Z rustc +"$toolchain" --version --verbose
+2026-11-13T00:00:38.1764553Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T00:00:38.1764740Z env:
+2026-11-13T00:00:38.1764859Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.1764995Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.1765135Z   CARGO_INCREMENTAL: 0
+2026-11-13T00:00:38.1765257Z   toolchain: 1.97.1
+2026-11-13T00:00:38.1765373Z ##[endgroup]
+2026-11-13T00:00:38.1885489Z rustc 1.97.1 (8bab26f4f 2026-07-14)
+2026-11-13T00:00:38.1885775Z binary: rustc
+2026-11-13T00:00:38.1886006Z commit-hash: 8bab26f4f68e0e26f0bb7960be334d5b520ea452
+2026-11-13T00:00:38.1886288Z commit-date: 2026-07-14
+2026-11-13T00:00:38.1886495Z host: x86_64-unknown-linux-gnu
+2026-11-13T00:00:38.1886706Z release: 1.97.1
+2026-11-13T00:00:38.1886882Z LLVM version: 22.1.6
+2026-11-13T00:00:38.1899970Z ##[end-action id=__dtolnay_rust-toolchain.__run_10;outcome=success;conclusion=success;duration_ms=21]
+2026-11-13T00:00:38.1946473Z ##[group]Run BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-fanout.sh base .
+2026-11-13T00:00:38.1946788Z BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-fanout.sh base .
+2026-11-13T00:00:38.1963865Z shell: /usr/bin/bash -e {0}
+2026-11-13T00:00:38.1964005Z env:
+2026-11-13T00:00:38.1964121Z   CARGO_TERM_COLOR: always
+2026-11-13T00:00:38.1964258Z   CARGO_HOME: /home/runner/.cargo
+2026-11-13T00:00:38.1964401Z   CARGO_INCREMENTAL: 0
+2026-11-13T00:00:38.1964527Z ##[endgroup]
+2026-11-13T00:00:38.2407678Z info: syncing channel updates for 1.97.1-x86_64-unknown-linux-gnu
+2026-11-13T00:00:38.3921602Z info: latest update on 2026-07-16 for version 1.97.1 (8bab26f4f 2026-07-14)
+2026-11-13T00:00:38.4040774Z info: downloading 2 components
+2026-11-13T00:02:56.5406944Z base: fanout n=1: 4697 us fanout n=16: 3570 us fanout n=64: 6680 us fanout n=256: 18912 us 
+2026-11-13T00:02:56.7423060Z head: fanout n=1: 4262 us fanout n=16: 5080 us fanout n=64: 8244 us fanout n=256: 20754 us 
+2026-11-13T00:02:56.9299580Z base: fanout n=1: 4493 us fanout n=16: 3488 us fanout n=64: 6596 us fanout n=256: 18924 us 
+2026-11-13T00:02:57.1300780Z head: fanout n=1: 4183 us fanout n=16: 5080 us fanout n=64: 8193 us fanout n=256: 20761 us 
+2026-11-13T00:02:57.3145849Z base: fanout n=1: 4517 us fanout n=16: 3494 us fanout n=64: 6558 us fanout n=256: 18897 us 
+2026-11-13T00:02:57.5259707Z head: fanout n=1: 4169 us fanout n=16: 5172 us fanout n=64: 8396 us fanout n=256: 20911 us 
+2026-11-13T00:02:57.7156701Z base: fanout n=1: 4529 us fanout n=16: 3495 us fanout n=64: 6567 us fanout n=256: 18977 us 
+2026-11-13T00:02:57.9232670Z head: fanout n=1: 4255 us fanout n=16: 5234 us fanout n=64: 8473 us fanout n=256: 21622 us 
+2026-11-13T00:02:58.1241008Z base: fanout n=1: 4590 us fanout n=16: 3490 us fanout n=64: 6600 us fanout n=256: 19905 us 
+2026-11-13T00:02:58.3330288Z head: fanout n=1: 4339 us fanout n=16: 5268 us fanout n=64: 8641 us fanout n=256: 21521 us 
+2026-11-13T00:03:52.7558800Z base: idle 500 clients: one state to all in 2119 us, server threads 7
+2026-11-13T00:04:51.4847967Z head: idle 500 clients: one state to all in 1930 us, server threads 7
+2026-11-13T00:04:51.4892468Z fan-out median of 5: base 33568 us, head 38648 us (head/base 115%)
+2026-11-13T00:04:51.4893489Z FAIL: the head is more than 10% slower than the base
+2026-11-13T00:04:51.4908783Z ##[error]Process completed with exit code 1.
+2026-11-13T00:04:51.4998304Z Post job cleanup.
+2026-11-13T00:04:51.5571312Z [command]/usr/bin/git version
+2026-11-13T00:04:51.5602534Z git version 2.56.0
+2026-11-13T00:04:51.5640938Z Temporarily overriding HOME='/home/runner/work/_temp/62ebdc48-b56f-48ac-bdee-0f86f44cdea7' before making global git config changes
+2026-11-13T00:04:51.5641371Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T00:04:51.5641744Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/shed/shed/base
+2026-11-13T00:04:51.5667048Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T00:04:51.5697213Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T00:04:51.5925475Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T00:04:51.5950699Z http.https://github.com/.extraheader
+2026-11-13T00:04:51.5962011Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-13T00:04:51.5999588Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T00:04:51.6251218Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T00:04:51.6291662Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T00:04:51.6631830Z Post job cleanup.
+2026-11-13T00:04:51.7247399Z [command]/usr/bin/git version
+2026-11-13T00:04:51.7290593Z git version 2.56.0
+2026-11-13T00:04:51.7340305Z Temporarily overriding HOME='/home/runner/work/_temp/485763ba-cbc1-47fc-982a-8d330b27e311' before making global git config changes
+2026-11-13T00:04:51.7341411Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T00:04:51.7342068Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/shed/shed
+2026-11-13T00:04:51.7343169Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T00:04:51.7382703Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T00:04:51.7633752Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T00:04:51.7670072Z http.https://github.com/.extraheader
+2026-11-13T00:04:51.7689641Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-11-13T00:04:51.7722910Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T00:04:51.8017758Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T00:04:51.8060040Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T00:04:51.8393538Z Cleaning up orphan processes
+2026-11-13T00:04:51.8674697Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

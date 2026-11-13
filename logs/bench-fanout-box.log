@@ -1,0 +1,13 @@
+base: fanout n=1: 1371 us fanout n=16: 1774 us fanout n=64: 2965 us fanout n=256: 8955 us 
+head: fanout n=1: 1363 us fanout n=16: 1783 us fanout n=64: 2772 us fanout n=256: 8223 us 
+base: fanout n=1: 1153 us fanout n=16: 1847 us fanout n=64: 3108 us fanout n=256: 8580 us 
+head: fanout n=1: 1109 us fanout n=16: 1580 us fanout n=64: 2870 us fanout n=256: 9610 us 
+base: fanout n=1: 1169 us fanout n=16: 1986 us fanout n=64: 2996 us fanout n=256: 9325 us 
+head: fanout n=1: 1466 us fanout n=16: 1700 us fanout n=64: 2882 us fanout n=256: 8635 us 
+base: fanout n=1: 1424 us fanout n=16: 1712 us fanout n=64: 2893 us fanout n=256: 8743 us 
+head: fanout n=1: 1392 us fanout n=16: 1810 us fanout n=64: 2880 us fanout n=256: 9094 us 
+base: fanout n=1: 1399 us fanout n=16: 1787 us fanout n=64: 2918 us fanout n=256: 9897 us 
+head: fanout n=1: 1529 us fanout n=16: 1816 us fanout n=64: 3881 us fanout n=256: 8806 us 
+base: idle 500 clients: one state to all in 13667 us, server threads 10
+head: idle 500 clients: one state to all in 5310 us, server threads 10
+fan-out median of 5: base 15065 us, head 15169 us (head/base 100%)

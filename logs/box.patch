@@ -1,0 +1,60 @@
+diff --git a/crates/shed-proto/src/lib.rs b/crates/shed-proto/src/lib.rs
+index c34bf0c..175cfdb 100644
+--- a/crates/shed-proto/src/lib.rs
++++ b/crates/shed-proto/src/lib.rs
+@@ -736,7 +736,7 @@ pub enum EventKind {
+         stop_reason: String,
+     },
+     /// ACP: the session is ready, or its model or slash commands changed.
+-    Session(AcpSession),
++    Session(Box<AcpSession>),
+     /// ACP: the agent's context window use and cost changed (`usage_update`).
+     Usage(AcpUsage),
+ }
+@@ -786,7 +786,7 @@ pub struct AcpSession {
+     pub commands: Vec<[String; 3]>,
+     /// The agent's last `usage_update`.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+-    pub usage: Option<Box<AcpUsage>>,
++    pub usage: Option<AcpUsage>,
+ }
+ 
+ /// An ACP session's context window use and cost, as the agent last reported it.
+diff --git a/crates/shed-server/src/acp.rs b/crates/shed-server/src/acp.rs
+index 38ec39b..876fa59 100644
+--- a/crates/shed-server/src/acp.rs
++++ b/crates/shed-server/src/acp.rs
+@@ -604,7 +604,7 @@ impl Session {
+                     .and_then(serde_json::from_value)
+                     .ok();
+                 if let Some(usage) = self.shown.usage.clone() {
+-                    self.emit(EventKind::Usage(*usage));
++                    self.emit(EventKind::Usage(usage));
+                 }
+             }
+             SessionUpdate::AvailableCommandsUpdate(u) => {
+@@ -650,7 +650,7 @@ impl Session {
+             self.shown.models = choices.iter().map(pair).collect();
+         }
+         self.send(Out::Emit(
+-            EventKind::Session(self.shown.clone()),
++            EventKind::Session(Box::new(self.shown.clone())),
+             self.replay,
+             !self.waking,
+         ))
+diff --git a/crates/shed-server/src/registry.rs b/crates/shed-server/src/registry.rs
+index 9a13569..9d80e63 100644
+--- a/crates/shed-server/src/registry.rs
++++ b/crates/shed-server/src/registry.rs
+@@ -665,9 +665,9 @@ impl Registry {
+         let entry = self.entries.get_mut(&p.name);
+         let info = &mut entry.ok_or_else(|| not_found(&p.name))?.info;
+         let session = match &p.kind {
+-            EventKind::Session(s) => info.session.replace(s.clone()).is_none_or(|old| old != *s),
++            EventKind::Session(s) => info.session.replace((**s).clone()).is_none_or(|old| old != **s),
+             EventKind::Usage(u) => {
+-                info.session.get_or_insert_default().usage = Some(Box::new(u.clone()));
++                info.session.get_or_insert_default().usage = Some(u.clone());
+                 false
+             }
+             _ => false,

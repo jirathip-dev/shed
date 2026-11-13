@@ -1,0 +1,114 @@
+cargo test --workspace --locked
+   Compiling shed-proto v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-88/crates/shed-proto)
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-88/crates/shed-server)
+   Compiling shed v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-88/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.46s
+     Running unittests src/main.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed-a4caab36b2bb9be3)
+
+running 4 tests
+test watch::tests::the_list_follows_the_event_stream ... ok
+test watch::tests::a_narrow_terminal_hides_the_preview ... ok
+test watch::tests::enter_attaches_and_ctrl_backslash_comes_back_to_the_selection ... ok
+test watch::tests::the_preview_shows_the_screen_at_most_ten_times_a_second ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acp.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp-a62b91957388521e)
+
+running 25 tests
+test an_agent_that_fails_the_handshake_reports_error ... ok
+test a_v2_only_agent_is_refused_with_a_clear_message ... ok
+test a_model_switch_is_reported_and_the_next_turn_uses_it ... ok
+test an_unknown_update_kind_is_skipped ... ok
+test each_change_of_the_slash_commands_is_one_session_event ... ok
+test cancel_ends_a_turn_mid_way ... ok
+test a_usage_update_shows_in_get_top_and_as_an_event ... ok
+test resume_is_refused_without_load_session ... ok
+test registry_installs_pinned_agents_from_a_fixture ... ok
+test mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden ... ok
+test a_turn_with_an_approval_matches_the_golden_event_log ... ok
+test resume_replays_the_history_once_marked_replay ... ok
+test the_deny_policy_rejects_permission_requests ... ok
+test recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks ... ok
+test sse_servers_pass_only_when_the_agent_advertises_them ... ok
+test unknown_or_malformed_mcp_servers_are_refused ... ok
+test agents_sessions_lists_every_page_and_resume_takes_one ... ok
+test rm_closes_the_session_once_and_only_when_the_agent_can ... ok
+test an_expired_login_ends_the_turn_as_an_auth_error ... ok
+test a_prompt_wakes_the_agent_and_its_history_is_not_repeated ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... ok
+test sends_during_a_wake_are_delivered_in_order ... ok
+test the_watchdog_ends_a_silent_turn_but_not_a_busy_one ... ok
+test no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn ... ok
+test an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.68s
+
+     Running tests/acp_bench.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp_bench-69a5ee2c8956ad70)
+
+running 5 tests
+test hibernate ... ignored, a memory bench: scripts/bench-acp.sh
+test hibernate_live ... ignored, a live bench: needs SHED_BENCH_LIVE and a logged-in agent
+test replay ... ignored, a timing bench: scripts/bench-acp.sh
+test shed_only ... ignored, a timing bench: scripts/bench-acp.sh
+test throughput ... ignored, a timing bench: scripts/bench-acp.sh
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/cli-0829e2ee4fb51540)
+
+running 18 tests
+test a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail ... ok
+test help_lists_every_command ... ok
+test hello_prints_the_version ... ok
+test a_server_that_exits_before_it_is_ready_is_reported_as_an_exit ... ok
+test schema_prints_the_committed_openrpc_document ... ok
+test version_flag_prints_the_version ... ok
+test serve_prints_one_ready_line_once_its_socket_accepts ... ok
+test a_terminal_has_shed_set ... ok
+test run_autostart_starts_a_detached_server ... ok
+test run_size_sets_the_program_size_and_the_default_is_wide ... ok
+test attach_ends_when_the_program_exits ... ok
+test a_query_the_screen_answers_reaches_the_program_once_with_a_client_attached ... ok
+test run_read_send_exit_ls_and_labels_match_the_golden ... ok
+test a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each ... ok
+test timing_report ... ok
+test attach_types_resizes_and_detaches_in_a_pty ... ok
+test wait_matches_output_by_pattern_and_falls_back_to_idle ... ok
+test a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.05s
+
+     Running tests/idle_bench.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/idle_bench-ce04b50dd16a996d)
+
+running 1 test
+test idle_connections ... ignored, a timing report: scripts/bench-fanout.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lock.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/lock-be012cee47fbcee6)
+
+running 3 tests
+test a_thousand_emits_from_one_lane_keep_list_p95_under_20_ms ... ok
+test killing_a_program_that_ignores_sigterm_holds_up_no_list ... FAILED
+test a_terminal_that_never_reads_its_input_holds_up_no_other_and_is_reported_stuck ... ok
+
+failures:
+
+---- killing_a_program_that_ignores_sigterm_holds_up_no_list stdout ----
+
+thread 'killing_a_program_that_ignores_sigterm_holds_up_no_list' (105569203) panicked at crates/shed/tests/lock.rs:100:9:
+ls took 125.2095ms
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread '<unnamed>' (105569386) panicked at crates/shed/tests/lock.rs:20:28:
+call: BadResponse("connection closed")
+
+
+failures:
+    killing_a_program_that_ignores_sigterm_holds_up_no_list
+
+test result: FAILED. 2 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+error: test failed, to rerun pass `-p shed --test lock`
+error: recipe `test` failed on line 17 with exit code 101

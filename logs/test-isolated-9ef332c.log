@@ -1,0 +1,195 @@
+cargo test --workspace --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running unittests src/main.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed-a4caab36b2bb9be3)
+
+running 4 tests
+test watch::tests::a_narrow_terminal_hides_the_preview ... ok
+test watch::tests::the_preview_shows_the_screen_at_most_ten_times_a_second ... ok
+test watch::tests::enter_attaches_and_ctrl_backslash_comes_back_to_the_selection ... ok
+test watch::tests::the_list_follows_the_event_stream ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acp.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp-a62b91957388521e)
+
+running 25 tests
+test a_model_switch_is_reported_and_the_next_turn_uses_it ... FAILED
+test an_unknown_update_kind_is_skipped ... FAILED
+test each_change_of_the_slash_commands_is_one_session_event ... FAILED
+test a_usage_update_shows_in_get_top_and_as_an_event ... FAILED
+test agents_sessions_lists_every_page_and_resume_takes_one ... FAILED
+test a_v2_only_agent_is_refused_with_a_clear_message ... FAILED
+test an_agent_that_fails_the_handshake_reports_error ... FAILED
+test a_turn_with_an_approval_matches_the_golden_event_log ... FAILED
+test a_prompt_wakes_the_agent_and_its_history_is_not_repeated ... FAILED
+test cancel_ends_a_turn_mid_way ... FAILED
+test an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits ... FAILED
+test an_expired_login_ends_the_turn_as_an_auth_error ... FAILED
+test registry_installs_pinned_agents_from_a_fixture ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... FAILED
+test the_deny_policy_rejects_permission_requests ... FAILED
+test recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks ... FAILED
+test sends_during_a_wake_are_delivered_in_order ... FAILED
+test no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn ... FAILED
+test resume_is_refused_without_load_session ... FAILED
+test mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden ... FAILED
+test sse_servers_pass_only_when_the_agent_advertises_them ... FAILED
+test rm_closes_the_session_once_and_only_when_the_agent_can ... FAILED
+test resume_replays_the_history_once_marked_replay ... FAILED
+test the_watchdog_ends_a_silent_turn_but_not_a_busy_one ... FAILED
+test unknown_or_malformed_mcp_servers_are_refused ... FAILED
+
+failures:
+
+---- a_model_switch_is_reported_and_the_next_turn_uses_it stdout ----
+
+thread 'a_model_switch_is_reported_and_the_next_turn_uses_it' (103214674) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- an_unknown_update_kind_is_skipped stdout ----
+
+thread 'an_unknown_update_kind_is_skipped' (103214683) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- each_change_of_the_slash_commands_is_one_session_event stdout ----
+
+thread 'each_change_of_the_slash_commands_is_one_session_event' (103214685) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- a_usage_update_shows_in_get_top_and_as_an_event stdout ----
+
+thread 'a_usage_update_shows_in_get_top_and_as_an_event' (103214677) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- agents_sessions_lists_every_page_and_resume_takes_one stdout ----
+
+thread 'agents_sessions_lists_every_page_and_resume_takes_one' (103214679) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- a_v2_only_agent_is_refused_with_a_clear_message stdout ----
+
+thread 'a_v2_only_agent_is_refused_with_a_clear_message' (103214678) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- an_agent_that_fails_the_handshake_reports_error stdout ----
+
+thread 'an_agent_that_fails_the_handshake_reports_error' (103214680) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- a_turn_with_an_approval_matches_the_golden_event_log stdout ----
+
+thread 'a_turn_with_an_approval_matches_the_golden_event_log' (103214676) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- a_prompt_wakes_the_agent_and_its_history_is_not_repeated stdout ----
+
+thread 'a_prompt_wakes_the_agent_and_its_history_is_not_repeated' (103214675) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- cancel_ends_a_turn_mid_way stdout ----
+
+thread 'cancel_ends_a_turn_mid_way' (103214684) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits stdout ----
+
+thread 'an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits' (103214682) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- an_expired_login_ends_the_turn_as_an_auth_error stdout ----
+
+thread 'an_expired_login_ends_the_turn_as_an_auth_error' (103214681) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- mcp_secrets_stay_in_memory_through_a_hibernation stdout ----
+
+thread 'mcp_secrets_stay_in_memory_through_a_hibernation' (103224678) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- the_deny_policy_rejects_permission_requests stdout ----
+
+thread 'the_deny_policy_rejects_permission_requests' (103224712) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks stdout ----
+
+thread 'recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks' (103224687) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- sends_during_a_wake_are_delivered_in_order stdout ----
+
+thread 'sends_during_a_wake_are_delivered_in_order' (103224706) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn stdout ----
+
+thread 'no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn' (103224685) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- resume_is_refused_without_load_session stdout ----
+
+thread 'resume_is_refused_without_load_session' (103224696) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden stdout ----
+
+thread 'mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden' (103224680) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- sse_servers_pass_only_when_the_agent_advertises_them stdout ----
+
+thread 'sse_servers_pass_only_when_the_agent_advertises_them' (103224708) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- rm_closes_the_session_once_and_only_when_the_agent_can stdout ----
+
+thread 'rm_closes_the_session_once_and_only_when_the_agent_can' (103224704) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- resume_replays_the_history_once_marked_replay stdout ----
+
+thread 'resume_replays_the_history_once_marked_replay' (103224702) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- the_watchdog_ends_a_silent_turn_but_not_a_busy_one stdout ----
+
+thread 'the_watchdog_ends_a_silent_turn_but_not_a_busy_one' (103224739) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+---- unknown_or_malformed_mcp_servers_are_refused stdout ----
+
+thread 'unknown_or_malformed_mcp_servers_are_refused' (103225415) panicked at crates/shed/tests/common/mod.rs:32:9:
+timed out waiting for the socket
+
+
+failures:
+    a_model_switch_is_reported_and_the_next_turn_uses_it
+    a_prompt_wakes_the_agent_and_its_history_is_not_repeated
+    a_turn_with_an_approval_matches_the_golden_event_log
+    a_usage_update_shows_in_get_top_and_as_an_event
+    a_v2_only_agent_is_refused_with_a_clear_message
+    agents_sessions_lists_every_page_and_resume_takes_one
+    an_agent_that_fails_the_handshake_reports_error
+    an_expired_login_ends_the_turn_as_an_auth_error
+    an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits
+    an_unknown_update_kind_is_skipped
+    cancel_ends_a_turn_mid_way
+    each_change_of_the_slash_commands_is_one_session_event
+    mcp_secrets_stay_in_memory_through_a_hibernation
+    mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden
+    no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn
+    recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks
+    resume_is_refused_without_load_session
+    resume_replays_the_history_once_marked_replay
+    rm_closes_the_session_once_and_only_when_the_agent_can
+    sends_during_a_wake_are_delivered_in_order
+    sse_servers_pass_only_when_the_agent_advertises_them
+    the_deny_policy_rejects_permission_requests
+    the_watchdog_ends_a_silent_turn_but_not_a_busy_one
+    unknown_or_malformed_mcp_servers_are_refused
+
+test result: FAILED. 1 passed; 24 failed; 0 ignored; 0 measured; 0 filtered out; finished in 20.15s
+
+error: test failed, to rerun pass `-p shed --test acp`
+error: recipe `test` failed on line 17 with exit code 101

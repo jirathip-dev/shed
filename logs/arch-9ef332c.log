@@ -1,0 +1,27 @@
+herdsman arch-check
+arch-check: 170 files, 0 violations
+cd ci/fixtures/arch-layer && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-core/src/lib.rs:1: layer `core` uses `server` (shed_server::Paths); its may_use is []
+arch-check: 1 files, 1 violations
+cd ci/fixtures/arch-spawn && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-server/src/lib.rs:2: `Command::new` is banned here: start processes through shed_core::runner
+crates/shed-server/src/lib.rs:2: `std::process` is banned here: process types and calls come from shed_core::runner
+arch-check: 1 files, 2 violations
+cd ci/fixtures/arch-process && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-server/src/lib.rs:2: `std::process` is banned here: process types and calls come from shed_core::runner
+arch-check: 1 files, 1 violations
+cd ci/fixtures/arch-sleep && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-server/src/lib.rs:2: `thread::sleep` is banned here: sleep through shed_core::clock
+arch-check: 1 files, 1 violations
+cd ci/fixtures/arch-env && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-server/src/lib.rs:2: `env::var` is banned here: read the environment through shed_server::config
+arch-check: 1 files, 1 violations
+cd ci/fixtures/arch-system-time && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-server/src/lib.rs:2: `SystemTime::now` is banned here: read the time through shed_core::clock
+arch-check: 1 files, 1 violations
+cd ci/fixtures/arch-instant && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed-server/src/lib.rs:2: `Instant::now` is banned here: read the time through shed_core::clock
+arch-check: 1 files, 1 violations
+cd ci/fixtures/arch-size && ! herdsman arch-check --config ../../../.herdsman/arch.toml
+crates/shed/src/main.rs:1: `crates/shed/src/main.rs:main` is 152 lines, over 150 (baseline None)
+arch-check: 1 files, 1 violations

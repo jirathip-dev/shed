@@ -1,0 +1,133 @@
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+# At most 10 allows in the workspace, each with a reason (clippy checks the reason).
+test "$(grep -rE 'allow\(' crates | wc -l)" -le 10
+scripts/banned.sh
+ci/fixtures/banned/allow_attributes_without_reason.rs: rejected (allow_attributes_without_reason)
+ci/fixtures/banned/as_conversions.rs: rejected (as_conversions)
+ci/fixtures/banned/dbg_macro.rs: rejected (dbg_macro)
+ci/fixtures/banned/expect_used.rs: rejected (expect_used)
+ci/fixtures/banned/indexing_slicing.rs: rejected (indexing_slicing)
+ci/fixtures/banned/let_underscore_must_use.rs: rejected (let_underscore_must_use)
+ci/fixtures/banned/panic.rs: rejected (panic)
+ci/fixtures/banned/print_stderr.rs: rejected (print_stderr)
+ci/fixtures/banned/print_stdout.rs: rejected (print_stdout)
+ci/fixtures/banned/todo.rs: rejected (todo)
+ci/fixtures/banned/unimplemented.rs: rejected (unimplemented)
+ci/fixtures/banned/unsafe_code.rs: rejected (unsafe_code)
+ci/fixtures/banned/unwrap_used.rs: rejected (unwrap_used)
+cargo test --workspace --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running unittests src/main.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed-a4caab36b2bb9be3)
+
+running 4 tests
+test watch::tests::a_narrow_terminal_hides_the_preview ... ok
+test watch::tests::the_preview_shows_the_screen_at_most_ten_times_a_second ... ok
+test watch::tests::enter_attaches_and_ctrl_backslash_comes_back_to_the_selection ... ok
+test watch::tests::the_list_follows_the_event_stream ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acp.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp-a62b91957388521e)
+
+running 25 tests
+test an_agent_that_fails_the_handshake_reports_error ... ok
+test a_v2_only_agent_is_refused_with_a_clear_message ... ok
+test a_model_switch_is_reported_and_the_next_turn_uses_it ... ok
+test an_unknown_update_kind_is_skipped ... ok
+test cancel_ends_a_turn_mid_way ... ok
+test each_change_of_the_slash_commands_is_one_session_event ... ok
+test a_usage_update_shows_in_get_top_and_as_an_event ... ok
+test resume_is_refused_without_load_session ... ok
+test registry_installs_pinned_agents_from_a_fixture ... ok
+test mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden ... ok
+test a_turn_with_an_approval_matches_the_golden_event_log ... ok
+test resume_replays_the_history_once_marked_replay ... ok
+test sse_servers_pass_only_when_the_agent_advertises_them ... ok
+test recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks ... ok
+test the_deny_policy_rejects_permission_requests ... ok
+test unknown_or_malformed_mcp_servers_are_refused ... ok
+test agents_sessions_lists_every_page_and_resume_takes_one ... ok
+test rm_closes_the_session_once_and_only_when_the_agent_can ... ok
+test an_expired_login_ends_the_turn_as_an_auth_error ... ok
+test a_prompt_wakes_the_agent_and_its_history_is_not_repeated ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... ok
+test sends_during_a_wake_are_delivered_in_order ... ok
+test the_watchdog_ends_a_silent_turn_but_not_a_busy_one ... ok
+test no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn ... ok
+test an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.34s
+
+     Running tests/acp_bench.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp_bench-69a5ee2c8956ad70)
+
+running 5 tests
+test hibernate ... ignored, a memory bench: scripts/bench-acp.sh
+test hibernate_live ... ignored, a live bench: needs SHED_BENCH_LIVE and a logged-in agent
+test replay ... ignored, a timing bench: scripts/bench-acp.sh
+test shed_only ... ignored, a timing bench: scripts/bench-acp.sh
+test throughput ... ignored, a timing bench: scripts/bench-acp.sh
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/cli-0829e2ee4fb51540)
+
+running 18 tests
+test help_lists_every_command ... ok
+test a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail ... ok
+test hello_prints_the_version ... ok
+test schema_prints_the_committed_openrpc_document ... ok
+test a_server_that_exits_before_it_is_ready_is_reported_as_an_exit ... ok
+test version_flag_prints_the_version ... ok
+test serve_prints_one_ready_line_once_its_socket_accepts ... ok
+test run_autostart_starts_a_detached_server ... ok
+test a_terminal_has_shed_set ... ok
+test run_size_sets_the_program_size_and_the_default_is_wide ... ok
+test attach_ends_when_the_program_exits ... ok
+test a_query_the_screen_answers_reaches_the_program_once_with_a_client_attached ... ok
+test run_read_send_exit_ls_and_labels_match_the_golden ... ok
+test a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each ... ok
+test timing_report ... ok
+test attach_types_resizes_and_detaches_in_a_pty ... ok
+test a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list ... ok
+test wait_matches_output_by_pattern_and_falls_back_to_idle ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.68s
+
+     Running tests/idle_bench.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/idle_bench-ce04b50dd16a996d)
+
+running 1 test
+test idle_connections ... ignored, a timing report: scripts/bench-fanout.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/machines.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/machines-2a76123d90ad91c1)
+
+running 8 tests
+down added
+test connect_carries_the_protocol_over_a_socketpair ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... FAILED
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test an_acp_session_is_started_waited_on_replied_approved_and_cancelled_on_a_machine_over_the_held_link ... ok
+test an_acp_agent_not_installed_on_the_machine_is_refused_with_the_machines_agents ... ok
+test over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test a_dropped_link_reconnects_and_the_merged_stream_loses_no_events ... ok
+
+failures:
+
+---- machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s stdout ----
+
+thread 'machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s' (103141639) panicked at crates/shed/tests/machines.rs:625:9:
+{"at":1794527804,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":16885,"cpus":12,"uptime_s":0,"terminals":{"exited":1,"working":1},"history":[{"at":1794527804,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":16877,"cpus":12,"uptime_s":0,"terminals":{}}]}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s
+
+test result: FAILED. 7 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.27s
+
+error: test failed, to rerun pass `-p shed --test machines`
+error: recipe `test` failed on line 17 with exit code 101

@@ -1,0 +1,323 @@
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+# At most 10 allows in the workspace, each with a reason (clippy checks the reason).
+test "$(grep -rE 'allow\(' crates | wc -l)" -le 10
+scripts/banned.sh
+ci/fixtures/banned/allow_attributes_without_reason.rs: rejected (allow_attributes_without_reason)
+ci/fixtures/banned/as_conversions.rs: rejected (as_conversions)
+ci/fixtures/banned/dbg_macro.rs: rejected (dbg_macro)
+ci/fixtures/banned/expect_used.rs: rejected (expect_used)
+ci/fixtures/banned/indexing_slicing.rs: rejected (indexing_slicing)
+ci/fixtures/banned/let_underscore_must_use.rs: rejected (let_underscore_must_use)
+ci/fixtures/banned/panic.rs: rejected (panic)
+ci/fixtures/banned/print_stderr.rs: rejected (print_stderr)
+ci/fixtures/banned/print_stdout.rs: rejected (print_stdout)
+ci/fixtures/banned/todo.rs: rejected (todo)
+ci/fixtures/banned/unimplemented.rs: rejected (unimplemented)
+ci/fixtures/banned/unsafe_code.rs: rejected (unsafe_code)
+ci/fixtures/banned/unwrap_used.rs: rejected (unwrap_used)
+cargo test --workspace --locked
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/main.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed-a4caab36b2bb9be3)
+
+running 4 tests
+test watch::tests::a_narrow_terminal_hides_the_preview ... ok
+test watch::tests::the_preview_shows_the_screen_at_most_ten_times_a_second ... ok
+test watch::tests::the_list_follows_the_event_stream ... ok
+test watch::tests::enter_attaches_and_ctrl_backslash_comes_back_to_the_selection ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acp.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp-a62b91957388521e)
+
+running 25 tests
+test an_agent_that_fails_the_handshake_reports_error ... ok
+test a_v2_only_agent_is_refused_with_a_clear_message ... ok
+test a_model_switch_is_reported_and_the_next_turn_uses_it ... ok
+test cancel_ends_a_turn_mid_way ... ok
+test an_unknown_update_kind_is_skipped ... ok
+test each_change_of_the_slash_commands_is_one_session_event ... ok
+test a_usage_update_shows_in_get_top_and_as_an_event ... ok
+test a_turn_with_an_approval_matches_the_golden_event_log ... ok
+test resume_is_refused_without_load_session ... ok
+test registry_installs_pinned_agents_from_a_fixture ... ok
+test mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden ... ok
+test sse_servers_pass_only_when_the_agent_advertises_them ... ok
+test agents_sessions_lists_every_page_and_resume_takes_one ... ok
+test resume_replays_the_history_once_marked_replay ... ok
+test the_deny_policy_rejects_permission_requests ... ok
+test unknown_or_malformed_mcp_servers_are_refused ... ok
+test recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks ... ok
+test rm_closes_the_session_once_and_only_when_the_agent_can ... ok
+test an_expired_login_ends_the_turn_as_an_auth_error ... ok
+test a_prompt_wakes_the_agent_and_its_history_is_not_repeated ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... ok
+test sends_during_a_wake_are_delivered_in_order ... ok
+test the_watchdog_ends_a_silent_turn_but_not_a_busy_one ... ok
+test no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn ... ok
+test an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.13s
+
+     Running tests/acp_bench.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/acp_bench-69a5ee2c8956ad70)
+
+running 5 tests
+test hibernate ... ignored, a memory bench: scripts/bench-acp.sh
+test hibernate_live ... ignored, a live bench: needs SHED_BENCH_LIVE and a logged-in agent
+test replay ... ignored, a timing bench: scripts/bench-acp.sh
+test shed_only ... ignored, a timing bench: scripts/bench-acp.sh
+test throughput ... ignored, a timing bench: scripts/bench-acp.sh
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/cli.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/cli-0829e2ee4fb51540)
+
+running 18 tests
+test a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail ... ok
+test help_lists_every_command ... ok
+test hello_prints_the_version ... ok
+test schema_prints_the_committed_openrpc_document ... ok
+test a_server_that_exits_before_it_is_ready_is_reported_as_an_exit ... ok
+test version_flag_prints_the_version ... ok
+test serve_prints_one_ready_line_once_its_socket_accepts ... ok
+test a_terminal_has_shed_set ... ok
+test run_autostart_starts_a_detached_server ... ok
+test run_size_sets_the_program_size_and_the_default_is_wide ... ok
+test a_query_the_screen_answers_reaches_the_program_once_with_a_client_attached ... ok
+test attach_ends_when_the_program_exits ... ok
+test run_read_send_exit_ls_and_labels_match_the_golden ... ok
+test a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each ... ok
+test timing_report ... ok
+test attach_types_resizes_and_detaches_in_a_pty ... ok
+test a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list ... ok
+test wait_matches_output_by_pattern_and_falls_back_to_idle ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.62s
+
+     Running tests/idle_bench.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/idle_bench-ce04b50dd16a996d)
+
+running 1 test
+test idle_connections ... ignored, a timing report: scripts/bench-fanout.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/machines.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/machines-2a76123d90ad91c1)
+
+running 8 tests
+down added
+test connect_carries_the_protocol_over_a_socketpair ... ok
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test an_acp_agent_not_installed_on_the_machine_is_refused_with_the_machines_agents ... ok
+test over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test an_acp_session_is_started_waited_on_replied_approved_and_cancelled_on_a_machine_over_the_held_link ... ok
+test a_dropped_link_reconnects_and_the_merged_stream_loses_no_events ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.77s
+
+     Running tests/reliability.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/reliability-8e5fdc8139cee78b)
+
+running 10 tests
+test malformed_requests_are_denied_with_a_reason_and_never_pass_the_handshake ... ok
+test a_first_start_menu_is_seen_read_and_answered ... ok
+test a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over ... ok
+test two_autostarts_at_once_share_one_server ... ok
+test a_terminal_replaced_under_the_same_name_gets_the_messages ... ok
+test kill_ends_only_its_own_tree_and_the_other_terminals_survive ... ok
+test a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream ... ok
+test emfile_fails_the_spawn_and_the_daemon_and_other_sessions_live_on ... ok
+test exited_sessions_release_their_fds ... ok
+test serve_raises_a_lowered_soft_limit_so_many_sessions_spawn ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.17s
+
+     Running tests/server.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/server-6d0f6df00b890b52)
+
+running 10 tests
+test a_version_mismatch_is_refused ... ok
+test rpc_discover_answers_the_openrpc_document_before_and_after_hello ... ok
+test jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored ... ok
+test terminal_input_and_keys_arrive_and_a_readonly_client_is_refused ... ok
+test screen_watch_sends_the_full_screen_then_diffs_and_since_skips_the_full_one ... ok
+test screen_watch_sends_at_most_20_updates_a_second ... ok
+test terminal_resize_from_the_watcher_resizes_the_screen_and_the_program ... ok
+test events_stream_in_seq_order_filter_by_label_and_replay_since ... ok
+test a_kept_terminal_comes_back_as_a_shell_in_its_cwd ... ok
+test run_ls_read_kill_over_the_socket_match_the_goldens ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/service.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/service-1e100ba39b4d34da)
+
+running 2 tests
+test install_writes_the_job_once_and_refuses_other_contents_without_force ... ok
+test doctor_reports_a_missing_job_and_server_with_their_fix_lines ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed_core-f5a1291a8aaad0f0)
+
+running 22 tests
+test keys::tests::key_encoding_table ... ok
+test keys::tests::unknown_keys_are_errors ... ok
+test pattern::tests::matches_the_supported_subset ... ok
+test pattern::tests::rejects_broken_patterns ... ok
+test proctree::tests::parses_proc_stat ... ok
+test proctree::tests::parses_ps_lines ... ok
+test proctree::tests::tree_takes_the_group_descendants_and_known_orphans ... ok
+test screen::tests::a_wide_character_at_the_last_column_wraps_whole ... ok
+test screen::tests::alternate_screen_keeps_the_primary_and_no_history ... ok
+test screen::tests::answers_cursor_position_queries ... ok
+test screen::tests::cursor_moves_and_erases ... ok
+test screen::tests::jan_osc_9999_maps_waiting_to_blocked_and_ignores_garbage ... ok
+test screen::tests::osc_7501_reports_state_and_never_reaches_the_screen ... ok
+test screen::tests::prints_lines_and_drops_trailing_blanks ... ok
+test screen::tests::resize_moves_rows_into_scrollback ... ok
+test screen::tests::scrollback_bytes_are_bounded_by_whole_lines ... ok
+test screen::tests::scrollback_is_bounded ... ok
+test screen::tests::wide_and_combining_characters_keep_the_box_edge_in_its_column ... ok
+test screen::tests::wraps_at_the_last_column ... ok
+test screen::tests::sgr_sets_the_pen_and_snapshot_groups_cells_into_runs ... ok
+test history::tests::the_log_stays_under_twice_the_cap_and_restores_the_tail ... ok
+test history::tests::tail_reads_only_the_tail_and_skips_a_cut_character ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/history.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/history-59b123b658658e7b)
+
+running 2 tests
+test a_terminal_starts_from_its_log ... ok
+test throughput_report_with_full_scrollback ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.82s
+
+     Running tests/terminal.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/terminal-95149d1ebf8066cb)
+
+running 7 tests
+test subscribers_get_raw_output_until_the_pty_closes ... ok
+test reads_printf_output_exactly ... ok
+test scrollback_is_bounded ... ok
+test passes_cwd_env_and_input ... ok
+test resize_reaches_the_program_and_the_screen ... ok
+test kill_ends_the_whole_tree ... ok
+test kill_escalates_to_sigkill_after_the_grace_period ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed_proto-306e10abc93737a2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_doc.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/protocol_doc-a86fedb7763326d3)
+
+running 8 tests
+test version_refusal_reads_as_specified ... ok
+test method_names_round_trip ... ok
+test emit_params_round_trip ... ok
+test the_schemas_refuse_broken_messages ... ok
+test protocol_md_matches_the_types ... ok
+test every_method_is_in_the_openrpc_document ... ok
+test every_golden_message_validates_against_its_schema ... ok
+test openrpc_json_matches_the_types ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/shed_server-d0d904f5ae4ce157)
+
+running 23 tests
+test events::bench::fanout ... ignored, a timing bench: scripts/bench-fanout.sh
+test acp::tests::frames_are_one_line_of_json ... ok
+test acp::tests::the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line ... ok
+test events::tests::since_beyond_seq_still_gets_new_events ... ok
+test events::tests::every_subscriber_shares_the_one_serialised_line ... ok
+test machines::tests::reconnects_follow_the_backoff_schedule ... ok
+test providers::tests::a_provider_is_one_file_and_one_registry_line ... ok
+test machines::tests::bad_names_targets_and_files_are_refused ... ok
+test machines::tests::add_ls_rm_round_trip_through_the_file ... ok
+test machines::tests::the_berth_release_config_loads ... ok
+test acp::tests::render_keeps_prompts_one_line_per_tool_call_and_replies ... ok
+test registry::tests::a_corrupt_state_file_is_refused_and_kept ... ok
+test stats::tests::parses_macos_sysctl ... ok
+test acp::tests::a_text_chunk_skips_the_sdk_parse_and_matches_it ... ok
+test events::tests::the_log_keeps_the_last_thousand_for_since ... ok
+test acp::tests::a_silent_turn_ends_as_no_response_after_the_timeout ... ok
+test events::tests::a_slow_subscriber_misses_nothing_and_the_log_is_trimmed_without_one ... ok
+still thinking
+test registry::tests::leftovers_go_on_load_and_a_removed_terminal_leaves_nothing ... ok
+test registry::tests::state_files_of_every_past_release_load ... ok
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+test acp::tests::thought_chunks_or_stderr_lines_keep_a_turn_alive_past_the_timeout ... ok
+test machines::tests::parallel_writes_never_share_a_temp_file ... ok
+test acp::tests::the_default_watchdog_lets_a_turn_think_silently_past_two_minutes ... ok
+test stats::tests::one_sample_a_minute_on_a_fake_clock_and_24_hours_kept ... ok
+
+test result: ok. 22 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 4.24s
+
+     Running tests/client.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/debug/deps/client-2f2edd9a67b9ffd2)
+
+running 1 test
+test a_server_of_another_version_is_refused_by_the_client ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_proto
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.17s
+   Generated /Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-88/doc/shed/index.html and 3 other files
+cargo deny --locked check
+error: no such command: `deny`
+
+help: a command with a similar name exists: `bench`
+
+help: view all installed commands with `cargo --list`
+help: find a package to install `deny` with `cargo search cargo-deny`
+error: recipe `deny` failed on line 23 with exit code 101
