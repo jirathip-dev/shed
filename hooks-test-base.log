@@ -1,0 +1,22 @@
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-87/crates/shed-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.44s
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-87/debug/deps/shed_server-e60d0538ec708608)
+
+running 1 test
+test hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte ... FAILED
+
+failures:
+
+---- hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte stdout ----
+
+thread 'hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte' (106662449) panicked at crates/shed-server/src/hooks.rs:208:50:
+config: Os { code: 2, kind: NotFound, message: "No such file or directory" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p shed-server --lib`

@@ -1,0 +1,12 @@
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-87/crates/shed-server)
+   Compiling shed v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-87/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 02s
+     Running tests/service.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-87/debug/deps/service-a1c8e0021d6f3056)
+
+running 3 tests
+test install_writes_the_job_once_and_refuses_other_contents_without_force ... ok
+test setup_hooks_report_nothing_outside_shed_and_doctor_lists_them ... ok
+test doctor_reports_a_missing_job_and_server_with_their_fix_lines ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.84s
+
