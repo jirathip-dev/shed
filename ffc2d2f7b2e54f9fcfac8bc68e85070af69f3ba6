@@ -1,0 +1,5 @@
+Decided: merge origin/staging into issue-89 and keep both sides: exec/file.read/file.write next to rpc.discover, all in the OpenRPC doc
+Because: crates/shed-proto/src/lib.rs:1112
+Rejected: none
+Check: shed schema lists exec, file.read and file.write with their params and result schemas, and dispatch still routes them through linked()
+Owner: Staging merged in; the new exec and file commands now also appear in the published API description.
