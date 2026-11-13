@@ -1,0 +1,9 @@
+Decided: kill keeps this PR's shared fn(name) -> TerminalInfo, called from staging's dispatch match
+Because: crates/shed-server/src/lib.rs:197
+Rejected: staging's kill(Target) -> Value — a second copy the parent-exit cascade could not reuse
+Decided: a parent note is written to its terminal on its own thread, outside the registry lock
+Because: crates/shed-core/src/terminal.rs:279
+Decided: Parent and the wait children mode derive JsonSchema; docs/shed.openrpc.json regenerated
+Because: crates/shed-proto/src/lib.rs:498
+Check: just check exit 0 at c0071ad with a fresh short TMPDIR; the machine_stats failure was PATH lacking /usr/sbin (sysctl), not code
+Owner: no behaviour change from round 1; the branch is now current with staging and its checks are green
