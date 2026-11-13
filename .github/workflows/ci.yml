@@ -52,7 +52,7 @@ jobs:
       - name: comment rule (no //; /// on public API only)
         run: just comments
 
-  # The fleet-wide rules: actionlint, herdsman's arch-check (layers, banned calls, size limits in
+  # The fleet-wide rules: actionlint, drover's arch-check (layers, banned calls, size limits in
   # .herdsman/arch.toml) and lesson checks (.herdsman/rules.md), each with the fixtures that break it.
   rules:
     runs-on: ubuntu-latest
@@ -69,8 +69,8 @@ jobs:
           curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz |
             tar -xz -C "$RUNNER_TEMP" actionlint
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - name: install herdsman
-        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging herdsman
+      - name: install drover (herdsman's renamed CLI)
+        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging drover
       - name: actionlint (.github/workflows)
         run: just actionlint
       - name: arch-check (.herdsman/arch.toml)

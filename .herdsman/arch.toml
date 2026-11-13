@@ -1,4 +1,4 @@
-# `herdsman arch-check` (just arch): the layers, the banned calls and the size limits.
+# `drover arch-check` (just arch): the layers, the banned calls and the size limits.
 [[layer]]
 name = "core"
 paths = ["crates/shed-core/src/**"]
