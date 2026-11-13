@@ -96,7 +96,7 @@ fn a_terminal_replaced_under_the_same_name_gets_the_messages() {
     let socket = Paths::in_dir(&dir).socket;
     let mut events = UnixStream::connect(&socket).expect("connect");
     let hello = json!({"jsonrpc": "2.0", "id": 1, "method": "hello",
-        "params": {"product": "shed", "version": env!("CARGO_PKG_VERSION")}});
+        "params": shed_server::proto::Hello::ours()});
     let sub = json!({"jsonrpc": "2.0", "id": 2, "method": "events", "params": {"since": 0}});
     writeln!(events, "{hello}\n{sub}").expect("write");
     events

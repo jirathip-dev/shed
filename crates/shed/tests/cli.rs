@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
 use shed_core::{Size, Terminal};
+use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
@@ -99,10 +100,7 @@ impl Transcript {
 
 #[test]
 fn hello_prints_the_version() {
-    assert_eq!(
-        shed(&["hello"]),
-        format!("shed {}\n", env!("CARGO_PKG_VERSION"))
-    );
+    assert_eq!(shed(&["hello"]), format!("shed {LONG_VERSION}\n"));
 }
 
 #[test]
@@ -113,11 +111,56 @@ fn schema_prints_the_committed_openrpc_document() {
 }
 
 #[test]
-fn version_flag_prints_the_version() {
+fn version_flag_prints_the_version_and_the_git_sha() {
+    let sha = git_sha();
     assert_eq!(
         shed(&["--version"]),
-        format!("shed {}\n", env!("CARGO_PKG_VERSION"))
+        format!("shed {} ({sha})\n", env!("CARGO_PKG_VERSION"))
     );
+}
+
+fn git_sha() -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("git runs");
+    String::from_utf8(out.stdout)
+        .expect("utf-8")
+        .trim()
+        .to_owned()
+}
+
+#[test]
+fn a_client_of_a_newer_protocol_exits_at_once_with_the_mismatch_line() {
+    let dir = temp_dir("protocol");
+    let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
+    let (done, held) = std::sync::mpsc::channel::<()>();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept");
+        let mut hello = String::new();
+        BufReader::new(&stream)
+            .read_line(&mut hello)
+            .expect("hello");
+        let older = json!({"jsonrpc": "2.0", "id": 1, "result":
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 1}});
+        std::io::Write::write_all(&mut stream, format!("{older}\n").as_bytes()).expect("reply");
+        held.recv_timeout(Duration::from_secs(10)).ok();
+    });
+    let started = Instant::now();
+    let out = shed_in(&dir, &["ls"]);
+    let took = started.elapsed();
+    done.send(()).ok();
+    server.join().expect("fake server");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        format!(
+            "shed: SHED_VERSION: client {BUILD} / server 56de739: protocol {PROTOCOL} vs {}; restart shed serve\n",
+            PROTOCOL - 1
+        )
+    );
+    assert!(took < Duration::from_secs(2), "took {took:?}");
 }
 
 #[test]
@@ -425,11 +468,7 @@ fn run_autostart_starts_a_detached_server() {
     );
     assert_eq!(stdout(&out), "t1\n");
     let socket = dir.join("shed.sock");
-    let started = format!(
-        "server {} on {} started",
-        env!("CARGO_PKG_VERSION"),
-        socket.display()
-    );
+    let started = format!("server {LONG_VERSION} on {} started", socket.display());
     assert!(
         String::from_utf8_lossy(&out.stderr).contains(&started),
         "{out:?}"
@@ -470,8 +509,10 @@ fn serve_prints_one_ready_line_once_its_socket_accepts() {
     let mut lines = BufReader::new(serve.stdout.take().expect("stdout")).lines();
     let line = lines.next().expect("a line").expect("utf-8");
     let socket = dir.join("shed.sock");
-    let version = env!("CARGO_PKG_VERSION");
-    assert_eq!(line, format!("shed ready {version} {}", socket.display()));
+    assert_eq!(
+        line,
+        format!("shed ready {LONG_VERSION} {}", socket.display())
+    );
     assert!(std::os::unix::net::UnixStream::connect(&socket).is_ok());
     serve.kill().expect("kill");
     assert!(lines.next().is_none(), "exactly one line");

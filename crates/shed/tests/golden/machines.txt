@@ -32,7 +32,7 @@ $ shed --on box ls
 NAME  STATE   EXIT  PID  RSS  CPU  LABELS  CMD
 t1    exited  143   -    -    -    -       sh -c echo hello from box; exec sleep 100
 $ shed --on old ls
-[exit 1] shed: SHED_VERSION: shed $VERSION here, 9.9.9 on old; install the same version on both, e.g. on old: `cargo install --locked --git https://github.com/jirathip-dev/shed --tag v$VERSION shed`, then restart its server
+[exit 1] shed: SHED_VERSION: shed $BUILD here, 56de739 on old; install the same build on both, e.g. on old: `cargo install --locked --git https://github.com/jirathip-dev/shed --rev $BUILD shed`, then restart its server
 $ shed machine rm old
 old removed
 $ shed machine rm old

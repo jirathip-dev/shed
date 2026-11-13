@@ -2,7 +2,7 @@
 //!
 //! The wire format is newline-delimited JSON-RPC 2.0 over a Unix socket: one [`Request`] per line, one
 //! [`Response`] per line. Every connection starts with [`Method::Hello`]; a client and server of
-//! different products or [`VERSION`]s are refused with [`ErrorCode::Version`]. `docs/protocol.md` is generated
+//! different products or [`PROTOCOL`]s are refused with [`ErrorCode::Version`]. `docs/protocol.md` is generated
 //! from these types (`SHED_BLESS=1 cargo test -p shed-proto`); CI fails when it drifts.
 #![forbid(unsafe_code)]
 
@@ -14,8 +14,17 @@ use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// The protocol version: the shed version. Client and server must match exactly.
+/// The shed version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// The git commit this build was made from, or `unknown` outside a git checkout.
+pub const BUILD: &str = env!("SHED_BUILD");
+
+/// `<semver> (<sha>)`, as `shed --version`, `shed hello` and the server's ready line print it.
+pub const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SHED_BUILD"), ")");
+
+/// The wire protocol version; bump it with any change to the messages. Client and server must match.
+pub const PROTOCOL: u32 = 1;
 
 /// The JSON-RPC version string every message carries.
 pub const JSONRPC: &str = "2.0";
@@ -106,12 +115,18 @@ impl RpcError {
         }
     }
 
-    /// The version refusal: `SHED_VERSION: client shed x, server shed y; restart the server`.
+    /// The protocol refusal: `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`.
     #[must_use]
-    pub fn version(client: &str, server: &str) -> Self {
+    pub fn version(client: &Hello, server: &Hello) -> Self {
         Self::new(
             ErrorCode::Version,
-            format!("client {client}, server {server}; restart the server"),
+            format!(
+                "client {} / server {}: protocol {} vs {}; restart shed serve",
+                client.label(),
+                server.label(),
+                client.protocol,
+                server.protocol
+            ),
         )
     }
 }
@@ -353,7 +368,7 @@ impl Method {
     pub fn summary(self) -> &'static str {
         match self {
             Self::Hello => {
-                "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`."
+                "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`."
             }
             Self::Run => {
                 "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
@@ -425,35 +440,53 @@ impl Method {
     }
 }
 
-/// `hello` params and result: the sender's product and version.
+/// `hello` params and result: the sender's product, version, build and protocol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Hello {
-    /// The product, `shed`; a peer that sends none is refused like another version.
+    /// The product, `shed`; a peer that sends none is refused like another protocol.
     #[serde(default)]
     pub product: String,
     /// The shed version.
     pub version: String,
+    /// The git commit the sender was built from.
+    #[serde(default)]
+    pub build: String,
+    /// The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.
+    #[serde(default)]
+    pub protocol: u32,
 }
 
 impl Hello {
-    /// This build's hello: `shed` and [`VERSION`].
+    /// This build's hello: `shed`, [`VERSION`], [`BUILD`] and [`PROTOCOL`].
     #[must_use]
     pub fn ours() -> Self {
         Self {
             product: "shed".to_owned(),
             version: VERSION.to_owned(),
+            build: BUILD.to_owned(),
+            protocol: PROTOCOL,
         }
     }
 
-    /// `shed 1.2.3`, or `unnamed 1.2.3` without a product.
+    /// Whether a peer that sent this hello speaks our protocol.
+    #[must_use]
+    pub fn compatible(&self) -> bool {
+        self.product == "shed" && self.protocol == PROTOCOL
+    }
+
+    /// The build's sha (`unknown` when it sent none), after the product unless that is `shed`.
     #[must_use]
     pub fn label(&self) -> String {
-        let product = if self.product.is_empty() {
-            "unnamed"
+        let build = if self.build.is_empty() {
+            "unknown"
         } else {
-            &self.product
+            &self.build
         };
-        format!("{product} {}", self.version)
+        match self.product.as_str() {
+            "shed" => build.to_owned(),
+            "" => format!("unnamed {build}"),
+            product => format!("{product} {build}"),
+        }
     }
 }
 

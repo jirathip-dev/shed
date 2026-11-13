@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json, to_value};
 use shed_proto::{
     AcpSession, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind, EventsParams,
     ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState, LsParams,
-    MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported, Request,
+    MachineStats, Method, ModelParams, PROTOCOL, Parent, ReadParams, ReadResult, Reported, Request,
     ResizeParams, Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams,
     State, StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams,
     VERSION, WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
@@ -261,12 +261,20 @@ fn read_example() -> (Value, Value) {
     )
 }
 
+fn peer(build: &str, protocol: u32) -> Hello {
+    Hello {
+        build: build.into(),
+        protocol,
+        ..Hello::ours()
+    }
+}
+
 fn example(method: Method) -> (Value, Value) {
     let running = || to_value(info(State::Running)).unwrap();
     let exited = || to_value(info(State::Exited)).unwrap();
     match method {
         Method::Hello => {
-            let hello = to_value(Hello::ours()).unwrap();
+            let hello = to_value(peer("4254d78", PROTOCOL)).unwrap();
             (hello.clone(), hello)
         }
         Method::Run => (run_params(), running()),
@@ -485,13 +493,13 @@ fn markdown() -> String {
     let mut md = format!(
         "# shed protocol\n\n\
          <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto`; do not edit. -->\n\n\
-         Version: `{VERSION}`. Client and server must run the same version.\n\n\
+         Version: `{VERSION}`, protocol `{PROTOCOL}`. Client and server must speak the same protocol.\n\n\
          Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:\n\
          `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one\n\
          response per line; a request without an `id` is a notification and gets no response.\n\n\
          Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`; another\n\
-         product or version is refused with `SHED_VERSION: client shed x, server shed y; restart the server`\n\
-         (a peer that sends no `product` shows as `unnamed`).\n\n\
+         product or protocol is refused with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>;\n\
+         restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `protocol` as 0).\n\n\
          A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is\n\
          the exit status (128 + N for signal N), `null` while running or when the program was lost in a server\n\
          restart; `pid` is set while running; `reported` is the state the program last reported (absent until\n\
@@ -549,7 +557,10 @@ fn markdown() -> String {
     for code in ErrorCode::ALL {
         writeln!(md, "| {} | `{}` |", code.code(), code.name()).unwrap();
     }
-    let refusal = Response::err(1.into(), RpcError::version("0.1.0", VERSION));
+    let refusal = Response::err(
+        1.into(),
+        RpcError::version(&peer("02fcf97", PROTOCOL + 1), &peer("56de739", PROTOCOL)),
+    );
     write!(md, "\n```json\n{}\n```\n", line(&refusal)).unwrap();
     md
 }
@@ -758,7 +769,7 @@ fn every_golden_message_validates_against_its_schema() {
     for update in screen_updates() {
         check(&doc, updates, &to_value(&update).unwrap()).unwrap_or_else(|e| panic!("{e}"));
     }
-    let refusal = RpcError::version("0.1.0", VERSION);
+    let refusal = RpcError::version(&peer("02fcf97", PROTOCOL + 1), &peer("56de739", PROTOCOL));
     let error = &doc["components"]["errors"]["SHED_VERSION"];
     assert_eq!(error["code"], refusal.code);
     assert!(
@@ -806,7 +817,7 @@ fn method_names_round_trip() {
 #[test]
 fn version_refusal_reads_as_specified() {
     assert_eq!(
-        RpcError::version("0.1.0", "0.2.0").message,
-        "SHED_VERSION: client 0.1.0, server 0.2.0; restart the server"
+        RpcError::version(&peer("02fcf97", 2), &peer("56de739", 1)).message,
+        "SHED_VERSION: client 02fcf97 / server 56de739: protocol 2 vs 1; restart shed serve"
     );
 }

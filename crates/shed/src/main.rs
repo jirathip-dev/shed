@@ -32,7 +32,7 @@ use shed_server::proto::{
 use shed_server::{Client, Paths};
 
 #[derive(Parser)]
-#[command(version)]
+#[command(version = shed_server::proto::LONG_VERSION)]
 struct Cli {
     #[arg(long, global = true)]
     dir: Option<PathBuf>,
@@ -436,7 +436,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
     let json = cli.json;
     let server = Server::new(&paths, cli.dir.as_deref(), cli.on, &mut cli.command)?;
     match cli.command {
-        Command::Hello => out::line(format_args!("shed {}", env!("CARGO_PKG_VERSION"))),
+        Command::Hello => out::line(format_args!("shed {}", shed_server::proto::LONG_VERSION)),
         Command::Schema => out::line(format_args!("{:#}", shed_server::proto::openrpc())),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
         Command::Run(args) => run_terminal(&server, json, *args)?,
@@ -992,7 +992,7 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
         Ok(line) => match line.trim_end().strip_prefix("shed ready ") {
             Some(ready) => out::err(format_args!(
                 "shed: server {} started",
-                ready.replacen(' ', " on ", 1)
+                ready.replacen(") ", ") on ", 1)
             )),
             None => bail!("shed serve exited ({}) before it was ready", child.wait()?),
         },

@@ -13,10 +13,16 @@ use std::path::{Path, PathBuf};
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
-use shed_server::proto::{Method, ReadParams, ReadResult, SendParams, State, TerminalInfo};
+use shed_server::proto::{
+    BUILD, Hello, Method, PROTOCOL, ReadParams, ReadResult, SendParams, State, TerminalInfo,
+};
 use shed_server::{Client, Paths};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn ours() -> Value {
+    serde_json::to_value(Hello::ours()).expect("hello json")
+}
 
 struct Conn {
     reader: BufReader<UnixStream>,
@@ -65,7 +71,7 @@ impl Conn {
 
     fn events(dir: &Path, params: &Value) -> Self {
         let mut c = Self::open(dir);
-        c.result("hello", &json!({"product": "shed", "version": VERSION}));
+        c.result("hello", &ours());
         assert_eq!(c.result("events", params), json!({}));
         c
     }
@@ -90,7 +96,8 @@ impl Goldens {
             let s = s
                 .replace(self.dir.to_str().expect("utf-8 dir"), "$DIR")
                 .replace(&format!("\"{VERSION}\""), "\"$VERSION\"")
-                .replace(&format!("server {VERSION};"), "server $VERSION;");
+                .replace(&format!("\"{BUILD}\""), "\"$BUILD\"")
+                .replace(&format!("server {BUILD}:"), "server $BUILD:");
             let mut out = String::new();
             let mut rest = s.as_str();
             while let Some(at) = rest.find("\"pid\":") {
@@ -132,7 +139,7 @@ impl Goldens {
 
 fn record_events(dir: &Path, goldens: &mut Goldens) {
     let mut events = Conn::open(dir);
-    events.result("hello", &json!({"product": "shed", "version": VERSION}));
+    events.result("hello", &ours());
     let (request, response, _) = events.call(22, "events", &json!({"since": 0}));
     let replay: Vec<String> = (0..4).map(|_| events.next()).collect();
     let response = format!("{response}\n{}", replay.join("\n"));
@@ -171,10 +178,7 @@ fn run_ls_read_kill_over_the_socket_match_the_goldens() {
     goldens.record("errors", &first);
     assert_eq!(first.2["error"]["code"], -32001);
 
-    goldens.record(
-        "hello",
-        &c.call(1, "hello", &json!({"product": "shed", "version": VERSION})),
-    );
+    goldens.record("hello", &c.call(1, "hello", &ours()));
     let run = c.call(
         2,
         "run",
@@ -372,19 +376,17 @@ fn a_kept_terminal_comes_back_as_a_shell_in_its_cwd() {
 }
 
 #[test]
-fn a_version_mismatch_is_refused() {
+fn a_protocol_mismatch_is_refused() {
     let dir = temp_dir("version");
     let _server = Server::start(&dir);
     let mut c = Conn::open(&dir);
-    let (_, line, _) = c.call(
-        1,
-        "hello",
-        &json!({"product": "shed", "version": "0.0.0-other"}),
-    );
+    let newer = json!({"product": "shed", "version": VERSION, "build": "02fcf97", "protocol": PROTOCOL + 1});
+    let (_, line, _) = c.call(1, "hello", &newer);
     assert_eq!(
         line,
         format!(
-            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client shed 0.0.0-other, server shed {VERSION}; restart the server"}}}}"#
+            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client 02fcf97 / server {BUILD}: protocol {} vs {PROTOCOL}; restart shed serve"}}}}"#,
+            PROTOCOL + 1
         )
     );
     let (_, _, after) = c.call(2, "ls", &json!({}));
@@ -398,8 +400,18 @@ fn a_version_mismatch_is_refused() {
     assert_eq!(
         line,
         format!(
-            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client unnamed {VERSION}, server shed {VERSION}; restart the server"}}}}"#
+            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client unnamed unknown / server {BUILD}: protocol 0 vs {PROTOCOL}; restart shed serve"}}}}"#
         )
+    );
+
+    let mut same = Conn::open(&dir);
+    let other_build =
+        json!({"product": "shed", "version": "9.9.9", "build": "56de739", "protocol": PROTOCOL});
+    let (_, _, reply) = same.call(1, "hello", &other_build);
+    assert_eq!(
+        reply["result"],
+        ours(),
+        "same protocol, other build: accepted"
     );
 }
 
@@ -412,7 +424,7 @@ fn rpc_discover_answers_the_openrpc_document_before_and_after_hello() {
     let committed: Value = serde_json::from_str(&committed).expect("the document is JSON");
     let mut c = Conn::open(&dir);
     assert_eq!(c.result("rpc.discover", &json!({})), committed);
-    c.result("hello", &json!({"product": "shed", "version": VERSION}));
+    c.result("hello", &ours());
     assert_eq!(c.result("rpc.discover", &json!({})), committed);
 }
 
@@ -421,7 +433,7 @@ fn events_stream_in_seq_order_filter_by_label_and_replay_since() {
     let dir = temp_dir("events");
     let _server = Server::start(&dir);
     let mut c = Conn::open(&dir);
-    c.result("hello", &json!({"product": "shed", "version": VERSION}));
+    c.result("hello", &ours());
     let mut live = Conn::events(&dir, &json!({"labels": {"test": "order"}}));
 
     let script = "printf '\\033]7501;state=working\\007'; read x; exit 3";
@@ -491,7 +503,7 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
     let dir = temp_dir("jan");
     let _server = Server::start(&dir);
     let mut c = Conn::open(&dir);
-    c.result("hello", &json!({"product": "shed", "version": VERSION}));
+    c.result("hello", &ours());
     let mut live = Conn::events(&dir, &json!({}));
     let jan = |state: &str| format!(r#"\033]9999;{{"agentType":"jan","state":"{state}"}}\007"#);
     let script = format!(
@@ -528,7 +540,7 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
 
 fn hello(dir: &Path) -> Conn {
     let mut c = Conn::open(dir);
-    c.result("hello", &json!({"product": "shed", "version": VERSION}));
+    c.result("hello", &ours());
     c
 }
 

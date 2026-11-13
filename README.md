@@ -37,7 +37,7 @@ around lanes:
 | Command | What it does |
 |---|---|
 | `shed serve` | The per-user server (launchd/systemd user job). Owns the PTYs, the state and the socket. |
-| `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and print how to load it (or unload it); check the job, socket, version and log. |
+| `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and (re)start the server under it, so the running server is this binary (uninstall prints how to unload it); check the job, socket, log, and that the server runs this binary's build. |
 | `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. |
 | `shed ls [--label k=v] [--json]` | List terminals: name, labels, cwd, state, pid tree, RSS/CPU, age. |
 | `shed get <t>` | One terminal as JSON. |
@@ -165,7 +165,9 @@ shed/
 - **Install:** `scripts/install.sh [BIN_DIR]` (`just install`) builds shed and, on macOS, signs every build with the
   self-signed identity `herdsman-local` that herdsman and cooee share (herdsman's `scripts/signing-identity.sh`
   creates it once), so a Keychain item that trusts one shed build trusts the next; with no identity it keeps the
-  installed binary and exits 1.
+  installed binary and exits 1. When the service job is installed, an install restarts the server (`shed install`
+  stops and starts `dev.shed.serve`, ending its terminals), so the binary and the running server are the same build.
+  `shed --version` prints the build's git sha; a client and server of different protocols refuse each other at once.
 - **Repo files:** `LICENSE` (MIT OR Apache-2.0), `SECURITY.md` (private reporting), `CONTRIBUTING.md` (how to run the
   gates locally: `just check`), and issue templates for bug and feature.
 - **Public-repo hygiene:** placeholders only in docs, tests and fixtures; a CI check bans setup-specific names; secret
