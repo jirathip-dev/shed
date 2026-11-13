@@ -19,7 +19,7 @@ use std::time::Duration;
 use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
@@ -343,6 +343,8 @@ struct RunArgs {
     resume: Option<String>,
     #[arg(long, value_name = "FILE", requires = "acp")]
     mcp: Option<PathBuf>,
+    #[arg(long, value_name = "JSON", requires = "acp", value_parser = |s: &str| serde_json::from_str::<Map<String, Value>>(s))]
+    meta: Option<Map<String, Value>>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
     #[arg(long, value_name = "RxC", value_parser = size)]
@@ -539,6 +541,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         acp: args.acp,
         resume: args.resume,
         mcp_servers,
+        meta: args.meta,
         no_hibernate: args.no_hibernate,
         machine: server.machine(),
         rows: args.size.map(|s| s.0),

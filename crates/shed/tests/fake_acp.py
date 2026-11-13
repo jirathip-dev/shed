@@ -26,6 +26,9 @@ loadSession is off.
 `--mcp FILE` is the JSON list of MCP servers session/new and session/load must get (default none);
 each entry is checked against ACP's stdio, http and sse shapes. `--mcp-caps http,sse` advertises
 those `mcpCapabilities`.
+
+`--meta FILE` is the JSON object session/new and session/load must get as `_meta`; without it they
+must carry no `_meta` and no key shed did not send before.
 """
 import json
 import sys
@@ -37,6 +40,7 @@ MODEL = "fast"
 
 
 MCP = json.load(open(sys.argv[sys.argv.index("--mcp") + 1])) if "--mcp" in sys.argv else []
+META = json.load(open(sys.argv[sys.argv.index("--meta") + 1])) if "--meta" in sys.argv else None
 CAPS = sys.argv[sys.argv.index("--mcp-caps") + 1].split(",") if "--mcp-caps" in sys.argv else []
 KEPT = []
 CANNED = "--canned" in sys.argv
@@ -74,6 +78,13 @@ def check_mcp(method, servers):
             check(isinstance(s.get("url"), str) and pairs(s.get("headers")),
                   f"{method}: {kind} server: {s}")
     check(servers == MCP, f"{method}: mcpServers {servers} != {MCP}")
+
+
+def check_keys(method, params, keys):
+    """Exits unless `params` has exactly `keys`, plus `_meta` equal to --meta's when it is given."""
+    want = set(keys) | ({"_meta"} if META is not None else set())
+    check(set(params) == want, f"{method}: keys {sorted(params)} != {sorted(want)}")
+    check(params.get("_meta") == META, f"{method}: _meta {params.get('_meta')} != {META}")
 
 
 def send(msg):
@@ -166,12 +177,14 @@ def main():
         elif method == "session/new":
             check(str(params.get("cwd", "")).startswith("/"), "session/new: absolute cwd")
             check_mcp("session/new", params.get("mcpServers"))
+            check_keys("session/new", params, ["cwd", "mcpServers"])
             send({"id": rid, "result": {"sessionId": SESSION, "configOptions": options()}})
         elif method == "session/load":
             check(HISTORY is not None, "session/load without loadSession")
             check(params.get("sessionId") == SESSION, "session/load: sessionId")
             check(str(params.get("cwd", "")).startswith("/"), "session/load: absolute cwd")
             check_mcp("session/load", params.get("mcpServers"))
+            check_keys("session/load", params, ["sessionId", "cwd", "mcpServers"])
             with open(HISTORY, "a+") as f:
                 f.seek(0)
                 for line in f:

@@ -33,6 +33,7 @@ shed cancel t1                    # or: shed keys t1 esc
 shed model t1 opus                # one of `shed get t1`'s session.models
 shed run --acp claude-acp --resume <session id>   # load a past session (`shed get`'s session.id)
 shed run --acp claude-acp --mcp servers.json      # with MCP servers (below)
+shed run --acp claude-acp --meta '{"k": 1}'       # with session options (below)
 shed send t1 "/review src/"                       # a slash command is an ordinary prompt
 ```
 
@@ -94,6 +95,14 @@ stdio servers always go through; `http` and `sse` ones only when the agent's `in
 refused by `run` with its index and name. Env and header values reach the bridge in its environment only
 (never the agent's): shed never writes or logs them, and the `session` (event and `shed get`) shows the
 servers with each value as `***`. A resume needs `--mcp` again.
+
+### Session options
+
+`--meta <json>` (the `run` method's `meta`) is one JSON object that shed sends unchanged as `_meta` on
+`session/new`, on `session/load` and on each wake from hibernation; without it the requests carry no `_meta`.
+shed does not read it: which keys exist is the agent's business; see the agent's own docs. It reaches the
+bridge in its environment only, never the agent's command line, environment or a label. drover's lanes
+(herdsman#923) and cooee's personas are its callers. A resume needs `--meta` again.
 
 The agent's slash commands (`available_commands_update`) are the session's `commands`
 (`[name, description, input hint]`); each change emits a `session` event. Run one by sending `/name …`.
