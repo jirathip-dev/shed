@@ -1194,6 +1194,182 @@
       }
     },
     {
+      "name": "exec",
+      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "cmd",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The program and its arguments."
+          }
+        },
+        {
+          "name": "cwd",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its working directory; default the server's."
+          }
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "End it after this many seconds."
+          }
+        },
+        {
+          "name": "stdin",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "Bytes fed to its stdin, then closed."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run it on this machine, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ExecResult"
+        }
+      }
+    },
+    {
+      "name": "file.read",
+      "description": "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "schema": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0,
+            "maximum": 255
+          }
+        }
+      }
+    },
+    {
+      "name": "file.write",
+      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "schema": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "rpc.discover",
       "description": "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.",
       "paramStructure": "by-name",
@@ -2482,6 +2658,42 @@
           }
         ],
         "description": "A held link's state."
+      },
+      "ExecResult": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The exit code, or 128 + the signal that ended it."
+          },
+          "stdout": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "What it wrote to stdout."
+          },
+          "stderr": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "description": "What it wrote to stderr."
+          }
+        },
+        "required": [
+          "code",
+          "stdout",
+          "stderr"
+        ],
+        "description": "`exec` result."
       }
     },
     "errors": {
@@ -2536,6 +2748,10 @@
       "NO_LINK": {
         "code": -32007,
         "message": "NO_LINK"
+      },
+      "IO": {
+        "code": -32008,
+        "message": "IO"
       }
     }
   }

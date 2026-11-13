@@ -231,6 +231,33 @@ Each configured machine's held link: `up`, `reconnecting` or `down`, since when,
 {"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
 ```
 
+### `exec`
+
+Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","machine":"box","timeout":30.0}}
+{"jsonrpc":"2.0","id":1,"result":{"code":0,"stderr":[],"stdout":[32,77,32,115,114,99,47,108,105,98,46,114,115,10]}}
+```
+
+### `file.read`
+
+A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"file.read","params":{"path":"/home/user/project/VERSION"}}
+{"jsonrpc":"2.0","id":1,"result":[49,46,50,46,48,10]}
+```
+
+### `file.write`
+
+Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"path":"/home/user/project/VERSION"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
 ### `rpc.discover`
 
 The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.
@@ -291,6 +318,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32005 | `SPAWN_FAILED` |
 | -32006 | `READONLY` |
 | -32007 | `NO_LINK` |
+| -32008 | `IO` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 0.1.0, server 0.0.0; restart the server"}}

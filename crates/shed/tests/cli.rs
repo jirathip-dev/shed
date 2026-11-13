@@ -555,7 +555,12 @@ fn timing_report() {
         &dir,
         &["run", "--name", "t", "--cwd", d, "--", "sleep", "100"],
     ));
-    for args in [&["ls"][..], &["get", "t"], &["read", "t"]] {
+    for args in [
+        &["ls"][..],
+        &["get", "t"],
+        &["read", "t"],
+        &["exec", "--", "true"],
+    ] {
         let mut ms: Vec<f64> = (0..CALLS)
             .map(|_| {
                 let start = Instant::now();

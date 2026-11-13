@@ -22,14 +22,15 @@ use std::io::{self, BufRead as _, BufReader, BufWriter, Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use proto::{
-    ErrorCode, Hello, Method, Request, ResizeParams, Response, RpcError, StatsParams, Target,
-    TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams, WaitResult,
-    WatchParams,
+    ErrorCode, ExecParams, ExecResult, FileParams, Hello, Method, Request, ResizeParams, Response,
+    RpcError, StatsParams, Target, TerminalParams, TerminalResizeParams, VERSION, WaitOutcome,
+    WaitParams, WaitResult, WatchParams,
 };
 use registry::{Registry, Stream};
 use rustix::process::{Resource, Rlimit, Signal, getrlimit, setrlimit};
@@ -466,6 +467,9 @@ async fn linked(
     if let Some((machine, params)) = links::remote(method, request) {
         return Some(links.call(&machine, method, params).await);
     }
+    if let Method::MachineStats | Method::Exec | Method::FileRead | Method::FileWrite = method {
+        return Some(here(registry, method, request).await);
+    }
     if method == Method::MachineLinks {
         links.sync(registry);
         return Some(json(&links.report()));
@@ -621,6 +625,70 @@ async fn machine_stats(registry: &Shared, p: StatsParams) -> Result<Value, RpcEr
     let mut reg = lock(registry);
     reg.refresh()?;
     json(&reg.machine_stats(now, p.since))
+}
+
+async fn here(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
+    match method {
+        Method::MachineStats => machine_stats(registry, params(request)?).await,
+        Method::Exec => exec(params(request)?).await,
+        _ => {
+            let p: FileParams = params(request)?;
+            let path = p.path.display().to_string();
+            let done = blocking(move || file(p)).await?;
+            done.map_err(|e| io_error(format!("{path}: {e}")))
+        }
+    }
+}
+
+async fn exec(p: ExecParams) -> Result<Value, RpcError> {
+    let timeout = p
+        .timeout
+        .map_or(Ok(Duration::MAX), Duration::try_from_secs_f64);
+    let timeout = timeout.map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))?;
+    let cwd = p.cwd.unwrap_or_else(|| PathBuf::from("."));
+    let ran = runner::exec(&p.cmd, &cwd, p.stdin, timeout, proto::REPLY_LIMIT).await;
+    let (status, stdout, stderr) = ran.map_err(io_error)?;
+    within_limit(stdout.len() + stderr.len()).map_err(io_error)?;
+    let signal = status.signal().map(|s| s.saturating_add(128));
+    let code = status.code().or(signal).unwrap_or(1);
+    json(&ExecResult {
+        code,
+        stdout,
+        stderr,
+    })
+}
+
+fn file(p: FileParams) -> io::Result<Value> {
+    let Some(data) = p.data else {
+        let mut bytes = Vec::new();
+        let mut file = fs::File::open(&p.path)?.take(proto::REPLY_LIMIT.saturating_add(1));
+        file.read_to_end(&mut bytes)?;
+        within_limit(bytes.len())?;
+        return serde_json::to_value(bytes).map_err(io::Error::other);
+    };
+    let mut temp = p.path.clone().into_os_string();
+    temp.push(format!(".shed-{}", runner::pid()));
+    let mode = fs::metadata(&p.path).map(|m| m.permissions());
+    fs::write(&temp, data)
+        .and_then(|()| mode.map_or(Ok(()), |mode| fs::set_permissions(&temp, mode)))
+        .and_then(|()| fs::rename(&temp, &p.path))
+        .inspect_err(|_| _ = fs::remove_file(&temp))?;
+    Ok(empty())
+}
+
+fn within_limit(len: usize) -> io::Result<()> {
+    if u64::try_from(len).is_ok_and(|len| len <= proto::REPLY_LIMIT) {
+        return Ok(());
+    }
+    let why = format!(
+        "{len} bytes, over the reply limit of {}",
+        proto::REPLY_LIMIT
+    );
+    Err(io::Error::new(io::ErrorKind::FileTooLarge, why))
+}
+
+fn io_error(e: impl std::fmt::Display) -> RpcError {
+    RpcError::new(ErrorCode::Io, e)
 }
 
 fn empty() -> Value {
