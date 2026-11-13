@@ -736,7 +736,7 @@ pub enum EventKind {
         stop_reason: String,
     },
     /// ACP: the session is ready, or its model or slash commands changed.
-    Session(AcpSession),
+    Session(Box<AcpSession>),
     /// ACP: the agent's context window use and cost changed (`usage_update`).
     Usage(AcpUsage),
 }
@@ -786,7 +786,7 @@ pub struct AcpSession {
     pub commands: Vec<[String; 3]>,
     /// The agent's last `usage_update`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage: Option<Box<AcpUsage>>,
+    pub usage: Option<AcpUsage>,
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.

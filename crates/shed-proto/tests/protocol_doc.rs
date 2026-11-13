@@ -47,7 +47,7 @@ fn session() -> AcpSession {
             "name": "web", "type": "http", "url": "https://mcp.example/"}),
         ],
         commands: vec![["review".into(), "Review the diff".into(), "files".into()]],
-        usage: Some(Box::new(usage())),
+        usage: Some(usage()),
     }
 }
 
@@ -113,7 +113,7 @@ fn events() -> Vec<Event> {
             text: "Fixed; all 12 tests pass.".into(),
             stop_reason: "end_turn".into(),
         },
-        EventKind::Session(session()),
+        EventKind::Session(Box::new(session())),
         EventKind::Usage(usage()),
     ]
     .into_iter()

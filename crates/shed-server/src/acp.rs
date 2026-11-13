@@ -604,7 +604,7 @@ impl Session {
                     .and_then(serde_json::from_value)
                     .ok();
                 if let Some(usage) = self.shown.usage.clone() {
-                    self.emit(EventKind::Usage(*usage));
+                    self.emit(EventKind::Usage(usage));
                 }
             }
             SessionUpdate::AvailableCommandsUpdate(u) => {
@@ -650,7 +650,7 @@ impl Session {
             self.shown.models = choices.iter().map(pair).collect();
         }
         self.send(Out::Emit(
-            EventKind::Session(self.shown.clone()),
+            EventKind::Session(Box::new(self.shown.clone())),
             self.replay,
             !self.waking,
         ))
