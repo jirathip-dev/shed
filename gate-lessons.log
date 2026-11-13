@@ -1,0 +1,11 @@
+herdsman lesson-check
+! env -u GITHUB_STEP_SUMMARY herdsman lesson-check --rules ci/fixtures/lesson-active.md
+FAIL always-fails: `false`
+```
+
+```
+env -u GITHUB_STEP_SUMMARY herdsman lesson-check --rules ci/fixtures/lesson-shadow.md
+would-fail (shadow) always-fails: `false`
+```
+
+```

@@ -1,0 +1,9 @@
+cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking tokio v1.54.1
+    Checking shed-proto v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-proto)
+    Checking shed-core v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-core)
+    Checking shed-server v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-server)
+    Checking shed v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.82s
+# At most 10 allows in the workspace, each with a reason (clippy checks the reason).
+test "$(grep -rE 'allow\(' crates | wc -l)" -le 10

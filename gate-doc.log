@@ -1,0 +1,11 @@
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+    Checking tokio v1.54.1
+    Checking shed-proto v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-proto)
+ Documenting shed-proto v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-proto)
+    Checking shed-core v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-core)
+ Documenting shed-core v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-core)
+    Checking shed-server v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-server)
+ Documenting shed-server v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed-server)
+ Documenting shed v0.0.0 (/Users/jkmacmini/.local/share/herdsman/work/shed/issue-80/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.71s
+   Generated /Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-80/doc/shed/index.html and 3 other files

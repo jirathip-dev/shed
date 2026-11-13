@@ -1,0 +1,12 @@
+drain plain: 2917 ms, 34 MB/s
+drain colour: 3580 ms, 28 MB/s
+ 7:52  up 2 days, 22:07, 1 user, load averages: 30.62 16.79 28.41
+drain plain: 1874 ms, 53 MB/s
+drain colour: 1579 ms, 63 MB/s
+ 7:52  up 2 days, 22:07, 1 user, load averages: 30.25 16.94 28.39
+drain plain: 2102 ms, 48 MB/s
+drain colour: 1374 ms, 73 MB/s
+ 7:52  up 2 days, 22:07, 1 user, load averages: 32.96 17.73 28.60
+drain raw plain: 758 ms, 134 MB/s
+drain raw colour: 902 ms, 113 MB/s
+drain raw redraw: 614 ms, 163 MB/s
