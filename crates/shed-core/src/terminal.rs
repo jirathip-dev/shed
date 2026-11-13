@@ -4,7 +4,7 @@ use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
 use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
 use std::path::Path;
-use std::sync::mpsc::{RecvTimeoutError, Sender, SyncSender, sync_channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
@@ -69,7 +69,7 @@ pub struct Terminal {
     pid: i32,
 }
 
-type Outputs = Mutex<Option<Vec<mpsc::UnboundedSender<Vec<u8>>>>>;
+type Outputs = Mutex<Option<Vec<mpsc::UnboundedSender<Arc<[u8]>>>>>;
 type Input = (Vec<u8>, SyncSender<std::io::Result<()>>);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -138,7 +138,19 @@ impl Terminal {
         let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
         std::thread::spawn(move || {
-            read_loop(&reader, &sink, &subs, &watcher, log);
+            let (pty, screen, outputs) =
+                (Arc::clone(&reader), Arc::clone(&sink), Arc::clone(&subs));
+            let watch = Arc::clone(&watcher);
+            let (logs, logger) = stage(move |rx: Receiver<Vec<u8>>| {
+                let mut log = log;
+                batches(&rx).try_for_each(|bytes| log.as_mut()?.append(&bytes).ok())
+            });
+            let (chunks, feeder) =
+                stage(move |rx| feed_loop(&rx, &pty, &screen, &outputs, &watch, Some(logs)));
+            read_loop(&reader, &chunks);
+            drop(chunks);
+            feeder.join().ok();
+            logger.join().ok();
             drop(reader);
             *lock(&subs) = None;
             bump(&watcher, |_| {});
@@ -182,6 +194,12 @@ impl Terminal {
     #[must_use]
     pub fn changes(&self) -> u64 {
         self.watch.borrow().changes
+    }
+
+    /// Whether the program has turned bracketed paste on.
+    #[must_use]
+    pub fn bracketed_paste(&self) -> bool {
+        lock(&self.screen).bracketed_paste()
     }
 
     /// The last `n` lines of scrollback and screen as plain text.
@@ -262,9 +280,10 @@ impl Terminal {
         }
     }
 
-    /// The program's raw output from now on, chunk by chunk; the channel closes when the PTY does.
+    /// The program's raw output from now on, chunk by chunk, each chunk shared by all subscribers; the
+    /// channel closes when the PTY does.
     #[must_use]
-    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
+    pub fn subscribe(&self) -> mpsc::UnboundedReceiver<Arc<[u8]>> {
         let (tx, rx) = mpsc::unbounded_channel();
         if let Some(subs) = lock(&self.outputs).as_mut() {
             subs.push(tx);
@@ -389,41 +408,71 @@ fn pty_size(size: Size) -> pty_process::Size {
     pty_process::Size::new(size.rows.max(1), size.cols.max(1))
 }
 
-fn read_loop(
-    pty: &pty_process::blocking::Pty,
-    screen: &Mutex<Screen>,
-    outputs: &Outputs,
-    watch: &watch::Sender<Status>,
-    mut log: Option<Log>,
-) {
-    let mut buf = [0u8; 8192];
+const DEPTH: usize = 256;
+
+fn stage<T: Send + 'static, R: Send + 'static>(
+    run: impl FnOnce(Receiver<T>) -> R + Send + 'static,
+) -> (SyncSender<T>, std::thread::JoinHandle<R>) {
+    let (tx, rx) = std::sync::mpsc::sync_channel(DEPTH);
+    (tx, std::thread::spawn(move || run(rx)))
+}
+
+fn batches(rx: &Receiver<Vec<u8>>) -> impl Iterator<Item = Vec<u8>> + '_ {
+    rx.iter().map(|mut chunk| {
+        for more in rx.try_iter().take(DEPTH) {
+            chunk.extend(more);
+        }
+        chunk
+    })
+}
+
+fn read_loop(pty: &pty_process::blocking::Pty, chunks: &SyncSender<Vec<u8>>) {
+    let mut buf = vec![0u8; 1 << 16];
     loop {
         match (&*pty).read(&mut buf) {
             Ok(0) => return,
             Ok(n) => {
-                let chunk = buf.get(..n).unwrap_or_default();
-                let (relayed, replies) = {
-                    let mut screen = lock(screen);
-                    let relayed = screen.relay(chunk);
-                    let report = screen.take_report();
-                    bump(watch, |s| {
-                        s.last_output = crate::clock::now();
-                        s.report = report.or_else(|| s.report.take());
-                    });
-                    (relayed, screen.take_replies())
-                };
-                if let Some(subs) = lock(outputs).as_mut() {
-                    subs.retain(|tx| tx.send(relayed.clone()).is_ok());
-                }
-                if log.as_mut().is_some_and(|l| l.append(&relayed).is_err()) {
-                    log = None;
-                }
-                if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {
+                if chunks
+                    .send(buf.get(..n).unwrap_or_default().to_vec())
+                    .is_err()
+                {
                     return;
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(_) => return,
+        }
+    }
+}
+
+fn feed_loop(
+    chunks: &Receiver<Vec<u8>>,
+    pty: &pty_process::blocking::Pty,
+    screen: &Mutex<Screen>,
+    outputs: &Outputs,
+    watch: &watch::Sender<Status>,
+    mut log: Option<SyncSender<Vec<u8>>>,
+) {
+    for chunk in batches(chunks) {
+        let (relayed, replies) = {
+            let mut screen = lock(screen);
+            let relayed = screen.relay(&chunk);
+            let report = screen.take_report();
+            bump(watch, |s| {
+                s.last_output = crate::clock::now();
+                s.report = report.or_else(|| s.report.take());
+            });
+            (relayed, screen.take_replies())
+        };
+        if let Some(subs) = lock(outputs).as_mut().filter(|s| !s.is_empty()) {
+            let shared: Arc<[u8]> = relayed.as_slice().into();
+            subs.retain(|tx| tx.send(Arc::clone(&shared)).is_ok());
+        }
+        if log.as_ref().is_some_and(|l| l.send(relayed).is_err()) {
+            log = None;
+        }
+        if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {
+            return;
         }
     }
 }

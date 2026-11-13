@@ -37,7 +37,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -182,6 +182,21 @@
           }
         },
         {
+          "name": "parent",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Parent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terminal that started it (`shed run` sends `$SHED`)."
+          }
+        },
+        {
           "name": "rows",
           "required": false,
           "schema": {
@@ -219,7 +234,7 @@
     },
     {
       "name": "ls",
-      "description": "List terminals, by name; `labels` keeps those that carry every given label.",
+      "description": "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -232,6 +247,17 @@
             },
             "description": "Only terminals carrying every one of these labels.",
             "default": {}
+          }
+        },
+        {
+          "name": "parent",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only the children of this terminal."
           }
         }
       ],
@@ -345,7 +371,7 @@
     },
     {
       "name": "send",
-      "description": "Type text into the terminal.",
+      "description": "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -362,6 +388,35 @@
           "schema": {
             "type": "string",
             "description": "The text, sent as UTF-8."
+          }
+        },
+        {
+          "name": "no_enter",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: no enter after the text."
+          }
+        },
+        {
+          "name": "no_paste",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: the text as typed keys even when the program has turned bracketed paste on."
+          }
+        },
+        {
+          "name": "draft_wait",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "`send`: seconds after a person's last key that their unsent line holds the send (default 60, 0 off)."
           }
         }
       ],
@@ -491,7 +546,7 @@
     },
     {
       "name": "attach",
-      "description": "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection.",
+      "description": "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -563,7 +618,7 @@
     },
     {
       "name": "wait",
-      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls.",
+      "description": "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -571,7 +626,22 @@
           "required": true,
           "schema": {
             "type": "string",
-            "description": "The terminal's name."
+            "description": "The terminal's name; with `children`, the parent's."
+          }
+        },
+        {
+          "name": "children",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Children"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wait on the terminal's children instead of the terminal."
           }
         },
         {
@@ -1023,15 +1093,44 @@
     },
     {
       "name": "terminal.input",
-      "description": "Type text into the terminal, as `send`.",
+      "description": "Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.",
       "paramStructure": "by-name",
       "params": [
+        {
+          "name": "draft_wait",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "`send`: seconds after a person's last key that their unsent line holds the send (default 60, 0 off)."
+          }
+        },
         {
           "name": "text",
           "required": true,
           "schema": {
             "type": "string",
             "description": "The text, sent as UTF-8."
+          }
+        },
+        {
+          "name": "no_enter",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: no enter after the text."
+          }
+        },
+        {
+          "name": "no_paste",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "`send`: the text as typed keys even when the program has turned bracketed paste on."
           }
         },
         {
@@ -1052,7 +1151,7 @@
     },
     {
       "name": "terminal.keys",
-      "description": "Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.",
+      "description": "Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1446,6 +1545,27 @@
         ],
         "description": "How an ACP bridge answers the agent's permission requests."
       },
+      "Parent": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The parent terminal's name."
+          },
+          "outlive": {
+            "type": "boolean",
+            "description": "Keep running when the parent's program ends; otherwise the child is killed with it."
+          },
+          "notify": {
+            "type": "boolean",
+            "description": "Type a `[shed]` note into the parent when the child blocks, errors or ends, while the parent is not\nworking."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "description": "A child's link to the terminal that started it."
+      },
       "TerminalInfo": {
         "type": "object",
         "properties": {
@@ -1543,6 +1663,17 @@
               }
             ],
             "description": "The ACP agent session, from the bridge's last `session` event."
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Parent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The terminal that started it."
           }
         },
         "required": [
@@ -2046,6 +2177,21 @@
         "type": "object",
         "additionalProperties": false
       },
+      "Children": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "all",
+            "description": "No child is working: each has exited or reports something other than `working`."
+          },
+          {
+            "type": "string",
+            "const": "any",
+            "description": "The next child that reports `done`, `blocked` or `error`, or exits; the result names it."
+          }
+        ],
+        "description": "Which children end a `wait`."
+      },
       "WaitResult": {
         "type": "object",
         "properties": {
@@ -2103,6 +2249,13 @@
               "type": "string"
             },
             "description": "The terminal's labels."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal's parent, if it has one."
           },
           "replay": {
             "type": "boolean",
@@ -2842,6 +2995,10 @@
       "IO": {
         "code": -32008,
         "message": "IO"
+      },
+      "DRAFT_HELD": {
+        "code": -32009,
+        "message": "DRAFT_HELD"
       }
     }
   }

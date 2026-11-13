@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-use shed_proto::{Event, EventKind, EventsParams};
+use shed_proto::{Event, EventKind, EventsParams, TerminalInfo};
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::unix::OwnedWriteHalf;
 use tokio::sync::watch;
@@ -38,19 +38,24 @@ fn line(event: &Event) -> Line {
 }
 
 impl Events {
-    pub(crate) fn emit(&mut self, name: &str, labels: &Labels, kind: EventKind) {
-        self.emit_as(name, labels, kind, false);
+    pub(crate) fn emit(&mut self, t: &TerminalInfo, kind: EventKind) {
+        self.emit_as(t, kind, false);
     }
 
-    pub(crate) fn emit_as(&mut self, name: &str, labels: &Labels, kind: EventKind, replay: bool) {
-        self.seq += 1;
-        let event = Event {
-            seq: self.seq,
-            name: name.to_owned(),
-            labels: labels.clone(),
+    pub(crate) fn emit_as(&mut self, t: &TerminalInfo, kind: EventKind, replay: bool) {
+        self.push(Event {
+            seq: 0,
+            name: t.name.clone(),
+            labels: t.labels.clone(),
+            parent: t.parent.as_ref().map(|p| p.name.clone()),
             kind,
             replay,
-        };
+        });
+    }
+
+    pub(crate) fn push(&mut self, mut event: Event) {
+        self.seq += 1;
+        event.seq = self.seq;
         let bytes = line(&event);
         let mut log = lock(&self.log);
         log.events.push_back((event, bytes));
@@ -88,12 +93,24 @@ pub(crate) struct Subscriber {
 
 impl Subscriber {
     pub(crate) fn take(&mut self) -> Vec<Line> {
+        self.take_with(|(_, line)| Arc::clone(line))
+    }
+
+    pub(crate) fn events(&mut self) -> Vec<Event> {
+        self.take_with(|(event, _)| event.clone())
+    }
+
+    pub(crate) async fn changed(&mut self) -> bool {
+        self.last.changed().await.is_ok()
+    }
+
+    fn take_with<T>(&mut self, f: impl FnMut(&(Event, Line)) -> T) -> Vec<T> {
         let mut log = lock(&self.log);
         let cursor = log.cursors.get(&self.id).copied().unwrap_or_default();
         let start = log.events.partition_point(|(e, _)| e.seq <= cursor);
         let lines = log.events.range(start..);
         let lines = lines.filter(|(e, _)| matches(&self.filter, e));
-        let lines = lines.map(|(_, line)| Arc::clone(line)).collect();
+        let lines = lines.map(f).collect();
         let end = log.events.back().map_or(cursor, |(e, _)| e.seq);
         log.cursors.insert(self.id, end);
         lines
@@ -120,12 +137,18 @@ impl Drop for Subscriber {
 mod tests {
     use super::*;
 
+    pub(super) fn t(labels: &Labels) -> TerminalInfo {
+        let t = serde_json::json!({"name": "t", "labels": labels, "cwd": "/", "cmd": [], "keep": false,
+            "state": "running", "exit": null, "pid": null});
+        serde_json::from_value(t).expect("a terminal")
+    }
+
     #[test]
     fn the_log_keeps_the_last_thousand_for_since() {
         let mut events = Events::default();
         let labels = Labels::from([("role".to_owned(), "impl".to_owned())]);
         for _ in 0..1_005 {
-            events.emit("t", &labels, EventKind::Started);
+            events.emit(&t(&labels), EventKind::Started);
         }
         let all = |events: &mut Events, since| {
             let mut sub = events.subscribe(EventsParams {
@@ -149,7 +172,7 @@ mod tests {
         let mut subs: Vec<_> = (0..3)
             .map(|_| events.subscribe(EventsParams::default()))
             .collect();
-        events.emit("t", &Labels::new(), EventKind::Started);
+        events.emit(&t(&Labels::new()), EventKind::Started);
         let lines: Vec<Line> = subs.iter_mut().flat_map(Subscriber::take).collect();
         let log = lock(&events.log);
         let kept = &log.events[0].1;
@@ -166,7 +189,7 @@ mod tests {
         });
         assert!(sub.take().is_empty());
         for _ in 0..3 {
-            events.emit("t", &Labels::new(), EventKind::Started);
+            events.emit(&t(&Labels::new()), EventKind::Started);
         }
         assert_eq!(sub.take().len(), 3);
     }
@@ -176,13 +199,13 @@ mod tests {
         let mut events = Events::default();
         let mut slow = events.subscribe(EventsParams::default());
         for _ in 0..5_000 {
-            events.emit("t", &Labels::new(), EventKind::Started);
+            events.emit(&t(&Labels::new()), EventKind::Started);
         }
         assert_eq!(slow.take().len(), 5_000);
         assert!(slow.take().is_empty(), "the cursor moved past them");
         drop(slow);
         for _ in 0..5_000 {
-            events.emit("t", &Labels::new(), EventKind::Started);
+            events.emit(&t(&Labels::new()), EventKind::Started);
         }
         assert!(lock(&events.log).events.len() <= 2_000);
     }

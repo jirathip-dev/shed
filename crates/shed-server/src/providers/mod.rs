@@ -5,6 +5,15 @@ mod fake;
 pub trait Provider: Sync {
     fn id(&self) -> &'static str;
     fn auth_failures(&self) -> &'static [&'static str];
+    fn hooks(&self) -> Option<&'static Hooks> {
+        None
+    }
+}
+
+pub struct Hooks {
+    pub agent: &'static str,
+    pub file: &'static str,
+    pub events: &'static [(&'static str, &'static str)],
 }
 
 static ALL: &[&dyn Provider] = &[
@@ -18,6 +27,10 @@ pub fn auth_failures(id: &str) -> &'static [&'static str] {
     ALL.iter()
         .find(|p| p.id() == id)
         .map_or(&[], |p| p.auth_failures())
+}
+
+pub fn hook_tables() -> impl Iterator<Item = &'static Hooks> {
+    ALL.iter().filter_map(|p| p.hooks())
 }
 
 #[cfg(test)]

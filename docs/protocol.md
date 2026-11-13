@@ -21,7 +21,8 @@ then), or `stuck` while the program has left input unread for over a second (`se
 running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`
 and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
 slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
-tokens, and the `cost` when sent).
+tokens, and the `cost` when sent); `parent` names the terminal that started it (absent
+without one), with `outlive` and `notify` as `run` set them.
 
 ## Methods
 
@@ -36,20 +37,20 @@ The handshake; must come first on every connection. Another product or version i
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true}}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `ls`
 
-List terminals, by name; `labels` keeps those that carry every given label.
+List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"ls","params":{"labels":{"issue":"7"}}}
-{"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
+{"jsonrpc":"2.0","id":1,"method":"ls","params":{"labels":{"issue":"7"},"parent":"lead"}}
+{"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
 ```
 
 ### `get`
@@ -58,7 +59,7 @@ One terminal.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"get","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `read`
@@ -72,10 +73,10 @@ The visible screen, or with `history` the scrollback and screen, as plain text; 
 
 ### `send`
 
-Type text into the terminal.
+Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint\n"}}
+{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
@@ -94,7 +95,7 @@ End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exite
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"kill","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":null,"state":"exited"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
 ```
 
 ### `rm`
@@ -103,7 +104,7 @@ Remove an exited terminal, its ACP session closed; returns it as it was.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rm","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":null,"state":"exited"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
 ```
 
 ### `resize`
@@ -117,11 +118,11 @@ Resize the terminal; the program gets SIGWINCH.
 
 ### `attach`
 
-Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection.
+Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"attach","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `state`
@@ -130,16 +131,16 @@ Report the terminal's state (`working`, `blocked`, `done` or `error`) with an op
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"state","params":{"name":"build","note":"tests pass","state":"done"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
 ### `wait`
 
-Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls.
+Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"wait","params":{"name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
-{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
+{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
 ```
 
 ### `events`
@@ -171,7 +172,7 @@ Stream a running terminal's screen. After the response the server writes screen 
 
 ### `terminal.input`
 
-Type text into the terminal, as `send`.
+Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.input","params":{"terminal":"build","text":"make lint"}}
@@ -180,7 +181,7 @@ Type text into the terminal, as `send`.
 
 ### `terminal.keys`
 
-Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.
+Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
@@ -270,26 +271,26 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ## Events
 
-An event names its terminal, carries its labels and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
+An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
 
 An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
 
 ```json
-{"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"event":"started"}
-{"seq":2,"name":"build","labels":{"issue":"7","role":"impl"},"event":"state","state":"done","note":"tests pass"}
-{"seq":3,"name":"build","labels":{"issue":"7","role":"impl"},"event":"resources","rss_mb":52,"cpu_pct":3}
-{"seq":4,"name":"build","labels":{"issue":"7","role":"impl"},"event":"exited","code":0}
-{"seq":5,"name":"build","labels":{"issue":"7","role":"impl"},"event":"killed"}
-{"seq":6,"name":"build","labels":{"issue":"7","role":"impl"},"event":"turn","prompt":"Fix the failing test"}
-{"seq":7,"name":"build","labels":{"issue":"7","role":"impl"},"event":"text","text":"Looking at the test"}
-{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending","kind":"edit"}
-{"seq":9,"name":"build","labels":{"issue":"7","role":"impl"},"event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
-{"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"event":"mode","mode":"default"}
-{"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}
-{"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"event":"approved","option":"allow"}
-{"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
-{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}}
-{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}
+{"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"started"}
+{"seq":2,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"state","state":"done","note":"tests pass"}
+{"seq":3,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"resources","rss_mb":52,"cpu_pct":3}
+{"seq":4,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"exited","code":0}
+{"seq":5,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"killed"}
+{"seq":6,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"turn","prompt":"Fix the failing test"}
+{"seq":7,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"text","text":"Looking at the test"}
+{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending","kind":"edit"}
+{"seq":9,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
+{"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"mode","mode":"default"}
+{"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}
+{"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow"}
+{"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
+{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}}
+{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}
 ```
 
 ## Screen updates
@@ -321,6 +322,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32006 | `READONLY` |
 | -32007 | `NO_LINK` |
 | -32008 | `IO` |
+| -32009 | `DRAFT_HELD` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 0.1.0, server 0.0.0; restart the server"}}

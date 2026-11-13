@@ -1,2 +1,4 @@
 {"jsonrpc":"2.0","id":3,"method":"ls","params":{"labels":{"role":"impl"}}}
 {"jsonrpc":"2.0","id":3,"result":[{"name":"build","labels":{"issue":"7","role":"impl"},"cwd":"$DIR","cmd":["sh","-c","printf 'hello\\n'; exec sleep 100"],"keep":false,"state":"running","exit":null,"pid":0}]}
+{"jsonrpc":"2.0","id":24,"method":"ls","params":{"parent":"build"}}
+{"jsonrpc":"2.0","id":24,"result":[{"name":"other","labels":{"role":"rev"},"cwd":"$DIR","cmd":["sleep","100"],"keep":false,"state":"running","exit":null,"pid":0,"parent":{"name":"build","outlive":true}}]}

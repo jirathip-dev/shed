@@ -10,7 +10,7 @@ use serde_json::{Map, Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, ApprovalOption, Color, EmitParams, ErrorCode, Event, EventKind,
     EventsParams, ExecParams, ExecResult, FileParams, Hello, KeysParams, Line, Link, LinkState,
-    LsParams, MachineStats, Method, ModelParams, ReadParams, ReadResult, Reported, Request,
+    LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported, Request,
     ResizeParams, Resources, Response, RpcError, Run, RunParams, Sample, ScreenUpdate, SendParams,
     State, StateParams, StatsParams, Target, TerminalInfo, TerminalParams, TerminalResizeParams,
     VERSION, WaitOutcome, WaitParams, WaitResult, WatchParams, openrpc,
@@ -31,6 +31,15 @@ fn info(state: State) -> TerminalInfo {
         resources: (state == State::Running).then_some(RESOURCES),
         acp: None,
         session: None,
+        parent: Some(lead()),
+    }
+}
+
+fn lead() -> Parent {
+    Parent {
+        name: "lead".into(),
+        outlive: false,
+        notify: true,
     }
 }
 
@@ -122,6 +131,7 @@ fn events() -> Vec<Event> {
         seq,
         name: "build".into(),
         labels: info(State::Running).labels,
+        parent: Some("lead".into()),
         kind,
         replay: false,
     })
@@ -216,6 +226,7 @@ fn run_params() -> Value {
         meta: None,
         no_hibernate: false,
         machine: None,
+        parent: Some(lead()),
         rows: None,
         cols: None,
     })
@@ -260,6 +271,15 @@ fn read_example() -> (Value, Value) {
     )
 }
 
+fn send_example() -> (Value, Value) {
+    let params = SendParams {
+        name: "build".into(),
+        text: "make lint".into(),
+        ..SendParams::default()
+    };
+    (to_value(params).unwrap(), json!({}))
+}
+
 fn example(method: Method) -> (Value, Value) {
     let running = || to_value(info(State::Running)).unwrap();
     let exited = || to_value(info(State::Exited)).unwrap();
@@ -272,20 +292,14 @@ fn example(method: Method) -> (Value, Value) {
         Method::Ls => (
             to_value(LsParams {
                 labels: BTreeMap::from([("issue".into(), "7".into())]),
+                parent: Some("lead".into()),
             })
             .unwrap(),
             json!([running()]),
         ),
         Method::Get | Method::Attach => (target(), running()),
         Method::Read => read_example(),
-        Method::Send => (
-            to_value(SendParams {
-                name: "build".into(),
-                text: "make lint\n".into(),
-            })
-            .unwrap(),
-            json!({}),
-        ),
+        Method::Send => send_example(),
         Method::Keys => (
             to_value(KeysParams {
                 name: "build".into(),
@@ -319,6 +333,7 @@ fn example(method: Method) -> (Value, Value) {
         Method::Wait => (
             to_value(WaitParams {
                 name: "build".into(),
+                children: None,
                 until: vec!["done".into(), "blocked".into()],
                 output: Some("^ok \\d+ tests$".into()),
                 timeout: Some(600.0),
@@ -498,7 +513,8 @@ fn markdown() -> String {
          running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\n\
          and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\n\
          slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\n\
-         tokens, and the `cost` when sent).\n\n## Methods\n"
+         tokens, and the `cost` when sent); `parent` names the terminal that started it (absent\n\
+         without one), with `outlive` and `notify` as `run` set them.\n\n## Methods\n"
     );
     for method in Method::ALL {
         let (params, result) = example(method);
@@ -515,7 +531,7 @@ fn markdown() -> String {
         .unwrap();
     }
     md.push_str(
-        "\n## Events\n\nAn event names its terminal, carries its labels and counts up in `seq`; `event` is \
+        "\n## Events\n\nAn event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is \
          `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by \
          `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).\n\n\
          An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), \

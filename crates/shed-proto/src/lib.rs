@@ -153,11 +153,13 @@ pub enum ErrorCode {
     NoLink,
     /// `exec` or a file call failed: not found, denied, timed out, or its reply over [`REPLY_LIMIT`].
     Io,
+    /// A person's unsent line held the `send` past `draft_wait`; nothing was written.
+    DraftHeld,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -172,6 +174,7 @@ impl ErrorCode {
         Self::ReadOnly,
         Self::NoLink,
         Self::Io,
+        Self::DraftHeld,
     ];
 
     /// The numeric JSON-RPC code.
@@ -192,6 +195,7 @@ impl ErrorCode {
             Self::ReadOnly => -32006,
             Self::NoLink => -32007,
             Self::Io => -32008,
+            Self::DraftHeld => -32009,
         }
     }
 
@@ -213,6 +217,7 @@ impl ErrorCode {
             Self::ReadOnly => "READONLY",
             Self::NoLink => "NO_LINK",
             Self::Io => "IO",
+            Self::DraftHeld => "DRAFT_HELD",
         }
     }
 }
@@ -356,16 +361,18 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
             }
             Self::Ls => {
-                "List terminals, by name; `labels` keeps those that carry every given label."
+                "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal."
             }
             Self::Get => "One terminal.",
             Self::Read => {
                 "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`."
             }
-            Self::Send => "Type text into the terminal.",
+            Self::Send => {
+                "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is."
+            }
             Self::Keys => {
                 "Press keys by name (`enter`, `esc`, `ctrl+c`, `up`, …); nothing is sent if any name is unknown."
             }
@@ -375,13 +382,13 @@ impl Method {
             Self::Rm => "Remove an exited terminal, its ACP session closed; returns it as it was.",
             Self::Resize => "Resize the terminal; the program gets SIGWINCH.",
             Self::Attach => {
-                "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`send`, `keys`, `resize`); detaching is closing the connection."
+                "Take over the terminal. After the response the server writes a redraw (clear, then the screen text) and the program's raw output, and closes the connection when the program's PTY closes. The client sends only notifications from then on (`terminal.input`, `keys`, `resize`); detaching is closing the connection."
             }
             Self::State => {
                 "Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen."
             }
             Self::Wait => {
-                "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls."
+                "Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs)."
             }
             Self::Events => {
                 "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still in the ring of the last 1,000, and never closes the connection; closing it unsubscribes."
@@ -392,8 +399,12 @@ impl Method {
             Self::ScreenWatch => {
                 "Stream a running terminal's screen. After the response the server writes screen updates (see Screen updates), at most 20 a second: the full screen first (none when `since` is the screen's current `seq`), then the rows that changed. It closes the connection when the program's PTY closes. The connection still takes requests; their responses are not written."
             }
-            Self::Input => "Type text into the terminal, as `send`.",
-            Self::TerminalKeys => "Press keys by name, as `keys`; `ctrl-x` is `ctrl+x`.",
+            Self::Input => {
+                "Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`."
+            }
+            Self::TerminalKeys => {
+                "Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s."
+            }
             Self::TerminalResize => {
                 "Resize the terminal, as `resize`; without `terminal`, the one this connection watches."
             }
@@ -512,6 +523,9 @@ pub struct RunParams {
     /// Start it on this machine, over its held link (`machine.links`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// The terminal that started it (`shed run` sends `$SHED`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Parent>,
     /// Rows; default the server's `$SHED_SIZE`, else 50.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rows: Option<u16>,
@@ -520,12 +534,29 @@ pub struct RunParams {
     pub cols: Option<u16>,
 }
 
+/// A child's link to the terminal that started it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Parent {
+    /// The parent terminal's name.
+    pub name: String,
+    /// Keep running when the parent's program ends; otherwise the child is killed with it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub outlive: bool,
+    /// Type a `[shed]` note into the parent when the child blocks, errors or ends, while the parent is not
+    /// working.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notify: bool,
+}
+
 /// `ls` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct LsParams {
     /// Only terminals carrying every one of these labels.
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
+    /// Only the children of this terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 /// `get`, `kill` and `rm` params: the terminal's name.
@@ -578,13 +609,22 @@ pub struct Logged {
 }
 
 /// `send` and `terminal.input` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SendParams {
     /// The terminal's name (`terminal` in `terminal.input`).
     #[serde(alias = "terminal")]
     pub name: String,
     /// The text, sent as UTF-8.
     pub text: String,
+    /// `send`: no enter after the text.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_enter: bool,
+    /// `send`: the text as typed keys even when the program has turned bracketed paste on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_paste: bool,
+    /// `send`: seconds after a person's last key that their unsent line holds the send (default 60, 0 off).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_wait: Option<u64>,
 }
 
 /// `keys` and `terminal.keys` params.
@@ -634,8 +674,11 @@ pub struct Reported {
 /// `wait` params.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WaitParams {
-    /// The terminal's name.
+    /// The terminal's name; with `children`, the parent's.
     pub name: String,
+    /// Wait on the terminal's children instead of the terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub children: Option<Children>,
     /// Reported states that end the wait.
     #[serde(default)]
     pub until: Vec<String>,
@@ -645,6 +688,16 @@ pub struct WaitParams {
     /// Give up after this many seconds; none waits for ever.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout: Option<f64>,
+}
+
+/// Which children end a `wait`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Children {
+    /// No child is working: each has exited or reports something other than `working`.
+    All,
+    /// The next child that reports `done`, `blocked` or `error`, or exits; the result names it.
+    Any,
 }
 
 /// How a `wait` ended.
@@ -689,6 +742,9 @@ pub struct Event {
     pub name: String,
     /// The terminal's labels.
     pub labels: BTreeMap<String, String>,
+    /// The terminal's parent, if it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
     /// What happened.
     #[serde(flatten)]
     pub kind: EventKind,
@@ -1016,6 +1072,9 @@ pub struct TerminalInfo {
     /// The ACP agent session, from the bridge's last `session` event.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session: Option<AcpSession>,
+    /// The terminal that started it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Parent>,
 }
 
 /// `screen.watch` params.

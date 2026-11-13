@@ -8,6 +8,8 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 mod events;
+pub mod hooks;
+mod input;
 mod links;
 pub mod machines;
 mod providers;
@@ -28,9 +30,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use proto::{
-    ErrorCode, ExecParams, ExecResult, FileParams, Hello, Method, Request, ResizeParams, Response,
-    RpcError, StatsParams, Target, TerminalParams, TerminalResizeParams, VERSION, WaitOutcome,
-    WaitParams, WaitResult, WatchParams,
+    Children, ErrorCode, Event, EventKind, EventsParams, ExecParams, ExecResult, FileParams, Hello,
+    Method, Request, ResizeParams, Response, RpcError, State, StatsParams, Target, TerminalInfo,
+    TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams, WaitResult,
+    WatchParams,
 };
 use registry::{Registry, Stream};
 use rustix::process::{Resource, Rlimit, Signal, getrlimit, setrlimit};
@@ -170,7 +173,7 @@ async fn blocking<T: Send + 'static>(
     joined.map_err(|e| RpcError::new(ErrorCode::Internal, e))
 }
 
-fn watch(registry: &Shared, term: Arc<Terminal>) {
+fn watch(registry: &Shared, name: String, term: Arc<Terminal>) {
     let registry = Arc::clone(registry);
     tokio::spawn(async move {
         loop {
@@ -180,11 +183,30 @@ fn watch(registry: &Shared, term: Arc<Terminal>) {
                 term.wait_until(|t| t.report() != last, None).await,
                 Ok(Wake::Matched)
             ) {
-                lock(&registry).refresh().ok();
+                let orphans = {
+                    let mut reg = lock(&registry);
+                    reg.refresh().ok();
+                    reg.orphans(&name)
+                };
+                for child in orphans {
+                    let registry = Arc::clone(&registry);
+                    tokio::spawn(async move { kill(&registry, &child).await });
+                }
                 return;
             }
         }
     });
+}
+
+async fn kill(registry: &Shared, name: &str) -> Result<TerminalInfo, RpcError> {
+    let term = lock(registry).mark_kill(name)?;
+    let Some(term) = term else {
+        return lock(registry).get(name);
+    };
+    let killing = Arc::clone(&term);
+    let status = blocking(move || killing.kill(registry::GRACE)).await?;
+    let status = status.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
+    lock(registry).killed(name, &term, status)
 }
 
 async fn sample(registry: Shared, every: Duration) {
@@ -276,9 +298,10 @@ fn stop_signals() -> io::Result<impl Future<Output = ()>> {
 async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     let stop = stop_signals()?;
     let registry = Arc::new(Mutex::new(Registry::load(&paths.state, &paths.socket)?));
-    for term in lock(&registry).running() {
-        watch(&registry, term);
+    for (name, term) in lock(&registry).running() {
+        watch(&registry, name, term);
     }
+    tokio::spawn(registry::keep_saved(Arc::clone(&registry)));
     tokio::spawn(sample(Arc::clone(&registry), sample_every));
     let first = record_stats(&registry).await;
     let recorder = Arc::clone(&registry);
@@ -312,10 +335,12 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         () = accept(&listener, &registry, &links) => {}
         () = stop => {}
     }
+    let saved = lock(&registry).close();
+    saved.await;
     let running = lock(&registry).running();
     let ends = running
         .into_iter()
-        .map(|t| blocking(move || t.kill(registry::GRACE)));
+        .map(|(_, t)| blocking(move || t.kill(registry::GRACE)));
     futures::future::join_all(ends).await;
     Ok(())
 }
@@ -395,7 +420,6 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
 }
 
 async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
-    let saver = lock(&registry).saver.clone();
     let mut session = Session {
         links: held,
         ..Session::default()
@@ -408,7 +432,8 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
             continue;
         }
         let response = respond(&registry, &mut session, &line).await;
-        saver.flushed().await;
+        let flushed = lock(&registry).saver.flushed();
+        flushed.await;
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
             bytes.push(b'\n');
@@ -521,7 +546,10 @@ async fn dispatch(
         return answer;
     }
     match method {
-        Method::Kill => return kill(registry, params(request)?).await,
+        Method::Kill => {
+            let Target { name } = params(request)?;
+            return json(&kill(registry, &name).await?);
+        }
         Method::Wait => return json(&wait(registry, &params(request)?).await?),
         Method::Emit => return lock(registry).emit(params(request)?).map(|()| empty()),
         Method::Read => return read(registry, params(request)?).await,
@@ -539,7 +567,7 @@ async fn dispatch(
         Method::Run => {
             let info = reg.run(params(request)?)?;
             if let (Some(term), _) = reg.to_wait(&info.name)? {
-                watch(registry, term);
+                watch(registry, info.name.clone(), term);
             }
             json(&info)
         }
@@ -582,17 +610,6 @@ async fn dispatch(
     }
 }
 
-async fn kill(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
-    let term = lock(registry).mark_kill(&name)?;
-    let Some(term) = term else {
-        return json(&lock(registry).get(&name)?);
-    };
-    let killing = Arc::clone(&term);
-    let status = blocking(move || killing.kill(registry::GRACE)).await?;
-    let status = status.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
-    json(&lock(registry).killed(&name, &term, status)?)
-}
-
 async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
     let (info, remove) = lock(registry).refresh()?.rm(&name)?;
     blocking(remove).await?;
@@ -607,17 +624,18 @@ async fn read(registry: &Shared, p: proto::ReadParams) -> Result<Value, RpcError
 }
 
 async fn input(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
-    let (term, bytes) = {
+    let input = {
         let mut reg = lock(registry);
         reg.refresh()?;
         match method {
-            Method::Keys | Method::TerminalKeys => reg.keys(&params(request)?)?,
+            Method::Keys => reg.keys(&params(request)?, false)?,
+            Method::TerminalKeys => reg.keys(&params(request)?, true)?,
             Method::Model => reg.model(params(request)?)?,
+            Method::Input => reg.typed(params(request)?)?,
             _ => reg.send(params(request)?)?,
         }
     };
-    let wrote = blocking(move || term.write(&bytes)).await?;
-    wrote.map_err(|e| RpcError::new(ErrorCode::Internal, e))?;
+    input.write().await?;
     Ok(empty())
 }
 
@@ -699,8 +717,8 @@ fn empty() -> Value {
 
 async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, RpcError> {
     let bad = |e: &dyn std::fmt::Display| RpcError::new(ErrorCode::InvalidParams, e);
-    if p.until.is_empty() && p.output.is_none() {
-        return Err(bad(&"give until, output or both"));
+    if p.until.is_empty() && p.output.is_none() && p.children.is_none() {
+        return Err(bad(&"give until, output or children"));
     }
     if let Some(s) = p
         .until
@@ -715,6 +733,9 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
     let deadline = timeout
         .map_err(|e| bad(&e))?
         .and_then(|d| shed_core::clock::now().checked_add(d));
+    if let Some(how) = p.children {
+        return wait_children(registry, &p.name, how, deadline).await;
+    }
     let (term, info) = {
         let mut reg = lock(registry);
         reg.refresh()?;
@@ -748,6 +769,52 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
         outcome,
         terminal: reg.get(&p.name)?,
     })
+}
+
+async fn wait_children(
+    registry: &Mutex<Registry>,
+    name: &str,
+    how: Children,
+    deadline: Option<std::time::Instant>,
+) -> Result<WaitResult, RpcError> {
+    let mut sub = lock(registry).events.subscribe(EventsParams::default());
+    let news = |e: &Event| {
+        e.parent.as_deref() == Some(name)
+            && match &e.kind {
+                EventKind::State(r) => ["done", "blocked", "error"].contains(&r.state.as_str()),
+                EventKind::Exited { .. } | EventKind::Killed => true,
+                _ => false,
+            }
+    };
+    loop {
+        let child = sub.events().into_iter().find(news);
+        {
+            let mut reg = lock(registry);
+            reg.refresh()?;
+            let parent = reg.get(name)?;
+            let running = || reg.children(name).any(|t| t.state == State::Running);
+            let ended = match (how, child) {
+                (Children::All, _) if !reg.busy_children(name) => {
+                    Some((WaitOutcome::Matched, parent))
+                }
+                (Children::Any, Some(e)) => Some((WaitOutcome::Matched, reg.get(&e.name)?)),
+                (Children::Any, None) if !running() => Some((WaitOutcome::Exited, parent)),
+                _ => None,
+            };
+            if let Some((outcome, terminal)) = ended {
+                return Ok(WaitResult { outcome, terminal });
+            }
+        }
+        let changed = match deadline {
+            Some(at) => tokio::time::timeout_at(at.into(), sub.changed()).await,
+            None => Ok(sub.changed().await),
+        };
+        if !changed.unwrap_or(false) {
+            let terminal = lock(registry).get(name)?;
+            let outcome = WaitOutcome::Timeout;
+            return Ok(WaitResult { outcome, terminal });
+        }
+    }
 }
 
 /// A connection to a server, past the version handshake.

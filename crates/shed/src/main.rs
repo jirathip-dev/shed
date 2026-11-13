@@ -24,9 +24,10 @@ use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
 use shed_server::proto::{
-    Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState, LsParams,
-    MachineStats, Method, ModelParams, ReadParams, ReadResult, Reported, RunParams, SendParams,
-    State, StateParams, StatsParams, Target, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
+    Children, Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState,
+    LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported,
+    RunParams, SendParams, State, StateParams, StatsParams, Target, TerminalInfo, WaitOutcome,
+    WaitParams, WaitResult,
 };
 use shed_server::{Client, Paths};
 
@@ -53,10 +54,12 @@ enum Command {
         #[arg(long, value_name = "S", default_value_t = 2.0)]
         sample: f64,
     },
-    Run(RunArgs),
+    Run(Box<RunArgs>),
     Ls {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
+        #[arg(long, value_name = "T")]
+        parent: Option<String>,
     },
     Get {
         name: String,
@@ -74,10 +77,7 @@ enum Command {
         #[arg(long, requires = "events")]
         before: Option<u64>,
     },
-    Send {
-        name: String,
-        text: String,
-    },
+    Send(SendArgs),
     Keys {
         name: String,
         #[arg(required = true)]
@@ -156,6 +156,16 @@ enum Command {
     },
     Uninstall,
     Doctor,
+    Setup(SetupArgs),
+}
+
+#[derive(Args)]
+struct SetupArgs {
+    agents: Vec<String>,
+    #[arg(long)]
+    remove: bool,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 impl Command {
@@ -163,14 +173,16 @@ impl Command {
         match self {
             Self::Get { name }
             | Self::Read { name, .. }
-            | Self::Send { name, .. }
+            | Self::Send(SendArgs { name, .. })
             | Self::Keys { name, .. }
             | Self::Kill { name }
             | Self::Rm { name }
             | Self::Approve { name, .. }
             | Self::Cancel { name }
             | Self::Model { name, .. }
-            | Self::Wait(WaitArgs { name, .. }) => Some(name),
+            | Self::Wait(WaitArgs {
+                name: Some(name), ..
+            }) => Some(name),
             _ => None,
         }
     }
@@ -235,6 +247,7 @@ impl Server<'_> {
                 | Command::Install { .. }
                 | Command::Uninstall
                 | Command::Doctor
+                | Command::Setup(_)
         );
         if local && on.is_some() {
             bail!(
@@ -250,7 +263,7 @@ impl Server<'_> {
                 | Command::Ls { .. }
                 | Command::Get { .. }
                 | Command::Read { .. }
-                | Command::Send { .. }
+                | Command::Send(_)
                 | Command::Keys { .. }
                 | Command::Kill { .. }
                 | Command::Rm { .. }
@@ -350,10 +363,36 @@ struct RunArgs {
     meta: Option<Map<String, Value>>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
+    #[command(flatten)]
+    parent: ParentArgs,
     #[arg(long, value_name = "RxC", value_parser = size)]
     size: Option<(u16, u16)>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
+}
+
+#[derive(Args)]
+struct SendArgs {
+    name: String,
+    text: String,
+    #[arg(long)]
+    no_enter: bool,
+    #[arg(long)]
+    no_paste: bool,
+    #[arg(long, value_name = "SECONDS")]
+    draft_wait: Option<u64>,
+}
+
+#[derive(Args)]
+struct ParentArgs {
+    #[arg(long, value_name = "T")]
+    parent: Option<String>,
+    #[arg(long, conflicts_with = "parent")]
+    no_parent: bool,
+    #[arg(long)]
+    outlive_parent: bool,
+    #[arg(long)]
+    notify: bool,
 }
 
 #[derive(Args)]
@@ -370,7 +409,10 @@ struct ExecArgs {
 
 #[derive(Args)]
 struct WaitArgs {
-    name: String,
+    #[arg(required_unless_present = "children")]
+    name: Option<String>,
+    #[arg(long, value_name = "all|any", value_parser = children, conflicts_with_all = ["until", "output"])]
+    children: Option<Children>,
     #[arg(long, num_args = 1.., value_name = "STATE",
           value_parser = ["working", "blocked", "done", "error", "idle", "hibernated"])]
     until: Vec<String>,
@@ -383,6 +425,10 @@ struct WaitArgs {
 fn policy(s: &str) -> Result<Policy, String> {
     serde_json::from_value(Value::String(s.to_owned()))
         .map_err(|_| format!("{s:?}: allow, deny or ask"))
+}
+
+fn children(s: &str) -> Result<Children, String> {
+    serde_json::from_value(Value::String(s.to_owned())).map_err(|_| format!("{s:?}: all or any"))
 }
 
 fn size(s: &str) -> Result<(u16, u16), String> {
@@ -416,17 +462,10 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Hello => out::line(format_args!("shed {}", env!("CARGO_PKG_VERSION"))),
         Command::Schema => out::line(format_args!("{:#}", shed_server::proto::openrpc())),
         Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
-        Command::Run(args) => run_terminal(&server, json, args)?,
-        Command::Ls { labels } => {
-            let params = LsParams {
-                labels: labels.into_iter().collect(),
-            };
-            let mut list: Vec<TerminalInfo> = server.connect(None)?.call(Method::Ls, &params)?;
-            if server.linked {
-                let prefix = server.name(String::new());
-                list.retain(|t| t.name.starts_with(&prefix));
-            }
-            print(json, &list, || table(&list, false))?;
+        Command::Run(args) => run_terminal(&server, json, *args)?,
+        Command::Ls { labels, parent } => {
+            let labels = labels.into_iter().collect();
+            ls(&server, json, &LsParams { labels, parent })?;
         }
         Command::Get { name } => {
             let info: TerminalInfo = server.connect(None)?.call(Method::Get, &Target { name })?;
@@ -451,7 +490,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             };
             read(&server, json, &params)?;
         }
-        Command::Send { name, text } => send(&server, json, name, text)?,
+        Command::Send(args) => send(&server, json, args)?,
         Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
@@ -504,8 +543,18 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
         Command::Doctor => {}
+        Command::Setup(args) => setup(&args)?,
     }
     Ok(ExitCode::SUCCESS)
+}
+
+fn ls(server: &Server, json: bool, params: &LsParams) -> anyhow::Result<()> {
+    let mut list: Vec<TerminalInfo> = server.connect(None)?.call(Method::Ls, params)?;
+    if server.linked {
+        let prefix = server.name(String::new());
+        list.retain(|t| t.name.starts_with(&prefix));
+    }
+    print(json, &list, || table(&list, false))
 }
 
 fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow::Result<()> {
@@ -546,6 +595,16 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         mcp_servers,
         meta: args.meta,
         no_hibernate: args.no_hibernate,
+        parent: match (args.parent.no_parent, &server.on) {
+            (true, _) => None,
+            (false, None) => (args.parent.parent).or_else(|| shed_server::config::var("SHED")),
+            (false, Some(_)) => args.parent.parent,
+        }
+        .map(|name| Parent {
+            name,
+            outlive: args.parent.outlive_parent,
+            notify: args.parent.notify,
+        }),
         machine: server.machine(),
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
@@ -582,25 +641,28 @@ fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> 
     print(json, &read, || format!("{}{end}", read.text))
 }
 
-fn send(server: &Server, json: bool, name: String, text: String) -> anyhow::Result<()> {
+fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
+    let mut params = SendParams {
+        name: args.name,
+        text: args.text,
+        no_enter: args.no_enter,
+        no_paste: args.no_paste,
+        draft_wait: args.draft_wait,
+    };
     let mut client = server.connect(None)?;
+    let name = params.name.clone();
     let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
-    let text = if info.acp.is_some() {
+    if info.acp.is_some() {
         let report = Reported {
             state: "working".to_owned(),
             note: None,
             state_source: None,
         };
-        let params = StateParams {
-            name: name.clone(),
-            report,
-        };
-        let _: TerminalInfo = client.call(Method::State, &params)?;
-        acp::frame(&Input::Prompt(text))
-    } else {
-        text
-    };
-    let done: Value = client.call(Method::Send, &SendParams { name, text })?;
+        let state = StateParams { name, report };
+        let _: TerminalInfo = client.call(Method::State, &state)?;
+        params.text = acp::frame(&Input::Prompt(std::mem::take(&mut params.text)));
+    }
+    let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
 }
 
@@ -624,7 +686,12 @@ fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::R
         bail!("{name} is not an ACP terminal (shed run --acp)");
     }
     let text = acp::frame(input);
-    let done: Value = client.call(Method::Send, &SendParams { name, text })?;
+    let params = SendParams {
+        name,
+        text,
+        ..SendParams::default()
+    };
+    let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
 }
 
@@ -694,9 +761,34 @@ fn state(
     print(json, &info, String::new)
 }
 
+fn setup(a: &SetupArgs) -> anyhow::Result<()> {
+    let home = shed_server::config::var("HOME").context("HOME is not set")?;
+    let files = shed_server::hooks::setup(Path::new(&home), &a.agents, a.remove, a.dry_run)?;
+    if files.is_empty() {
+        bail!("no installed agent has hooks shed can set up");
+    }
+    for f in files {
+        let (agent, file) = (f.agent, f.file.display());
+        match (f.after, a.dry_run) {
+            (None, _) => out::line(format_args!("{agent}: {file} unchanged")),
+            (Some(t), true) => out::text(format_args!("{agent}: {file} would become:\n{t}")),
+            (Some(_), false) => out::line(format_args!("{agent}: {file} updated")),
+        }
+    }
+    Ok(())
+}
+
 fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode> {
+    let name = match args.name {
+        Some(name) => name,
+        None => server.name(
+            shed_server::config::var("SHED")
+                .context("no terminal given and $SHED is unset (it is set inside a terminal)")?,
+        ),
+    };
     let params = WaitParams {
-        name: args.name,
+        name,
+        children: args.children,
         until: args.until,
         output: args.output,
         timeout: args.timeout,
@@ -705,6 +797,19 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     let t = &done.terminal;
     let state = t.reported.as_ref().map(|r| &r.state);
     print(json, &done, || match (done.outcome, t.exit) {
+        (WaitOutcome::Matched, _) if params.children == Some(Children::All) => {
+            format!("{} no child working\n", t.name)
+        }
+        (WaitOutcome::Matched, code) if params.children.is_some() && t.state == State::Exited => {
+            format!(
+                "{} exited{}\n",
+                t.name,
+                code.map(|c| format!(" {c}")).unwrap_or_default()
+            )
+        }
+        (WaitOutcome::Matched, _) if params.children.is_some() => {
+            format!("{} {}\n", t.name, state.map_or("running", String::as_str))
+        }
         (WaitOutcome::Matched, _) => match state.filter(|s| params.until.contains(s)) {
             Some(state) => format!("{} {state}\n", t.name),
             None => format!("{} output\n", t.name),
