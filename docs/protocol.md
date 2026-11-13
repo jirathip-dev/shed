@@ -15,11 +15,12 @@ product or version is refused with `SHED_VERSION: client shed x, server shed y; 
 A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is
 the exit status (128 + N for signal N), `null` while running or when the program was lost in a server
 restart; `pid` is set while running; `reported` is the state the program last reported (absent until
-then); `idle_after` is set when the `idle` fallback is on; `resources` is the process tree's memory
-(MiB) and CPU (percent of one core) at the last sample, while running; an ACP terminal's `session` is its
-agent session (`id`, for `run`'s `resume`; the current `model` and the `models`, `[id, name]`; `run`'s
-`mcp_servers` with each env and header value as `***`; the agent's slash `commands`, `[name, description,
-hint]`).
+then), or `stuck` while the program has left input unread for over a second (`send`, `keys` and
+`acp.model` then fail, their input queued); `idle_after` is set when the `idle` fallback is on;
+`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while
+running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`
+and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
+slash `commands`, `[name, description, hint]`).
 
 ## Methods
 
