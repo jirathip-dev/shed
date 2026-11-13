@@ -1,0 +1,13 @@
+Decided: running comes from open ACP tool calls plus processes the agent started after the turn began (process tree), never from provider text
+Because: "Every state except `rate-limited` comes from the ACP protocol or the OS process tree"
+Decided: per-agent limit patterns are static Limit entries in providers/<agent>.rs keyed by registry id
+Because: "kept beside `agents.json` or in a shipped table keyed by registry id"
+Decided: a process alive in the agent tree when a turn starts counts as the agent's own (adapter, MCP servers)
+Rejected: baseline at session ready only — lazily started helpers would keep the lane running forever
+Decided: OSC 7501 blocked for non-ACP terminals and hooks is left unchanged
+Because: "shed reports an ACP lane as `working` only while a prompt turn is open"
+Decided: hibernation needs done, or a resumed session with no turn yet; each state change restarts the timer
+Because: crates/shed-server/src/acp.rs:858
+Check: the woken session clears ended and child so the adapter's own children never read as spawned
+Check: macOS and Linux proctree::command paths; only macOS was run locally
+Owner: ACP lanes now show running, waiting-approval and rate-limited and sleep only after 10 quiet minutes in done
