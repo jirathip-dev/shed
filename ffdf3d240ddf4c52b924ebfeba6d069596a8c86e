@@ -1,0 +1,13 @@
+Decided: a reply waits only for the urgent saves its own request made (task-local), never for another client's or a refresh's save
+Because: crates/shed-server/src/registry.rs:133
+Because: crates/shed-server/src/lib.rs:434
+Decided: lock.rs flake was real: ls waited ~210 ms on another request's state-file fsync, slow on Ubuntu; no timing bound was relaxed
+Because: "Fix the cause where there is one."
+Decided: kill_tree signals and watches the process group when the process table cannot be read, so kill works out of fds
+Because: crates/shed-core/src/proctree.rs:207
+Decided: round 3 drops the TEMP macOS diagnostics step; it showed reliability 10/10 alone and no pty leak, and failed actionlint
+Because: "Every job of `ci` on staging is green at the merge commit"
+Rejected: keeping the diagnostics step — shellcheck SC2012 fails the rules job
+Check: ci.yml at head equals ab898ae's; rules, stable (ubuntu), stable (macos) and msrv green at ffdf3d2
+Check: Ubuntu 10-run loop log: actions run 43361288177 job 131675146427; macOS 10-run loop: run 43406601429
+Owner: Staging CI green again; two real server bugs fixed, the rules job uses drover
