@@ -2,15 +2,15 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto`; do not edit. -->
 
-Version: `0.0.0`. Client and server must run the same version.
+Version: `0.0.0`, protocol `1`. Client and server must speak the same protocol.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
 response per line; a request without an `id` is a notification and gets no response.
 
 Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`; another
-product or version is refused with `SHED_VERSION: client shed x, server shed y; restart the server`
-(a peer that sends no `product` shows as `unnamed`).
+product or protocol is refused with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>;
+restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `protocol` as 0).
 
 A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is
 the exit status (128 + N for signal N), `null` while running or when the program was lost in a server
@@ -28,11 +28,11 @@ without one), with `outlive` and `notify` as `run` set them.
 
 ### `hello`
 
-The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`.
+The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"product":"shed","version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"product":"shed","version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","product":"shed","protocol":1,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","product":"shed","protocol":1,"version":"0.0.0"}}
 ```
 
 ### `run`
@@ -334,5 +334,5 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32009 | `DRAFT_HELD` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 0.1.0, server 0.0.0; restart the server"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 / server 56de739: protocol 2 vs 1; restart shed serve"}}
 ```

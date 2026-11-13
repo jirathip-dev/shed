@@ -5,7 +5,8 @@
 # build, so a Keychain item that trusts one shed build opens to the next with no prompt.
 # Signed by SHA-1 hash (the self-signed cert is not trusted, so `--sign herdsman-local` finds nothing). No identity,
 # or a codesign that fails or waits on a dialog (killed after SHED_SIGN_TIMEOUT seconds, 10), keeps the old binary
-# and exits 1.
+# and exits 1. When the service job is already installed, `shed install` then restarts it on the new binary, so the
+# running server is never an older build than the binary.
 set -eu
 dir=${1:-$HOME/.cargo/bin}
 dest="$dir/shed"
@@ -31,3 +32,6 @@ if command -v codesign >/dev/null; then
 fi
 mv "$dest.new" "$dest"
 echo "shed install: $dest"
+for job in "$HOME/Library/LaunchAgents/dev.shed.serve.plist" "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/shed.service"; do
+  if [ -e "$job" ]; then "$dest" install; fi
+done

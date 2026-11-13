@@ -7,7 +7,7 @@
   "methods": [
     {
       "name": "hello",
-      "description": "The handshake; must come first on every connection. Another product or version is refused with `SHED_VERSION`.",
+      "description": "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -15,7 +15,7 @@
           "required": false,
           "schema": {
             "type": "string",
-            "description": "The product, `shed`; a peer that sends none is refused like another version.",
+            "description": "The product, `shed`; a peer that sends none is refused like another protocol.",
             "default": ""
           }
         },
@@ -25,6 +25,26 @@
           "schema": {
             "type": "string",
             "description": "The shed version."
+          }
+        },
+        {
+          "name": "build",
+          "required": false,
+          "schema": {
+            "type": "string",
+            "description": "The git commit the sender was built from.",
+            "default": ""
+          }
+        },
+        {
+          "name": "protocol",
+          "required": false,
+          "schema": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.",
+            "default": 0
           }
         }
       ],
@@ -1524,18 +1544,30 @@
         "properties": {
           "product": {
             "type": "string",
-            "description": "The product, `shed`; a peer that sends none is refused like another version.",
+            "description": "The product, `shed`; a peer that sends none is refused like another protocol.",
             "default": ""
           },
           "version": {
             "type": "string",
             "description": "The shed version."
+          },
+          "build": {
+            "type": "string",
+            "description": "The git commit the sender was built from.",
+            "default": ""
+          },
+          "protocol": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.",
+            "default": 0
           }
         },
         "required": [
           "version"
         ],
-        "description": "`hello` params and result: the sender's product and version."
+        "description": "`hello` params and result: the sender's product, version, build and protocol."
       },
       "Policy": {
         "oneOf": [

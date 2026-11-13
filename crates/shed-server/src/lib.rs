@@ -31,8 +31,8 @@ use std::time::Duration;
 
 use proto::{
     Children, ErrorCode, Event, EventKind, EventsParams, ExecParams, ExecResult, FileParams, Hello,
-    Method, Request, ResizeParams, Response, RpcError, State, StatsParams, Target, TerminalInfo,
-    TerminalParams, TerminalResizeParams, VERSION, WaitOutcome, WaitParams, WaitResult,
+    LONG_VERSION, Method, Request, ResizeParams, Response, RpcError, State, StatsParams, Target,
+    TerminalInfo, TerminalParams, TerminalResizeParams, WaitOutcome, WaitParams, WaitResult,
     WatchParams,
 };
 use registry::{Registry, Stream};
@@ -82,18 +82,18 @@ pub enum Error {
     /// No machine has that name.
     #[error("no machine {0}; see `shed machine ls`")]
     NoMachine(String),
-    /// The shed on a machine is another version.
+    /// The shed on a machine speaks another protocol.
     #[error(
-        "SHED_VERSION: shed {here} here, {there} on {machine}; install the same version on both, e.g. \
-         on {machine}: `cargo install --locked --git https://github.com/jirathip-dev/shed --tag v{here} \
+        "SHED_VERSION: shed {here} here, {there} on {machine}; install the same build on both, e.g. \
+         on {machine}: `cargo install --locked --git https://github.com/jirathip-dev/shed --rev {here} \
          shed`, then restart its server"
     )]
     MachineVersion {
         /// The machine.
         machine: String,
-        /// This shed's version.
+        /// This shed's build.
         here: String,
-        /// The version of the server on the machine.
+        /// The build of the server on the machine.
         there: String,
     },
     /// `ssh` or the shed on a machine gave no answer.
@@ -245,7 +245,7 @@ async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     Duration::from_secs(wait.max(1))
 }
 
-/// Loads the state, binds the socket (mode 0600, its directory 0700), prints `shed ready <version>
+/// Loads the state, binds the socket (mode 0600, its directory 0700), prints `shed ready <semver> (<sha>)
 /// <socket>` and serves until killed, sampling each terminal's memory and CPU every `sample_every`.
 ///
 /// # Errors
@@ -337,7 +337,7 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
     writeln!(
         io::stdout(),
-        "shed ready {VERSION} {}",
+        "shed ready {LONG_VERSION} {}",
         paths.socket.display()
     )
     .ok();
@@ -552,8 +552,8 @@ async fn dispatch(
         .ok_or_else(|| RpcError::new(ErrorCode::MethodNotFound, &request.method))?;
     if method == Method::Hello {
         let p: Hello = params(request)?;
-        if p != Hello::ours() {
-            return Err(RpcError::version(&p.label(), &Hello::ours().label()));
+        if !p.compatible() {
+            return Err(RpcError::version(&p, &Hello::ours()));
         }
         session.hello = true;
         return json(&Hello::ours());
@@ -851,20 +851,21 @@ pub struct Client {
     reader: BufReader<UnixStream>,
     writer: BufWriter<UnixStream>,
     next_id: u64,
+    server: Hello,
 }
 
 impl Client {
-    /// Connects to the server on `socket` and checks it runs this version.
+    /// Connects to the server on `socket` and checks it speaks this protocol.
     ///
     /// # Errors
-    /// [`Error::Rpc`] with `SHED_VERSION: client x, server y; restart the server` on a version
-    /// mismatch; [`Error::Io`] when nothing listens.
+    /// [`Error::Rpc`] with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`
+    /// on a protocol mismatch; [`Error::Io`] when nothing listens.
     pub fn connect(socket: &Path) -> Result<Self, Error> {
         Self::over(UnixStream::connect(socket)?)
     }
 
     /// Speaks the protocol over `writer`, a connected stream (a socket, or one end of a socketpair
-    /// whose other end is `ssh … shed connect`), and checks the server runs this version.
+    /// whose other end is `ssh … shed connect`), and checks the server speaks this protocol.
     ///
     /// # Errors
     /// As [`Client::connect`].
@@ -873,13 +874,22 @@ impl Client {
             reader: BufReader::new(writer.try_clone()?),
             writer: BufWriter::new(writer),
             next_id: 1,
+            server: Hello::ours(),
         };
-        let server: Hello = client.call(Method::Hello, &Hello::ours())?;
-        if server != Hello::ours() {
-            let (here, there) = (Hello::ours().label(), server.label());
-            return Err(Error::Rpc(RpcError::version(&here, &there)));
+        client.server = client.call(Method::Hello, &Hello::ours())?;
+        if !client.server.compatible() {
+            return Err(Error::Rpc(RpcError::version(
+                &Hello::ours(),
+                &client.server,
+            )));
         }
         Ok(client)
+    }
+
+    /// The server's answer to `hello`: its version, build and protocol.
+    #[must_use]
+    pub fn server(&self) -> &Hello {
+        &self.server
     }
 
     /// Calls `method` with `params` and decodes its result.

@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Every build carries its git sha: `shed --version`, `shed hello`, the server's ready line and `shed doctor` show
+  `<semver> (<sha>)`. Client and server exchange a protocol number in `hello`; a mismatch (or an older server
+  that sends none) fails at once with `client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`.
+  `shed doctor` fails when the running server is another build than the binary, and `shed install` (and
+  `scripts/install.sh` when the job is installed) restarts the server.
 - `shed setup [<agent>…] [--dry-run] [--remove]` adds hooks that report an installed agent's state through
   `shed state` (a no-op outside shed) to its config file, keeping every other entry; `shed doctor` lists per
   agent whether they are in. Claude Code's are in `~/.claude/settings.json`; see `docs/hooks.md`.
