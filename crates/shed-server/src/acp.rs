@@ -572,7 +572,7 @@ impl Session {
                 self.reply.clear();
                 (self.ended, self.child) = (None, None);
                 self.open.clear();
-                self.own.extend(&self.seen);
+                self.own.clone_from(&self.seen);
                 self.emit(EventKind::Turn {
                     prompt: text.clone(),
                 });
@@ -887,6 +887,7 @@ async fn drive(
     };
     (s.shown.id, s.shown.mcp_servers) = (s.id.to_string(), redacted(&s.mcp));
     s.models(&options.unwrap_or_default())?;
+    (s.ended, s.child) = (None, None);
     s.tree();
     s.say(format!("shed: ACP session ready ({}); send a prompt", s.id))?;
     if let Some(input) = wake {
@@ -1251,6 +1252,13 @@ pub(crate) fn close(info: &TerminalInfo) -> Result<(), Error> {
     })
 }
 
+fn launch_options() -> Result<(Vec<McpServer>, Option<Meta>), Error> {
+    let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
+    let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
+    let meta = crate::config::var("SHED_ACP_META").and_then(|m| serde_json::from_str(&m).ok());
+    Ok((mcp_servers(&mcp).map_err(Error::Acp)?, meta))
+}
+
 fn run(
     cmd: &[String],
     cwd: &Path,
@@ -1260,10 +1268,7 @@ fn run(
     agent_id: &str,
     name: &str,
 ) -> Result<i32, Error> {
-    let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
-    let mcp = serde_json::from_str::<Vec<Value>>(&mcp).unwrap_or_default();
-    let mcp = mcp_servers(&mcp).map_err(Error::Acp)?;
-    let meta = crate::config::var("SHED_ACP_META").and_then(|m| serde_json::from_str(&m).ok());
+    let (mcp, meta) = launch_options()?;
     let reported = Arc::default();
     let lent = pty_socket(socket, name);
     if let Ok((master, _)) = take_over(io::stderr()) {
@@ -1283,17 +1288,12 @@ fn run(
         preview: Preview::default(),
     };
     let (typed, mut inputs) = unbounded_channel();
-    let idle = turn_idle_timeout();
     let session = move |cx, back, stirred, pid, kept: Option<Session>| match kept {
         Some(s) => Session {
             cx,
             back,
             stirred,
             pid,
-            own: BTreeSet::new(),
-            seen: BTreeSet::new(),
-            ended: None,
-            child: None,
             ..s
         },
         None => Session {
@@ -1310,7 +1310,7 @@ fn run(
             auth: crate::providers::auth_failures(agent_id),
             heard: shed_core::clock::tokio_now(),
             stirred,
-            idle,
+            idle: turn_idle_timeout(),
             replay: false,
             waking: false,
             last: ("idle".to_owned(), None),
