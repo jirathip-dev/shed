@@ -1108,7 +1108,7 @@ mod tests {
             let report = Reported {
                 state: (if n % 2 == 0 { "working" } else { "blocked" }).to_owned(),
                 note: Some(format!("change {n}")),
-                state_source: None,
+                ..Reported::default()
             };
             let name = "busy".to_owned();
             crate::lock(&registry)
