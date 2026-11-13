@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-use shed_server::Paths;
+use shed_server::proto::{LsParams, Method, TerminalInfo};
+use shed_server::{Client, Paths};
 
 struct Made(RefCell<Vec<PathBuf>>);
 
@@ -34,7 +35,7 @@ pub fn eventually(what: &str, mut check: impl FnMut() -> bool) {
     }
 }
 
-pub struct Server(pub Child);
+pub struct Server(pub Child, PathBuf);
 
 impl Server {
     pub fn start(dir: &Path) -> Self {
@@ -57,8 +58,8 @@ impl Server {
             .stderr(Stdio::null())
             .spawn()
             .expect("shed serve starts");
-        let server = Self(child);
         let socket = Paths::in_dir(dir).socket;
+        let server = Self(child, socket.clone());
         eventually("the socket", || UnixStream::connect(&socket).is_ok());
         server
     }
@@ -66,6 +67,20 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
+        let lanes: Vec<TerminalInfo> = Client::connect(&self.1)
+            .and_then(|mut c| c.call(Method::Ls, &LsParams::default()))
+            .unwrap_or_default();
+        for pid in lanes
+            .iter()
+            .filter(|t| t.acp.is_some())
+            .filter_map(|t| t.pid)
+        {
+            let group = format!("-{pid}");
+            Command::new("kill")
+                .args(["-KILL", "--", &group])
+                .status()
+                .ok();
+        }
         self.0.kill().ok();
         self.0.wait().ok();
     }
