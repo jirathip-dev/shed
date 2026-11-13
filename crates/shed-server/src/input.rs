@@ -169,7 +169,5 @@ mod tests {
         send("marker").await.unwrap().unwrap();
         shows(&term, "ready\nhalf line\nagent\ndraft\nmarker").await;
         assert!(!term.screen().contains("dropped"), "{}", term.screen());
-        let saver = crate::lock(&registry).saver.clone();
-        saver.flushed().await;
     }
 }

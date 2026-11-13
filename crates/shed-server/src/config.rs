@@ -30,3 +30,11 @@ pub fn default_size() -> (u16, u16) {
         .and_then(size)
         .unwrap_or((50, 200))
 }
+
+/// How long an exited terminal stays listed: `$SHED_PRUNE_AFTER` seconds of `shed serve`, else a day.
+#[must_use]
+pub fn prune_after() -> u64 {
+    var("SHED_PRUNE_AFTER")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(86_400)
+}

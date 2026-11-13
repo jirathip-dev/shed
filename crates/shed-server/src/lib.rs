@@ -300,6 +300,7 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     for (name, term) in lock(&registry).running() {
         watch(&registry, name, term);
     }
+    tokio::spawn(registry::keep_saved(Arc::clone(&registry)));
     tokio::spawn(sample(Arc::clone(&registry), sample_every));
     let first = record_stats(&registry).await;
     let recorder = Arc::clone(&registry);
@@ -333,6 +334,8 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         () = accept(&listener, &registry, &links) => {}
         () = stop => {}
     }
+    let saved = lock(&registry).close();
+    saved.await;
     let running = lock(&registry).running();
     let ends = running
         .into_iter()
@@ -416,7 +419,6 @@ fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> O
 }
 
 async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
-    let saver = lock(&registry).saver.clone();
     let mut session = Session {
         links: held,
         ..Session::default()
@@ -429,7 +431,8 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
             continue;
         }
         let response = respond(&registry, &mut session, &line).await;
-        saver.flushed().await;
+        let flushed = lock(&registry).saver.flushed();
+        flushed.await;
         if let (Some(response), Some(out)) = (response, &mut out) {
             let mut bytes = serde_json::to_vec(&response).unwrap_or_default();
             bytes.push(b'\n');
