@@ -502,7 +502,7 @@
     },
     {
       "name": "rm",
-      "description": "Remove an exited terminal; returns it as it was.",
+      "description": "Remove an exited terminal, its ACP session closed; returns it as it was.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1055,6 +1055,20 @@
               "event"
             ],
             "description": "ACP: the session is ready, or its model or slash commands changed."
+          },
+          {
+            "$ref": "#/components/schemas/AcpUsage",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "usage"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
           }
         ],
         "description": "`emit` params."
@@ -1810,12 +1824,48 @@
               "maxItems": 3
             },
             "description": "The agent's slash commands (a prompt `/name …` runs one): name, description, input hint."
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcpUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The agent's last `usage_update`."
           }
         },
         "required": [
           "id"
         ],
         "description": "An ACP terminal's agent session, as its bridge last reported it."
+      },
+      "AcpUsage": {
+        "type": "object",
+        "properties": {
+          "used": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Tokens in context."
+          },
+          "size": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The context window, in tokens."
+          },
+          "cost": {
+            "description": "The session's total cost so far (`amount`, `currency`), when the agent reports it."
+          }
+        },
+        "required": [
+          "used",
+          "size"
+        ],
+        "description": "An ACP session's context window use and cost, as the agent last reported it."
       },
       "ReadResult": {
         "type": "object",
@@ -2114,6 +2164,20 @@
               "event"
             ],
             "description": "ACP: the session is ready, or its model or slash commands changed."
+          },
+          {
+            "$ref": "#/components/schemas/AcpUsage",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "usage"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
           }
         ],
         "description": "One event of an ACP terminal's transcript."
@@ -2499,6 +2563,20 @@
               "event"
             ],
             "description": "ACP: the session is ready, or its model or slash commands changed."
+          },
+          {
+            "$ref": "#/components/schemas/AcpUsage",
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "usage"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
           }
         ],
         "description": "One event, as `events` streams it."

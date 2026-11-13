@@ -8,6 +8,7 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 mod events;
+pub mod hooks;
 mod input;
 mod links;
 pub mod machines;
@@ -612,6 +613,8 @@ async fn dispatch(
 async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {
     let (info, remove) = lock(registry).refresh()?.rm(&name)?;
     blocking(remove).await?;
+    let closing = info.clone();
+    blocking(move || crate::acp::close(&closing)).await?.ok();
     json(&info)
 }
 

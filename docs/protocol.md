@@ -20,7 +20,8 @@ then), or `stuck` while the program has left input unread for over a second (`se
 `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while
 running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`
 and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
-slash `commands`, `[name, description, hint]`); `parent` names the terminal that started it (absent
+slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
+tokens, and the `cost` when sent); `parent` names the terminal that started it (absent
 without one), with `outlive` and `notify` as `run` set them.
 
 ## Methods
@@ -99,7 +100,7 @@ End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exite
 
 ### `rm`
 
-Remove an exited terminal; returns it as it was.
+Remove an exited terminal, its ACP session closed; returns it as it was.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rm","params":{"name":"build"}}
@@ -272,7 +273,7 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
 
-An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`) and `session` (the session is ready, or its model or slash commands changed). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
+An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
 
 ```json
 {"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"started"}
@@ -288,7 +289,8 @@ An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridg
 {"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}
 {"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow"}
 {"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
-{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]]}
+{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}}
+{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}
 ```
 
 ## Screen updates

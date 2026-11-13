@@ -156,6 +156,16 @@ enum Command {
     },
     Uninstall,
     Doctor,
+    Setup(SetupArgs),
+}
+
+#[derive(Args)]
+struct SetupArgs {
+    agents: Vec<String>,
+    #[arg(long)]
+    remove: bool,
+    #[arg(long)]
+    dry_run: bool,
 }
 
 impl Command {
@@ -186,6 +196,9 @@ enum AgentsCommand {
         registry: String,
     },
     Rm {
+        id: String,
+    },
+    Sessions {
         id: String,
     },
 }
@@ -234,6 +247,7 @@ impl Server<'_> {
                 | Command::Install { .. }
                 | Command::Uninstall
                 | Command::Doctor
+                | Command::Setup(_)
         );
         if local && on.is_some() {
             bail!(
@@ -529,6 +543,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
         Command::Doctor => {}
+        Command::Setup(args) => setup(&args)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -539,7 +554,7 @@ fn ls(server: &Server, json: bool, params: &LsParams) -> anyhow::Result<()> {
         let prefix = server.name(String::new());
         list.retain(|t| t.name.starts_with(&prefix));
     }
-    print(json, &list, || table(&list))
+    print(json, &list, || table(&list, false))
 }
 
 fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow::Result<()> {
@@ -699,6 +714,18 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
             let agent = agents::rm(&paths.state, &id)?;
             print(json, &agent, || format!("removed {}", line(&agent)))
         }
+        Some(AgentsCommand::Sessions { id }) => {
+            let agents = agents::list(&paths.state)?;
+            let agent = agents.iter().find(|a| a.id == id);
+            let agent = agent.with_context(|| format!("ACP agent {id} is not installed"))?;
+            let here = std::env::current_dir().context("current directory")?;
+            let list = acp::sessions(&agent.cmd, &here)?;
+            print(json, &list, || {
+                let field = |s: &Value, k: &str| s[k].as_str().unwrap_or("-").to_owned();
+                let row = |s| ["sessionId", "updatedAt", "cwd", "title"].map(|k| field(s, k));
+                list.iter().map(|s| row(s).join("  ") + "\n").collect()
+            })
+        }
     }
 }
 
@@ -707,7 +734,7 @@ fn top(server: &Server, json: bool) -> anyhow::Result<()> {
         .connect(None)?
         .call(Method::Ls, &LsParams::default())?;
     list.sort_by_key(|t| std::cmp::Reverse(t.resources.map(|r| r.rss_mb)));
-    print(json, &list, || table(&list))
+    print(json, &list, || table(&list, true))
 }
 
 fn state(
@@ -732,6 +759,23 @@ fn state(
     };
     let info: TerminalInfo = server.connect(None)?.call(Method::State, &params)?;
     print(json, &info, String::new)
+}
+
+fn setup(a: &SetupArgs) -> anyhow::Result<()> {
+    let home = shed_server::config::var("HOME").context("HOME is not set")?;
+    let files = shed_server::hooks::setup(Path::new(&home), &a.agents, a.remove, a.dry_run)?;
+    if files.is_empty() {
+        bail!("no installed agent has hooks shed can set up");
+    }
+    for f in files {
+        let (agent, file) = (f.agent, f.file.display());
+        match (f.after, a.dry_run) {
+            (None, _) => out::line(format_args!("{agent}: {file} unchanged")),
+            (Some(t), true) => out::text(format_args!("{agent}: {file} would become:\n{t}")),
+            (Some(_), false) => out::line(format_args!("{agent}: {file} updated")),
+        }
+    }
+    Ok(())
 }
 
 fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode> {
@@ -1018,17 +1062,14 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     Ok(())
 }
 
-fn table(list: &[TerminalInfo]) -> String {
+fn table(list: &[TerminalInfo], tokens: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-    let mut rows = vec![
-        [
-            "NAME", "STATE", "EXIT", "PID", "RSS", "CPU", "LABELS", "CMD",
-        ]
-        .map(str::to_owned),
-    ];
+    let head = "NAME STATE EXIT PID RSS CPU TOKENS LABELS CMD".split(' ');
+    let mut rows = vec![head.map(str::to_owned).collect::<Vec<_>>()];
     for t in list {
         let labels: Vec<String> = t.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
-        rows.push([
+        let usage = t.session.as_ref().and_then(|s| s.usage.as_ref());
+        rows.push(vec![
             t.name.clone(),
             match t.state {
                 State::Running => "running",
@@ -1039,6 +1080,7 @@ fn table(list: &[TerminalInfo]) -> String {
             dash(t.pid.map(|v| v.to_string())),
             dash(t.resources.map(|r| format!("{}M", r.rss_mb))),
             dash(t.resources.map(|r| format!("{}%", r.cpu_pct))),
+            dash(usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000))),
             if labels.is_empty() {
                 "-".to_owned()
             } else {
@@ -1047,7 +1089,10 @@ fn table(list: &[TerminalInfo]) -> String {
             t.cmd.join(" "),
         ]);
     }
-    let mut widths = [0; 8];
+    for row in rows.iter_mut().filter(|_| !tokens) {
+        row.remove(6);
+    }
+    let mut widths = vec![0; rows.first().map_or(0, Vec::len)];
     for row in &rows {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = cell.chars().count().max(*w);
@@ -1057,7 +1102,7 @@ fn table(list: &[TerminalInfo]) -> String {
     for row in &rows {
         let cells: Vec<String> = row
             .iter()
-            .zip(widths)
+            .zip(&widths)
             .map(|(c, w)| format!("{c:<w$}"))
             .collect();
         writeln!(out, "{}", cells.join("  ").trim_end()).ok();
