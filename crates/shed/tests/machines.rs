@@ -767,3 +767,30 @@ fn exec_and_file_return_exact_bytes_and_codes_here_and_over_the_held_link() {
     exec_and_files(&root, &["--on", "box"]);
     assert_eq!(box_ssh(&root), ssh, "no ssh per call while the link is up");
 }
+
+#[test]
+fn events_on_a_machine_pass_reset_and_lagged_notices_through() {
+    let root = temp_dir("notices");
+    fake_hosts(&root);
+    let hello = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/hello.jsonl"),
+    )
+    .expect("hello golden");
+    let hello = hello.lines().nth(1).expect("reply").replace("$VERSION", VERSION);
+    let reset = r#"{"jsonrpc":"2.0","method":"reset","params":{"seq":7}}"#;
+    let event = r#"{"seq":8,"name":"t1","labels":{},"event":"started"}"#;
+    let lagged = r#"{"jsonrpc":"2.0","method":"lagged","params":{"seq":8}}"#;
+    script(
+        &root.join("lag.example/shed"),
+        &format!(
+            "read -r line\nprintf '%s\\n' '{hello}'\nread -r line\n\
+             id=$(printf '%s' \"$line\" | sed 's/.*\"id\":\\([0-9]*\\).*/\\1/')\n\
+             printf '{{\"jsonrpc\":\"2.0\",\"id\":%s,\"result\":null}}\\n' \"$id\"\n\
+             printf '%s\\n%s\\n\\n%s\\n' '{reset}' '{event}' '{lagged}'\n"
+        ),
+    );
+    ok(&root, &["machine", "add", "lag", "lag.example"]);
+    let out = ok(&root, &["--on", "lag", "events", "--since", "1"]);
+    let renamed = event.replace("\"t1\"", "\"lag/t1\"");
+    assert_eq!(out, format!("{reset}\n{renamed}\n\n{lagged}\n"));
+}
