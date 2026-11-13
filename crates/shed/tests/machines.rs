@@ -18,10 +18,11 @@ use std::time::{Duration, Instant};
 
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
-use shed_server::proto::{EventsParams, Method, Response, RpcError};
+use shed_server::proto::{BUILD, EventsParams, Hello, Method, PROTOCOL, Response, RpcError};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const OLD: &str = "56de739";
 
 #[test]
 fn connect_carries_the_protocol_over_a_socketpair() {
@@ -43,7 +44,7 @@ fn connect_carries_the_protocol_over_a_socketpair() {
     let golden = std::fs::read_to_string(golden).expect("hello golden");
     let exchange: Vec<String> = golden
         .lines()
-        .map(|l| l.replace("$VERSION", VERSION))
+        .map(|l| l.replace("$VERSION", VERSION).replace("$BUILD", BUILD))
         .collect();
     let mut call = |request: &str| {
         (&ours)
@@ -85,7 +86,12 @@ fn fake_hosts(root: &Path) -> PathBuf {
         &root.join("user@box.example/shed"),
         &format!("exec '{SHED}' --dir '{}' \"$@\"\n", remote.display()),
     );
-    let refusal = Response::err(1.into(), RpcError::version(VERSION, "9.9.9"));
+    let old = Hello {
+        build: OLD.into(),
+        protocol: PROTOCOL - 1,
+        ..Hello::ours()
+    };
+    let refusal = Response::err(1.into(), RpcError::version(&Hello::ours(), &old));
     let refusal = serde_json::to_string(&refusal).expect("json");
     script(
         &root.join("old.example/shed"),
@@ -186,7 +192,8 @@ fn on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_m
     }
     let text = text
         .replace(root.to_str().expect("utf-8 dir"), "$DIR")
-        .replace(VERSION, "$VERSION");
+        .replace(VERSION, "$VERSION")
+        .replace(BUILD, "$BUILD");
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/machines.txt");
     if std::env::var_os("SHED_BLESS").is_some() {
         std::fs::write(&path, &text).expect("write golden");
@@ -262,7 +269,7 @@ fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_versi
     assert_eq!(refused["state"], "down", "{refused}");
     let error = refused["error"].as_str().expect("why it is down");
     assert!(
-        error.contains(&format!("shed {VERSION} here, 9.9.9 on old")),
+        error.contains(&format!("shed {BUILD} here, {OLD} on old")),
         "{error}"
     );
     let ssh = box_ssh(&root);
@@ -326,7 +333,7 @@ fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_versi
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success());
     assert!(
-        stderr.contains(&format!("SHED_VERSION: shed {VERSION} here, 9.9.9 on old")),
+        stderr.contains(&format!("SHED_VERSION: shed {BUILD} here, {OLD} on old")),
         "{stderr}"
     );
     let out = shed_on(&root, &["get", "nope/t1"])

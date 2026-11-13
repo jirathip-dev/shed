@@ -24,7 +24,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::proto::{ErrorCode, MachineStats, Method, StatsParams, VERSION};
+use crate::proto::{BUILD, ErrorCode, MachineStats, Method, StatsParams};
 use crate::{Client, Error};
 
 const CONNECT_TIMEOUT: u32 = 10;
@@ -209,11 +209,11 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
     std::thread::spawn(move || child.wait());
     match Client::over(ours) {
         Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
-            let there = e.message.split("server ").nth(1).unwrap_or_default();
-            let there = there.split(';').next().unwrap_or_default().to_owned();
+            let there = e.message.split(" / server ").nth(1).unwrap_or_default();
+            let there = there.split(':').next().unwrap_or_default().to_owned();
             Err(Error::MachineVersion {
                 machine: machine.name.clone(),
-                here: VERSION.to_owned(),
+                here: BUILD.to_owned(),
                 there,
             })
         }

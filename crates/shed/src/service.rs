@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
+use shed_server::proto::{BUILD, LONG_VERSION};
 use shed_server::{Client, Error, Paths};
 
 const LABEL: &str = "dev.shed.serve";
@@ -77,17 +78,23 @@ pub fn install(force: bool) -> anyhow::Result<()> {
     match std::fs::read_to_string(&job.path) {
         Ok(old) if old == job.text => crate::out::line(format_args!("{file} is up to date")),
         Ok(_) if !force => bail!("{file} has other contents; `shed install --force` replaces it"),
-        old => {
+        _ => {
             let dir = job.path.parent().context("the job's directory")?;
             std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
             std::fs::write(&job.path, &job.text).with_context(|| file.to_string())?;
             crate::out::line(format_args!("wrote {file}"));
-            if old.is_ok() {
-                crate::out::line(format_args!("stop the old job first:\n  {}", job.stop));
-            }
         }
     }
-    crate::out::line(format_args!("start it with:\n  {}", job.start));
+    let restart = format!("{} 2>/dev/null; {}", job.stop, job.start);
+    let ran = shed_server::runner::output("sh", ["-c", restart.as_str()], &[])?;
+    if !ran.status.success() {
+        bail!(
+            "restarting {LABEL} failed ({}): {}; run:\n  {restart}",
+            ran.status,
+            String::from_utf8_lossy(&ran.stderr).trim()
+        );
+    }
+    crate::out::line(format_args!("restarted {LABEL}:\n  {restart}"));
     Ok(())
 }
 
@@ -136,8 +143,12 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         (
             "version",
             match server {
-                Ok(_) => Ok(format!("shed {}", env!("CARGO_PKG_VERSION"))),
-                Err(Error::Rpc(e)) => Err(format!("{e}; fix: {} && {}", job.stop, job.start)),
+                Ok(c) if c.server().build == BUILD => Ok(format!("shed {LONG_VERSION}")),
+                Ok(c) => Err(format!(
+                    "binary {BUILD}, server {}; fix: shed install",
+                    c.server().label()
+                )),
+                Err(Error::Rpc(e)) => Err(format!("{e}; fix: shed install")),
                 Err(_) => Err("no server to ask".into()),
             },
         ),
