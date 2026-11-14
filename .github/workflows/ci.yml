@@ -18,8 +18,8 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: clippy, rustfmt
       - uses: taiki-e/install-action@v2
@@ -60,10 +60,10 @@ jobs:
       RUSTUP_TOOLCHAIN: 1.99.1
     steps:
       # Two commits: on a pull request the merge commit and its base, for arch-check's --base.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
-      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -99,7 +99,7 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: test
         run: cargo test --workspace --locked
@@ -110,12 +110,12 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - name: fan-out bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-fanout.sh base .
 
@@ -125,12 +125,12 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - name: drain bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-drain.sh base .
 
@@ -141,11 +141,11 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - name: ACP bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-acp.sh base .
