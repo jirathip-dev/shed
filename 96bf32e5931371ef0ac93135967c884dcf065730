@@ -1,0 +1,10 @@
+Decided: the schema feature also turns on serde_json/preserve_order, so the OpenRPC document keeps field order wherever it is built
+Because: crates/shed-proto/Cargo.toml:17
+Decided: the protocol_doc test needs the schema feature via required-features, and just generate passes --features schema
+Because: crates/shed-proto/Cargo.toml:21
+Rejected: a self dev-dependency of shed-proto with the schema feature — plain cargo tree counts dev-deps and still showed preserve_order and schemars
+Decided: the feature-tree check runs in just deps (already a CI step) and must also find both with --features schema, which proves it bites
+Because: "checked in `just` or CI"
+Check: cmp of shed schema and the raw rpc.discover line, base 6551550 binary vs head binary, exit 0
+Check: machine_stats fails at base too; the acp no_hibernation test failed only under load average 270-800, then passed 5/5 at head
+Owner: drover can pin shed at this head; shed's own schema and wire JSON are unchanged byte for byte
