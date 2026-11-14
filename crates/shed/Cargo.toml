@@ -14,7 +14,7 @@ shed-server.workspace = true
 clap.workspace = true
 rustix = { workspace = true, features = ["termios"] }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
 
 [dev-dependencies]
 shed-core.workspace = true

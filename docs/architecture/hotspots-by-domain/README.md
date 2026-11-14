@@ -82,7 +82,7 @@ generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json"]
 generate = "just generate"
 ```
 
-`just generate` runs `scripts/changelog.py` and `SHED_BLESS=1 cargo test -p shed-proto --test protocol_doc`;
+`just generate` runs `scripts/changelog.py` and `SHED_BLESS=1 cargo test -p shed-proto --features schema --test protocol_doc`;
 `just check` runs `generate` before `arch`. CI's rules job checks out with `fetch-depth: 2` and `just arch`
 passes `--base HEAD^1` on pull requests.
 

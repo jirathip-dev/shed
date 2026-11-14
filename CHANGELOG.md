@@ -164,6 +164,9 @@ All notable changes to this project are documented here. The format follows
   `shed.service`) and the docs. Terminals get `$SHED`. The `hello`
   carries `product: "shed"`, so a berth client or server is refused with `SHED_VERSION` instead of
   half-working. OSC 7501 is unchanged.
+- `shed-proto` no longer turns on serde_json's `preserve_order` or pulls in `schemars` for its users: the
+  JSON Schema derives and `openrpc()` sit behind its `schema` feature, off by default. `shed` and
+  `shed-server` turn both on, so `shed schema`, `rpc.discover` and the wire JSON are unchanged.
 
 ### Fixed
 

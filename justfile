@@ -6,7 +6,7 @@ check: generate fmt clippy banned test doc deny cap deps hygiene neutral comment
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
-    SHED_BLESS=1 cargo test -p shed-proto --locked --test protocol_doc
+    SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
 
 fmt:
     cargo fmt --all --check
@@ -34,6 +34,7 @@ cap:
 
 deps:
     scripts/dep-direction.sh
+    scripts/proto-features.sh
 
 hygiene:
     scripts/hygiene.sh

@@ -3,16 +3,20 @@
 //! The wire format is newline-delimited JSON-RPC 2.0 over a Unix socket: one [`Request`] per line, one
 //! [`Response`] per line. Every connection starts with [`Method::Hello`]; a client and server of
 //! different products or [`PROTOCOL`]s are refused with [`ErrorCode::Version`]. `docs/protocol.md` is generated
-//! from these types (`SHED_BLESS=1 cargo test -p shed-proto`); CI fails when it drifts.
+//! from these types (`SHED_BLESS=1 cargo test -p shed-proto --features schema`); CI fails when it drifts.
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+#[cfg(feature = "schema")]
 use schemars::generate::SchemaSettings;
+#[cfg(feature = "schema")]
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
+#[cfg(feature = "schema")]
+use serde_json::json;
 
 /// The shed version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -30,7 +34,8 @@ pub const PROTOCOL: u32 = 1;
 pub const JSONRPC: &str = "2.0";
 
 /// A JSON-RPC request. Without an `id` it is a notification and gets no response.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Request {
     /// Always `"2.0"`.
     pub jsonrpc: String,
@@ -58,7 +63,8 @@ impl Request {
 }
 
 /// A JSON-RPC response: exactly one of `result` and `error` is set.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Response {
     /// Always `"2.0"`.
     pub jsonrpc: String,
@@ -97,7 +103,8 @@ impl Response {
 }
 
 /// A JSON-RPC error object.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RpcError {
     /// The numeric code; see [`ErrorCode`].
     pub code: i64,
@@ -294,7 +301,7 @@ pub enum Method {
     FileWrite,
     /// Keep the connection alive: `{}` → `{}`, usually as a notification.
     Heartbeat,
-    /// The API as an `OpenRPC` document: `{}` → [`openrpc`].
+    /// The API as an `OpenRPC` document: `{}` → `openrpc()` (the `schema` feature).
     Discover,
 }
 
@@ -459,7 +466,8 @@ impl Method {
 }
 
 /// `hello` params and result: the sender's product, version, build and protocol.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Hello {
     /// The product, `shed`; a peer that sends none is refused like another protocol.
     #[serde(default)]
@@ -509,7 +517,8 @@ impl Hello {
 }
 
 /// How an ACP bridge answers the agent's permission requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Policy {
     /// Pick the first `allow_once` (else `allow_always`) option.
@@ -521,7 +530,8 @@ pub enum Policy {
 }
 
 /// `run` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RunParams {
     /// The terminal's name, unique per server; `[A-Za-z0-9._-]+`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -575,7 +585,8 @@ pub struct RunParams {
 }
 
 /// A child's link to the terminal that started it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Parent {
     /// The parent terminal's name.
     pub name: String,
@@ -589,7 +600,8 @@ pub struct Parent {
 }
 
 /// `ls` params.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct LsParams {
     /// Only terminals carrying every one of these labels.
     #[serde(default)]
@@ -600,14 +612,16 @@ pub struct LsParams {
 }
 
 /// `get`, `kill` and `rm` params: the terminal's name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Target {
     /// The terminal's name.
     pub name: String,
 }
 
 /// `read` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ReadParams {
     /// The terminal's name.
     pub name: String,
@@ -629,7 +643,8 @@ pub struct ReadParams {
 }
 
 /// `read` result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ReadResult {
     /// Plain text, one line per row, trailing blanks dropped.
     pub text: String,
@@ -639,7 +654,8 @@ pub struct ReadResult {
 }
 
 /// One event of an ACP terminal's transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Logged {
     /// Its place in the transcript, from 1.
     pub seq: u64,
@@ -649,7 +665,8 @@ pub struct Logged {
 }
 
 /// `send` and `terminal.input` params.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct SendParams {
     /// The terminal's name (`terminal` in `terminal.input`).
     #[serde(alias = "terminal")]
@@ -668,7 +685,8 @@ pub struct SendParams {
 }
 
 /// `keys` and `terminal.keys` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct KeysParams {
     /// The terminal's name (`terminal` in `terminal.keys`).
     #[serde(alias = "terminal")]
@@ -678,7 +696,8 @@ pub struct KeysParams {
 }
 
 /// `resize` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ResizeParams {
     /// The terminal's name.
     pub name: String,
@@ -689,7 +708,8 @@ pub struct ResizeParams {
 }
 
 /// `state` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct StateParams {
     /// The terminal's name.
     pub name: String,
@@ -699,7 +719,8 @@ pub struct StateParams {
 }
 
 /// A state a terminal's program reported.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Reported {
     /// `working`, `blocked`, `done` or `error`; `idle` from OSC 7501 or the `idle_after` fallback.
     pub state: String,
@@ -730,7 +751,8 @@ pub struct Reported {
 }
 
 /// `wait` params.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WaitParams {
     /// The terminal's name; with `children`, the parent's.
     pub name: String,
@@ -752,7 +774,8 @@ pub struct WaitParams {
 }
 
 /// Which children end a `wait`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum Children {
     /// No child is working: each has exited or reports something other than `working`.
@@ -762,7 +785,8 @@ pub enum Children {
 }
 
 /// How a `wait` ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum WaitOutcome {
     /// A state in `until` or the `output` pattern matched.
@@ -774,7 +798,8 @@ pub enum WaitOutcome {
 }
 
 /// `wait` result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WaitResult {
     /// How the wait ended.
     pub outcome: WaitOutcome,
@@ -783,7 +808,8 @@ pub struct WaitResult {
 }
 
 /// `events` params.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct EventsParams {
     /// Only events of terminals carrying every one of these labels.
     #[serde(default)]
@@ -804,7 +830,8 @@ pub struct EventsParams {
 /// the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its
 /// events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state
 /// `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Event {
     /// Counts up from 1 for every event the server emits, so a reconnecting client can ask for what it
     /// missed with `since`.
@@ -825,7 +852,8 @@ pub struct Event {
 }
 
 /// What an [`Event`] reports; the `event` field names it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum EventKind {
     /// The program started (`run`, or a kept terminal back after a server restart).
@@ -914,7 +942,8 @@ impl EventKind {
 }
 
 /// One choice of an [`EventKind::ApprovalRequest`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ApprovalOption {
     /// The option id `shed approve` takes.
     pub id: String,
@@ -925,7 +954,8 @@ pub struct ApprovalOption {
 }
 
 /// An ACP terminal's agent session, as its bridge last reported it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct AcpSession {
     /// The agent's session id, for `run --acp … --resume`.
     pub id: String,
@@ -947,7 +977,8 @@ pub struct AcpSession {
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct AcpUsage {
     /// Tokens in context.
     pub used: u64,
@@ -959,7 +990,8 @@ pub struct AcpUsage {
 }
 
 /// `emit` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct EmitParams {
     /// The terminal's name.
     pub name: String,
@@ -972,7 +1004,8 @@ pub struct EmitParams {
 }
 
 /// `acp.model` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ModelParams {
     /// The terminal's name.
     pub name: String,
@@ -984,7 +1017,8 @@ pub struct ModelParams {
 pub const REPLY_LIMIT: u64 = 8 << 20;
 
 /// `exec` params.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ExecParams {
     /// The program and its arguments.
     pub cmd: Vec<String>,
@@ -1003,7 +1037,8 @@ pub struct ExecParams {
 }
 
 /// `exec` result.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ExecResult {
     /// The exit code, or 128 + the signal that ended it.
     pub code: i32,
@@ -1014,7 +1049,8 @@ pub struct ExecResult {
 }
 
 /// `file.read` and `file.write` params.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct FileParams {
     /// The file.
     pub path: PathBuf,
@@ -1027,7 +1063,8 @@ pub struct FileParams {
 }
 
 /// `machine.stats` params.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct StatsParams {
     /// Add the kept samples taken after this time (unix seconds) as `history`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1035,7 +1072,8 @@ pub struct StatsParams {
 }
 
 /// One sample of a machine's health.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Sample {
     /// When it was taken, unix seconds.
     pub at: u64,
@@ -1056,7 +1094,8 @@ pub struct Sample {
 }
 
 /// A held link's state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum LinkState {
     /// Connected.
@@ -1068,7 +1107,8 @@ pub enum LinkState {
 }
 
 /// One machine's held link, as `machine.links` reports it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Link {
     /// Up, reconnecting or down.
     pub state: LinkState,
@@ -1080,7 +1120,8 @@ pub struct Link {
 }
 
 /// `machine.stats` result: a sample taken now, and the kept ones after `since`.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct MachineStats {
     /// Now.
     #[serde(flatten)]
@@ -1091,7 +1132,8 @@ pub struct MachineStats {
 }
 
 /// A terminal's process tree's resource use at the last sample.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Resources {
     /// Summed resident memory, in MiB.
     pub rss_mb: u64,
@@ -1100,7 +1142,8 @@ pub struct Resources {
 }
 
 /// Whether a terminal's program runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum State {
     /// The program runs.
@@ -1121,7 +1164,8 @@ pub enum State {
 /// slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
 /// tokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with
 /// `outlive` and `notify` as `run` set them.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalInfo {
     /// The unique name.
     pub name: String,
@@ -1163,7 +1207,8 @@ pub struct TerminalInfo {
 }
 
 /// `screen.watch` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WatchParams {
     /// The terminal's name.
     pub terminal: String,
@@ -1177,7 +1222,8 @@ pub struct WatchParams {
 /// as runs of cells with one pen: `fg` and `bg` (a palette index 0–255, or `[r, g, b]`; `null` is the default),
 /// `bold`, `italic`, `underline` and `inverse`. Trailing blank default cells are dropped, so a blank row has no
 /// runs. `full` marks an update that carries every row: the first, and the one after a resize.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ScreenUpdate {
     /// The screen's change count it shows; pass it as `since` when watching again.
     pub seq: u64,
@@ -1196,7 +1242,8 @@ pub struct ScreenUpdate {
 }
 
 /// One row of a [`ScreenUpdate`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Line {
     /// The row, from 0.
     pub row: u16,
@@ -1205,7 +1252,8 @@ pub struct Line {
 }
 
 /// Consecutive cells with the same pen; `null` colours are the terminal's defaults.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "the four SGR attributes are independent flags"
@@ -1228,7 +1276,8 @@ pub struct Run {
 }
 
 /// A colour: a palette index (0–15 the named colours, up to 255 the xterm palette) or `[r, g, b]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(untagged)]
 pub enum Color {
     /// A palette index.
@@ -1238,7 +1287,8 @@ pub enum Color {
 }
 
 /// `terminal.resize` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalResizeParams {
     /// The terminal's name; default the one this connection watches.
     #[serde(default, alias = "name", skip_serializing_if = "Option::is_none")]
@@ -1250,12 +1300,14 @@ pub struct TerminalResizeParams {
 }
 
 /// `terminal.readonly` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalParams {
     /// The terminal's name.
     pub terminal: String,
 }
 
+#[cfg(feature = "schema")]
 impl Method {
     fn schemas(self, g: &mut SchemaGenerator) -> [Schema; 2] {
         fn pair<P: JsonSchema, R: JsonSchema>(g: &mut SchemaGenerator) -> [Schema; 2] {
@@ -1299,10 +1351,12 @@ impl Method {
     }
 }
 
+#[cfg(feature = "schema")]
 #[derive(JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Empty {}
 
+#[cfg(feature = "schema")]
 fn terminal_for_name([mut params, result]: [Schema; 2]) -> [Schema; 2] {
     for (key, value) in params.as_object_mut().into_iter().flatten() {
         match (key.as_str(), value) {
@@ -1322,6 +1376,7 @@ fn terminal_for_name([mut params, result]: [Schema; 2]) -> [Schema; 2] {
     [params, result]
 }
 
+#[cfg(feature = "schema")]
 /// The whole API as one `OpenRPC` document (`shed schema`, `rpc.discover`): every method's params and result,
 /// the streamed [`Event`]s and [`ScreenUpdate`]s (`x-stream`) and the error codes, as JSON Schema.
 #[must_use]
@@ -1343,6 +1398,7 @@ pub fn openrpc() -> Value {
         "components": {"schemas": g.take_definitions(true), "errors": errors}})
 }
 
+#[cfg(feature = "schema")]
 fn describe(method: Method, g: &mut SchemaGenerator) -> Value {
     let [params, result] = method.schemas(g);
     let required = params.get("required").and_then(Value::as_array);

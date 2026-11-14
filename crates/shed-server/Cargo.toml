@@ -12,9 +12,9 @@ publish.workspace = true
 agent-client-protocol.workspace = true
 futures.workspace = true
 shed-core.workspace = true
-shed-proto.workspace = true
+shed-proto = { workspace = true, features = ["schema"] }
 serde.workspace = true
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
 rustix = { workspace = true, features = ["net", "stdio", "termios"] }
 thiserror.workspace = true
 tokio = { workspace = true, features = [

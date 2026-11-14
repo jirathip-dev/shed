@@ -1,6 +1,6 @@
 # shed protocol
 
-<!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto`; do not edit. -->
+<!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
 Version: `0.0.0`, protocol `1`. Client and server must speak the same protocol.
 

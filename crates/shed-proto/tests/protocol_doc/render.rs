@@ -34,7 +34,7 @@ fn markdown() -> String {
     let doc = openrpc();
     let mut md = format!(
         "# shed protocol\n\n\
-         <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto`; do not edit. -->\n\n\
+         <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->\n\n\
          Version: `{VERSION}`, protocol `{PROTOCOL}`. Client and server must speak the same protocol.\n\n\
          Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:\n\
          `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one\n\
