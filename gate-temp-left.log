@@ -1,0 +1,5 @@
+scripts/temp-left.sh
+tests left no temp folders
+! scripts/temp-left.sh ci/fixtures/temp-left
+shed-cli-123
+tests left these in ci/fixtures/temp-left; make each test remove its temp folders

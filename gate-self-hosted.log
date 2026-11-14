@@ -1,0 +1,4 @@
+scripts/self-hosted.py
+every self-hosted job is gated to same-repo code
+! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
+ci/fixtures/self-hosted-unguarded/ci.yml: job `test` uses a self-hosted runner without `github.event.pull_request.head.repo.full_name == github.repository`

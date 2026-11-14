@@ -1,0 +1,10 @@
+scripts/comment-rule.py
+comments follow the rule
+! scripts/comment-rule.py ci/fixtures/comment-plain
+ci/fixtures/comment-plain/crates/core/src/lib.rs:5:5: // a plain comment
+comments break the rule (.herdsman/rules.md): no // or /* */ but // SAFETY: and // TODO(#N); /// only on public API
+! scripts/comment-rule.py ci/fixtures/comment-private-doc
+ci/fixtures/comment-private-doc/crates/core/src/lib.rs:8:1: /// A private item, so this doc breaks the rule.
+comments break the rule (.herdsman/rules.md): no // or /* */ but // SAFETY: and // TODO(#N); /// only on public API
+scripts/comment-rule.py ci/fixtures/comment-allowed
+comments follow the rule

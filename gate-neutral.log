@@ -1,0 +1,5 @@
+scripts/neutral-core.sh
+core names no agent or provider
+! scripts/neutral-core.sh ci/fixtures/leaky-core
+ci/fixtures/leaky-core/crates/core/src/lib.rs:3: pub const AGENT: &str = "codex-acp";
+agent or provider names in core code; move them to providers/<name>.rs
