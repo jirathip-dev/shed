@@ -1,5 +1,12 @@
 # Every CI gate, locally.
-check: fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
+check: generate fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
+
+# The generated files in .herdsman/arch.toml, written in the current folder (so a fixture gets its own):
+# CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json.
+[no-cd]
+generate:
+    python3 -I "{{justfile_directory()}}/scripts/changelog.py"
+    SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
 
 fmt:
     cargo fmt --all --check
@@ -27,6 +34,7 @@ cap:
 
 deps:
     scripts/dep-direction.sh
+    scripts/proto-features.sh
 
 hygiene:
     scripts/hygiene.sh
@@ -54,9 +62,10 @@ self-hosted:
     ! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
 
 # Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
-# environment only in shed_server::config) and size limits in .herdsman/arch.toml; one fixture breaks each.
+# environment only in shed_server::config), size limits and generated files in .herdsman/arch.toml; one
+# fixture breaks each. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
 arch:
-    drover arch-check
+    drover arch-check ${ARCH_BASE:+--base "$ARCH_BASE"}
     cd ci/fixtures/arch-layer && ! drover arch-check --config ../../../.herdsman/arch.toml
     cd ci/fixtures/arch-spawn && ! drover arch-check --config ../../../.herdsman/arch.toml
     cd ci/fixtures/arch-process && ! drover arch-check --config ../../../.herdsman/arch.toml
@@ -65,6 +74,7 @@ arch:
     cd ci/fixtures/arch-system-time && ! drover arch-check --config ../../../.herdsman/arch.toml
     cd ci/fixtures/arch-instant && ! drover arch-check --config ../../../.herdsman/arch.toml
     cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.herdsman/arch.toml
 
 # The lesson checks in .herdsman/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:

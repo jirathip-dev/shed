@@ -1,6 +1,6 @@
 # shed protocol
 
-<!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto`; do not edit. -->
+<!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
 Version: `0.0.0`, protocol `1`. Client and server must speak the same protocol.
 
@@ -12,18 +12,18 @@ Every connection starts with `hello`. Any other method first is refused with `NO
 product or protocol is refused with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>;
 restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `protocol` as 0).
 
-A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is
-the exit status (128 + N for signal N), `null` while running or when the program was lost in a server
-restart; `pid` is set while running; `reported` is the state the program last reported (absent until
-then), with OSC 7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the
-program has left input unread for over a second (`send`, `keys` and `acp.model` then fail, their input
-queued); `records` are its OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle`
-fallback is on; `resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last
-sample, while running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the
-current `model` and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as
-`***`; the agent's slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the
-context window in tokens, and the `cost` when sent); `parent` names the terminal that
-started it (absent without one), with `outlive` and `notify` as `run` set them.
+A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the
+exit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;
+`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC
+7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left
+input unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are
+its OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;
+`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while
+running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`
+and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
+slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
+tokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with
+`outlive` and `notify` as `run` set them.
 
 ## Methods
 
@@ -281,9 +281,17 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ## Events
 
-An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`), `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
+An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in
+`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),
+`killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
 
-An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text` (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
+An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`
+(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with
+`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session
+is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of
+the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its
+events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state
+`hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
 
 ```json
 {"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"started"}
@@ -305,7 +313,11 @@ An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridg
 
 ## Screen updates
 
-`screen.watch` writes one update per line. `seq` is the screen's change count; `rows`, `cols`, `cursor` (`[row, col]`, from 0) and `scrollback` (lines) are always there; `lines` holds the rows that changed, each as runs of cells with one pen: `fg` and `bg` (a palette index 0–255, or `[r, g, b]`; `null` is the default), `bold`, `italic`, `underline` and `inverse`. Trailing blank default cells are dropped, so a blank row has no runs. `full` marks an update that carries every row: the first, and the one after a resize.
+`screen.watch` writes one update per line. `seq` is the screen's change count; `rows`, `cols`, `cursor`
+(`[row, col]`, from 0) and `scrollback` (lines) are always there; `lines` holds the rows that changed, each
+as runs of cells with one pen: `fg` and `bg` (a palette index 0–255, or `[r, g, b]`; `null` is the default),
+`bold`, `italic`, `underline` and `inverse`. Trailing blank default cells are dropped, so a blank row has no
+runs. `full` marks an update that carries every row: the first, and the one after a resize.
 
 ```json
 {"seq":41,"full":true,"rows":2,"cols":40,"cursor":[1,2],"scrollback":120,"lines":[{"row":0,"runs":[{"text":"ok","fg":2,"bg":null,"bold":true,"italic":false,"underline":false,"inverse":false},{"text":" 12 tests","fg":null,"bg":null,"bold":false,"italic":false,"underline":false,"inverse":false}]},{"row":1,"runs":[{"text":"$","fg":null,"bg":null,"bold":false,"italic":false,"underline":false,"inverse":false}]}]}

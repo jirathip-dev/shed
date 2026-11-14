@@ -10,8 +10,15 @@ publish.workspace = true
 
 [dependencies]
 serde.workspace = true
-serde_json = { workspace = true, features = ["preserve_order"] }
-schemars.workspace = true
+serde_json.workspace = true
+schemars = { workspace = true, optional = true }
+
+[features]
+schema = ["dep:schemars", "serde_json/preserve_order"]
+
+[[test]]
+name = "protocol_doc"
+required-features = ["schema"]
 
 [lints]
 workspace = true
