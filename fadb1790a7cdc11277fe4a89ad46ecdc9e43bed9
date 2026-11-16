@@ -1,0 +1,24 @@
+Decided: the reaper and input writer run on the caller's multi-thread tokio runtime (serve's), else on a private one-worker runtime
+Because: crates/shed-core/src/terminal.rs:505
+Because: crates/shed/tests/reliability.rs:418
+Decided: the Linux fd failure was the private runtime's epoll, waker and signal fds opened lazily after the test's baseline, not a per-session leak
+Rejected: any current runtime — a current-thread test runtime that blocks in kill can never run the reaper (registry tests hung)
+Rejected: changing the fd test — the spec says "the reliability suite pass unchanged"
+Decided: if SIGCHLD cannot be watched the reaper waits for the child on a blocking task instead of recording it as exited
+Because: crates/shed-core/src/terminal.rs:512
+Decided: the cap overrun waits for the owner's raise in one orchestrator-filed issue
+Because: q1767
+Check: exited_sessions_release_their_fds passes on the Linux CI jobs (stable ubuntu, msrv) at this head
+Check: bench-drain on CI stays within 110%
+Owner: fixes the leftover file-handle failure on Linux by sharing the server's background runtime instead of starting a second one
+
+Decided: merged origin/staging rather than rebasing, so the pushed history stays as it is
+Decided: no code change this round; the only red check was the line cap, which #140 raised
+Because: q1767
+Decided: the reaper and input writer run on the caller's multi-thread tokio runtime (serve's), else on a private one-worker runtime
+Because: crates/shed-core/src/terminal.rs:505
+Rejected: any current runtime — a current-thread test runtime that blocks in kill can never run the reaper
+Rejected: changing the fd test — the spec says "the reliability suite pass unchanged"
+Check: just cap passes on CI at this head (10039 / 11000)
+Check: exited_sessions_release_their_fds passes on the Linux CI jobs and bench-drain stays within 110%
+Owner: the cap raise is merged in; this PR now fits under the line cap with no code change
