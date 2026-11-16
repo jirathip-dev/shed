@@ -643,7 +643,7 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
                 paths.socket.display()
             );
         }
-        serve_detached(paths, dir, None)?;
+        connect(paths, dir, Some(true))?;
     }
     shed_server::relay(&paths.socket).context("shed connect")
 }
@@ -1027,7 +1027,7 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
             ) =>
         {
             if autostart == Some(true) {
-                let started = serve_detached(paths, dir, None);
+                let started = start_server(paths, dir);
                 for _ in 0..50 {
                     if let Ok(client) = Client::connect(&paths.socket) {
                         return Ok(client);
@@ -1049,6 +1049,13 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
         }
         client => Ok(client?),
     }
+}
+
+fn start_server(paths: &Paths, dir: Option<&Path>) -> anyhow::Result<()> {
+    if dir.is_some() || !service::start_job()? {
+        return serve_detached(paths, dir, None);
+    }
+    Ok(())
 }
 
 fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> anyhow::Result<()> {

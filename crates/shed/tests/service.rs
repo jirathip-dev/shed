@@ -16,19 +16,29 @@ use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
 fn shed(home: &Path, args: &[&str]) -> Output {
+    shed_with(home, args, &[])
+}
+
+fn shed_with(home: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     let bin = home.join("fake-bin");
     std::fs::create_dir_all(&bin).expect("fake bin");
     for ctl in ["launchctl", "systemctl"] {
         let file = bin.join(ctl);
-        let log = "echo \"$(basename \"$0\") $*\" >> \"$(dirname \"$0\")/ctl.log\"\n";
+        let log = "echo \"$(basename \"$0\") $*\" >> \"$(dirname \"$0\")/ctl.log\"\n\
+                   case \"$*\" in *\" start \"*|kickstart*) \"$SHED_BIN\" serve </dev/null >/dev/null 2>&1 & esac\n\
+                   [ -z \"$CTL_FAIL\" ] || case \"$*\" in *\"$CTL_FAIL\"*) exit 3; esac\n";
         std::fs::write(&file, format!("#!/bin/sh\n{log}")).expect("fake ctl");
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
     let path = std::env::var("PATH").unwrap_or_default();
     Command::new(SHED)
         .env("HOME", home)
+        .env("XDG_RUNTIME_DIR", home)
+        .env("SHED_BIN", SHED)
+        .env("SHELL", "/bin/sh")
         .env("PATH", format!("{}:{path}", bin.display()))
         .env_remove("XDG_CONFIG_HOME")
+        .envs(env.iter().copied())
         .args(args)
         .output()
         .expect("shed runs")
@@ -287,4 +297,86 @@ fn install_force_over_a_unit_without_the_oom_policy_leaves_one_with_it() {
     let unit = std::fs::read_to_string(&file).expect("the unit");
     assert!(unit.contains("\nOOMPolicy=continue\n"), "{unit}");
     assert!(ctl_log(&home).contains("daemon-reload"), "reloaded");
+}
+
+fn autostart(home: &Path) -> Output {
+    let out = shed(
+        home,
+        &[
+            "run",
+            "--autostart",
+            "--",
+            "sh",
+            "-c",
+            "echo $PPID; exec sleep 100",
+        ],
+    );
+    let mut server = String::new();
+    common::eventually("the server's pid", || {
+        server = String::from_utf8_lossy(&shed(home, &["read", "t1"]).stdout)
+            .trim()
+            .to_owned();
+        !server.is_empty()
+    });
+    assert!(
+        Command::new("kill")
+            .arg(&server)
+            .status()
+            .expect("kill")
+            .success()
+    );
+    common::eventually("the server to exit", || {
+        !Command::new("kill")
+            .args(["-0", &server])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("kill -0")
+            .success()
+    });
+    out
+}
+
+#[test]
+fn autostart_starts_the_installed_job_and_no_server_of_its_own() {
+    let home = temp_dir("aj");
+    assert!(shed(&home, &["install"]).status.success());
+    std::fs::remove_file(home.join("fake-bin/ctl.log")).expect("clear the log");
+    let out = autostart(&home);
+    assert!(out.status.success(), "{out:?}");
+    assert!(!text(&out).contains("started"), "{out:?}");
+    let kick = if cfg!(target_os = "macos") {
+        "launchctl kickstart gui/"
+    } else {
+        "systemctl --user reset-failed shed.service\nsystemctl --user start shed.service\n"
+    };
+    assert!(ctl_log(&home).starts_with(kick), "{}", ctl_log(&home));
+}
+
+#[test]
+fn autostart_without_a_job_starts_a_detached_server() {
+    let home = temp_dir("an");
+    let out = autostart(&home);
+    assert!(out.status.success(), "{out:?}");
+    assert!(text(&out).contains("started"), "{out:?}");
+    assert_eq!(ctl_log(&home), "", "no job to start");
+}
+
+#[test]
+fn doctor_flags_a_server_outside_a_failed_job() {
+    let home = temp_dir("outside");
+    let d = home.to_str().expect("utf-8 dir");
+    assert!(shed(&home, &["install"]).status.success());
+    let _server = Server::start(&home);
+    let inactive = if cfg!(target_os = "macos") {
+        "list"
+    } else {
+        "is-active"
+    };
+    let out = shed_with(&home, &["--dir", d, "doctor"], &[("CTL_FAIL", inactive)]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let line = format!(
+        "FAIL  loaded   a server outside dev.shed.serve answers on {}; fix: stop that server, then ",
+        home.join("shed.sock").display()
+    );
+    assert!(text(&out).contains(&line), "{}", text(&out));
 }

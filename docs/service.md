@@ -44,6 +44,17 @@ systemctl --user enable --now shed.service
 loginctl enable-linger "$USER"   # optional: keep it running while logged out
 ```
 
+## Out of memory
+
+An out-of-memory kill ends only the process it picks. The unit has `OOMPolicy=continue`, so when the
+kernel kills one terminal's child (a compiler, say), the server and every other terminal keep running.
+If the server itself is killed, `Restart=always` brings it back and the terminals are restored as under
+Restarts. `shed install --force` rewrites a unit from before this policy and reloads it.
+
+With the job installed, `--autostart` starts the job (`systemctl --user start shed.service`,
+`launchctl kickstart`) and waits for its socket; it never starts a server of its own. `shed doctor`
+flags a server that answers while the job is not loaded: it runs outside the job's restart policy.
+
 ## Restarts
 
 The state file keeps every terminal's name, labels, cwd, command, state and exit status, written
