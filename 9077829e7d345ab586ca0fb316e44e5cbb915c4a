@@ -1,0 +1,12 @@
+Decided: the unit gets OOMPolicy=continue, so an OOM kill of a lane's child no longer stops shed.service
+Because: "The systemd unit gets `OOMPolicy=continue`: an OOM kill ends the killed process only"
+Decided: --autostart starts the installed job only without --dir; with --dir the job never serves that socket, so a detached server starts as before
+Because: crates/shed/src/main.rs:1055
+Decided: the job's start is `reset-failed; start` on Linux, so a unit that hit its start limit after the OOM starts again
+Decided: on macOS the start is `kickstart || bootstrap`, so an unloaded plist still starts
+Decided: `shed connect --autostart` reuses connect's start and 5 s socket wait instead of its own serve_detached call
+Because: crates/shed/src/main.rs:646
+Decided: doctor's loaded row reports the outside server when the job is not loaded but the socket answers
+Rejected: a separate doctor row — the loaded row already owns the job-inactive case and its fix line
+Check: the OOMPolicy test is Linux-only (the unit is only written there); CI's ubuntu job runs it
+Owner: one out-of-memory kill now ends one process, and autostart brings back the real service instead of a stray server
