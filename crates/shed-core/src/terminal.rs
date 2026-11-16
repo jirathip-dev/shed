@@ -16,7 +16,7 @@ use rustix::event::{PollFd, PollFlags, poll};
 use rustix::process::{Pid, Signal, kill_process_group};
 use rustix::termios::{Winsize, tcgetwinsize, tcsetwinsize};
 use tokio::io::AsyncWriteExt as _;
-use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor::MultiThread};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
 
@@ -502,7 +502,10 @@ fn runtime() -> Result<Handle, Error> {
             .as_ref()
             .map(Runtime::handle)
     };
-    let runtime = Handle::try_current().ok().or_else(|| own().cloned());
+    let pooled = Handle::try_current()
+        .ok()
+        .filter(|h| h.runtime_flavor() == MultiThread);
+    let runtime = pooled.or_else(|| own().cloned());
     runtime.ok_or_else(|| Error::Io(std::io::Error::other("no runtime")))
 }
 
