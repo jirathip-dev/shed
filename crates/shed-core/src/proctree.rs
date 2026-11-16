@@ -221,11 +221,13 @@ pub fn usage(procs: &[ProcessInfo]) -> Usage {
 }
 
 fn signal_tree(root: i32, pids: &BTreeSet<i32>, sig: Signal) {
-    if let Some(group) = Pid::from_raw(root) {
-        kill_process_group(group, sig).ok();
-    }
-    for pid in pids.iter().filter_map(|&p| Pid::from_raw(p)) {
-        kill_process(pid, sig).ok();
+    for sig in [sig, Signal::CONT] {
+        if let Some(group) = Pid::from_raw(root) {
+            kill_process_group(group, sig).ok();
+        }
+        for pid in pids.iter().filter_map(|&p| Pid::from_raw(p)) {
+            kill_process(pid, sig).ok();
+        }
     }
 }
 
@@ -240,7 +242,8 @@ fn live(table: &impl ProcessTable, root: i32, known: &BTreeSet<i32>) -> BTreeSet
     }
 }
 
-/// Ends the tree led by `root`: SIGTERM to every process, then SIGKILL to what is left after `grace`.
+/// Ends the tree led by `root`: SIGTERM to every process, SIGHUP 100 ms later, then SIGKILL to what
+/// is left after `grace`, each with SIGCONT so a stopped process sees it.
 ///
 /// `reap` is called while waiting so the caller can collect its exited child; the call returns once
 /// no process of the tree is alive, or a second after SIGKILL. While the process table cannot be read
@@ -248,8 +251,9 @@ fn live(table: &impl ProcessTable, root: i32, known: &BTreeSet<i32>) -> BTreeSet
 pub fn kill_tree(table: &impl ProcessTable, root: i32, grace: Duration, mut reap: impl FnMut()) {
     let mut known = live(table, root, &BTreeSet::new());
     signal_tree(root, &known, Signal::TERM);
-    let mut killed = false;
-    let mut deadline = crate::clock::now() + grace;
+    let started = crate::clock::now();
+    let mut next = [Signal::HUP, Signal::KILL].into_iter();
+    let mut deadline = started + Duration::from_millis(100);
     loop {
         reap();
         let live = live(table, root, &known);
@@ -258,12 +262,9 @@ pub fn kill_tree(table: &impl ProcessTable, root: i32, grace: Duration, mut reap
         }
         known.extend(live);
         if crate::clock::now() >= deadline {
-            if killed {
-                return;
-            }
-            signal_tree(root, &known, Signal::KILL);
-            killed = true;
-            deadline = crate::clock::now() + Duration::from_secs(1);
+            let Some(sig) = next.next() else { return };
+            signal_tree(root, &known, sig);
+            deadline = started + grace + Duration::from_secs(u64::from(sig == Signal::KILL));
         }
         crate::clock::sleep(Duration::from_millis(20));
     }
