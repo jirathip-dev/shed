@@ -274,3 +274,17 @@ fn setup_hooks_report_nothing_outside_shed_and_doctor_lists_them() {
     assert!(report.contains("FAIL  hooks    "), "{report}");
     assert!(report.contains("not JSON objects"), "{report}");
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn install_force_over_a_unit_without_the_oom_policy_leaves_one_with_it() {
+    let home = temp_dir("oom");
+    let file = job_file(&home);
+    std::fs::create_dir_all(file.parent().expect("unit dir")).expect("unit dir");
+    std::fs::write(&file, "[Service]\nExecStart=shed serve\nRestart=always\n").expect("old unit");
+    let out = shed(&home, &["install", "--force"]);
+    assert!(out.status.success(), "{out:?}");
+    let unit = std::fs::read_to_string(&file).expect("the unit");
+    assert!(unit.contains("\nOOMPolicy=continue\n"), "{unit}");
+    assert!(ctl_log(&home).contains("daemon-reload"), "reloaded");
+}
