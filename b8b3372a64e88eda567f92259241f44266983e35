@@ -1,0 +1,10 @@
+Decided: stay on the ACP adapter; drop npx in its own issue; no direct stream-json bridge
+Because: "build only if it saves at least 100 MB per awake session and loses no state or event"
+Because: docs/decisions/0006-claude-direct.md:36
+Decided: the stream-json mode runs the SDK's bundled claude binary so only the adapter differs between rows
+Rejected: the claude on PATH — another build (2.1.325 vs 2.1.323), its RSS differs on its own
+Rejected: a direct bridge — 114 MB saved but resume replay and session listing are lost, approvals ride the SDK's undocumented control protocol
+Decided: agents run with only HOME, PATH, USER, TERM, LANG, TMPDIR so a parent Claude session or API key cannot leak in
+Check: times are API-bound and noisy; only the memory rows and ready time carry the decision
+Check: the 7 processes of adapter 0.100.0 in docs/acp.md are not reproduced; 0.107.0 shows 3 plus the bridge
+Owner: Claude lanes keep the adapter; launching it without npx would save up to about 110 MB per awake lane
