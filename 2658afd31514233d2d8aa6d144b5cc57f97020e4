@@ -1,0 +1,10 @@
+Decided: merged origin/staging rather than rebasing, so the pushed history stays as it is
+Decided: no code change this round; the only red check was the line cap, which #140 raised
+Because: q1767
+Decided: the reaper and input writer run on the caller's multi-thread tokio runtime (serve's), else on a private one-worker runtime
+Because: crates/shed-core/src/terminal.rs:505
+Rejected: any current runtime — a current-thread test runtime that blocks in kill can never run the reaper
+Rejected: changing the fd test — the spec says "the reliability suite pass unchanged"
+Check: just cap passes on CI at this head (10039 / 11000)
+Check: exited_sessions_release_their_fds passes on the Linux CI jobs and bench-drain stays within 110%
+Owner: the cap raise is merged in; this PR now fits under the line cap with no code change
