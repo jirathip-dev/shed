@@ -568,3 +568,30 @@ fn kill_ends_an_interactive_shell_without_waiting_out_the_grace() {
     let took = started.elapsed();
     assert!(took < Duration::from_millis(500), "kill took {took:?}");
 }
+
+#[test]
+fn kill_lets_a_sigterm_handler_run_before_the_hangup() {
+    let dir = temp_dir("rel-tidy");
+    let _server = Server::start(&dir);
+    run_sh(
+        &dir,
+        "tidy",
+        "trap 'exit 7' TERM; echo ready; while :; do sleep 1; done",
+    );
+    eventually("ready", || ok(&dir, &["read", "tidy"]).contains("ready"));
+    assert_eq!(ok(&dir, &["kill", "tidy"]), "tidy exited 7\n");
+}
+
+#[test]
+fn sigterm_to_serve_with_20_shells_ends_in_under_a_second() {
+    let dir = temp_dir("rel-shells");
+    let mut server = Serve::start(&dir, "", Stdio::null());
+    for i in 0..20 {
+        run_shell(&dir, &format!("s{i}"));
+    }
+    let started = Instant::now();
+    server.signal("-TERM");
+    server.0.wait().expect("serve exits");
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(1), "serve took {took:?}");
+}

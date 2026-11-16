@@ -723,6 +723,29 @@ fn timing_report() {
             ms[CALLS - 1],
         );
     }
+    for program in [&["sleep", "600"][..], &["sh"]] {
+        let mut ms = [vec![], vec![], vec![]];
+        for i in 0..8 {
+            let name = format!("life{i}");
+            let mut run = vec!["run", "--name", &name, "--cwd", d, "--"];
+            run.extend(program);
+            let steps = [run, vec!["kill", &name], vec!["rm", &name]];
+            for (step, args) in ms.iter_mut().zip(&steps) {
+                let start = Instant::now();
+                stdout(&shed_in(&dir, args));
+                step.push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        let [run, kill, rm] = ms.map(|mut m| {
+            m.sort_by(f64::total_cmp);
+            m[4]
+        });
+        let program = program.join(" ");
+        eprintln!(
+            "timing: lifecycle {program:<9} run {run:5.1} ms, kill {kill:5.1} ms, rm {rm:5.1} ms (median of 8, kill < 500 ms)"
+        );
+        assert!(kill < 500.0, "kill of {program} took {kill:.1} ms");
+    }
 }
 
 #[test]
