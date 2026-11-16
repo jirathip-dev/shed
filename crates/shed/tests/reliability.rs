@@ -537,3 +537,34 @@ fn the_next_start_ends_a_tree_a_killed_serve_left_behind() {
     assert_eq!(named.len(), 1, "{text}");
     assert!(named.iter().all(|l| l.contains(&tree.0)), "{text}");
 }
+
+fn run_shell(dir: &Path, name: &str) {
+    let d = dir.to_str().expect("utf-8 dir");
+    ok(
+        dir,
+        &[
+            "run",
+            "--name",
+            name,
+            "--cwd",
+            d,
+            "--",
+            "env",
+            "PS1=ready> ",
+            "sh",
+            "-i",
+        ],
+    );
+    eventually("the prompt", || ok(dir, &["read", name]).contains("ready>"));
+}
+
+#[test]
+fn kill_ends_an_interactive_shell_without_waiting_out_the_grace() {
+    let dir = temp_dir("rel-shell");
+    let _server = Server::start(&dir);
+    run_shell(&dir, "sh");
+    let started = Instant::now();
+    ok(&dir, &["kill", "sh"]);
+    let took = started.elapsed();
+    assert!(took < Duration::from_millis(500), "kill took {took:?}");
+}
