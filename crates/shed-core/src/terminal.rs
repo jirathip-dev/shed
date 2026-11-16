@@ -16,7 +16,7 @@ use rustix::event::{PollFd, PollFlags, poll};
 use rustix::process::{Pid, Signal, kill_process_group};
 use rustix::termios::{Winsize, tcgetwinsize, tcsetwinsize};
 use tokio::io::AsyncWriteExt as _;
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
 
@@ -488,27 +488,37 @@ impl Drop for Terminal {
     }
 }
 
-fn runtime() -> Result<&'static tokio::runtime::Runtime, Error> {
-    static RUNTIME: OnceLock<Option<tokio::runtime::Runtime>> = OnceLock::new();
+fn runtime() -> Result<Handle, Error> {
+    static RUNTIME: OnceLock<Option<Runtime>> = OnceLock::new();
     let one = || {
         Builder::new_multi_thread()
             .worker_threads(1)
             .enable_all()
             .build()
     };
-    let runtime = RUNTIME.get_or_init(|| one().ok()).as_ref();
+    let own = || {
+        RUNTIME
+            .get_or_init(|| one().ok())
+            .as_ref()
+            .map(Runtime::handle)
+    };
+    let runtime = Handle::try_current().ok().or_else(|| own().cloned());
     runtime.ok_or_else(|| Error::Io(std::io::Error::other("no runtime")))
 }
 
 async fn reap(mut child: Child, watch: Arc<watch::Sender<Status>>) {
-    let (mut exits, mut exit) = (signal(SignalKind::child()), child.try_wait());
-    while let (true, Ok(exits)) = (matches!(exit, Ok(None)), &mut exits) {
-        if exits.recv().await.is_none() {
-            break;
-        }
+    let mut exits = signal(SignalKind::child()).ok();
+    let mut exit = child.try_wait();
+    while let (Ok(None), Some(signals)) = (&exit, &mut exits) {
+        exits = signals.recv().await.and(exits.take());
         exit = child.try_wait();
     }
-    let exit = exit.and_then(|s| s.ok_or(BrokenPipe.into()));
+    let exit = match exit {
+        Ok(None) => tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .unwrap_or_else(|e| Err(e.into())),
+        done => done.and_then(|s| s.ok_or(BrokenPipe.into())),
+    };
     bump(&watch, |s| {
         s.exit = Some(exit.map_err(|e| e.kind()));
         s.end(true);
