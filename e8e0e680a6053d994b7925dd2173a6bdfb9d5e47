@@ -1,0 +1,12 @@
+Decided: kill_tree sends SIGTERM, then SIGHUP 100 ms later, then SIGKILL at grace; SIGCONT goes with each
+Because: "A program that handles SIGTERM to clean up still gets the chance to (its handler runs before any SIGKILL)."
+Rejected: SIGHUP and SIGTERM in one burst — with both pending the kernel delivers SIGHUP first, so a shell with a TERM trap exited 129, never 7 (crates/shed/tests/reliability.rs:573 fails that way)
+Because: crates/shed-core/src/proctree.rs:256
+Decided: HUP and KILL run off one schedule (next signal plus deadline) so src/ stays under the 10000-line cap (9999 at head)
+Because: crates/shed-core/src/proctree.rs:267
+Decided: the KILL wait ends at started + grace + 1 s instead of kill time + 1 s; same within one 20 ms poll
+Decided: core and lock tests that ignored only SIGTERM now ignore SIGHUP too; they now cover "traps SIGHUP and SIGTERM"
+Decided: the lifecycle line in the timing report asserts a kill median under 500 ms, so a regression fails CI
+Check: a default-disposition program still reports exit 143 (TERM lands first), a shell now 129
+Check: machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s fails on this host at base too (uptime_s 0)
+Owner: closing a terminal that sits at a shell prompt, or stopping the server, is now instant instead of 2 s
