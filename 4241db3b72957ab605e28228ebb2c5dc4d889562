@@ -1,0 +1,7 @@
+Decided: raise line_cap from 10000 to 11000 in ci/cap.toml with a cap-history note
+Because: "Raise shed's line cap (`ci/cap.toml` `line_cap`) from 10,000 to 11,000"
+Because: q1764
+Because: q1767
+Rejected: raising only to the 10066 projection — the owner asked to cover every queued issue (q1764)
+Check: sh scripts/line-cap.sh prints 9999 / cap 11000 and exits 0
+Owner: The size limit goes to 11,000 lines so the queued wave can merge.
