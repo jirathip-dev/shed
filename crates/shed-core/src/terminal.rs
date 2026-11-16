@@ -3,17 +3,21 @@
 use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
+use std::io::{ErrorKind::BrokenPipe, Read as _};
 use std::os::fd::OwnedFd;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use rustix::event::{PollFd, PollFlags, poll};
 use rustix::process::{Pid, Signal, kill_process_group};
 use rustix::termios::{Winsize, tcgetwinsize, tcsetwinsize};
+use tokio::io::AsyncWriteExt as _;
+use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor::MultiThread};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
 
 use crate::history::{History, Log};
@@ -97,7 +101,7 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 /// unless it was [`release`](Self::release)d.
 pub struct Terminal {
     pty: Weak<File>,
-    input: Sender<Input>,
+    input: mpsc::UnboundedSender<Input>,
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
     watch: Arc<watch::Sender<Status>>,
@@ -162,13 +166,7 @@ impl Terminal {
         let child = crate::runner::pty(program, args, cwd, env, pts, stderr)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
-        Ok(Self::start(
-            OwnedFd::from(pty).into(),
-            pid,
-            Some(child),
-            screen,
-            log,
-        ))
+        Self::start(OwnedFd::from(pty).into(), pid, Some(child), screen, log)
     }
 
     /// Takes over a terminal that another process started: `master` is its PTY's master, `pid` its program,
@@ -185,7 +183,7 @@ impl Terminal {
         };
         let screen = history.restore(size)?;
         let log = Log::open(history)?;
-        Ok(Self::start(master.into(), pid, None, screen, log))
+        Self::start(master.into(), pid, None, screen, log)
     }
 
     fn start(
@@ -194,7 +192,9 @@ impl Terminal {
         child: Option<Child>,
         screen: Screen,
         log: Option<Log>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
+        let runtime = runtime()?;
+        let (input, inputs) = mpsc::unbounded_channel();
         let screen = Arc::new(Mutex::new(screen));
         let reader = Arc::new(master);
         let pty = Arc::downgrade(&reader);
@@ -212,16 +212,16 @@ impl Terminal {
         let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
         let adopted = child.is_none();
+        let replies = input.clone();
         std::thread::spawn(move || {
-            let (pty, screen, outputs) =
-                (Arc::clone(&reader), Arc::clone(&sink), Arc::clone(&subs));
+            let (screen, outputs) = (Arc::clone(&sink), Arc::clone(&subs));
             let watch = Arc::clone(&watcher);
             let (logs, logger) = stage(move |rx: Receiver<Vec<u8>>| {
                 let mut log = log;
                 batches(&rx).try_for_each(|bytes| log.as_mut()?.append(&bytes).ok())
             });
             let (chunks, feeder) =
-                stage(move |rx| feed_loop(&rx, &pty, &screen, &outputs, &watch, Some(logs)));
+                stage(move |rx| feed_loop(&rx, &replies, &screen, &outputs, &watch, Some(logs)));
             read_loop(&reader, &chunks);
             drop(chunks);
             feeder.join().ok();
@@ -236,13 +236,10 @@ impl Terminal {
             });
         });
         if let Some(child) = child {
-            let exits = Arc::clone(&watch);
-            std::thread::spawn(move || reap(child, &exits));
+            runtime.spawn(reap(child, Arc::clone(&watch)));
         }
-        let (input, inputs) = std::sync::mpsc::channel();
-        let (writer, watcher) = (Weak::clone(&pty), Arc::clone(&watch));
-        std::thread::spawn(move || write_loop(&writer, &inputs, &watcher));
-        Self {
+        runtime.spawn(write_loop(Weak::clone(&pty), inputs, Arc::clone(&watch)));
+        Ok(Self {
             pty,
             input,
             screen,
@@ -250,7 +247,7 @@ impl Terminal {
             watch,
             pid,
             released: AtomicBool::new(false),
-        }
+        })
     }
 
     /// A duplicate of the PTY's master, for a process that is to keep the terminal open.
@@ -443,7 +440,7 @@ impl Terminal {
         Ok(())
     }
 
-    /// The program's exit status, if it has exited, as the reaper thread recorded it (never blocks).
+    /// The program's exit status, if it has exited, as the reaper recorded it (never blocks).
     ///
     /// # Errors
     /// [`Error::Io`] when the status could not be read.
@@ -491,28 +488,70 @@ impl Drop for Terminal {
     }
 }
 
-fn reap(mut child: Child, watch: &watch::Sender<Status>) {
-    let exit = child.wait().map_err(|e| e.kind());
-    bump(watch, |s| {
-        s.exit = Some(exit);
+fn runtime() -> Result<Handle, Error> {
+    static RUNTIME: OnceLock<Option<Runtime>> = OnceLock::new();
+    let one = || {
+        Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+    };
+    let own = || {
+        RUNTIME
+            .get_or_init(|| one().ok())
+            .as_ref()
+            .map(Runtime::handle)
+    };
+    let pooled = Handle::try_current()
+        .ok()
+        .filter(|h| h.runtime_flavor() == MultiThread);
+    let runtime = pooled.or_else(|| own().cloned());
+    runtime.ok_or_else(|| Error::Io(std::io::Error::other("no runtime")))
+}
+
+async fn reap(mut child: Child, watch: Arc<watch::Sender<Status>>) {
+    let mut exits = signal(SignalKind::child()).ok();
+    let mut exit = child.try_wait();
+    while let (Ok(None), Some(signals)) = (&exit, &mut exits) {
+        exits = signals.recv().await.and(exits.take());
+        exit = child.try_wait();
+    }
+    let exit = match exit {
+        Ok(None) => tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .unwrap_or_else(|e| Err(e.into())),
+        done => done.and_then(|s| s.ok_or(BrokenPipe.into())),
+    };
+    bump(&watch, |s| {
+        s.exit = Some(exit.map_err(|e| e.kind()));
         s.end(true);
     });
 }
 
-fn write_loop(
-    pty: &Weak<File>,
-    inputs: &std::sync::mpsc::Receiver<Input>,
-    watch: &watch::Sender<Status>,
+async fn write_loop(
+    pty: Weak<File>,
+    mut inputs: mpsc::UnboundedReceiver<Input>,
+    watch: Arc<watch::Sender<Status>>,
 ) {
-    for (bytes, done) in inputs {
-        let wrote = pty
-            .upgrade()
-            .map_or_else(|| Err(BrokenPipe.into()), |pty| (&*pty).write_all(&bytes));
+    while let Some((bytes, done)) = inputs.recv().await {
+        let wrote = match pty.upgrade() {
+            Some(pty) => write_all(&pty, &bytes).await,
+            None => Err(BrokenPipe.into()),
+        };
         done.send(wrote).ok();
         if watch.borrow().stuck {
-            bump(watch, |s| s.stuck = false);
+            bump(&watch, |s| s.stuck = false);
         }
     }
+}
+
+async fn write_all(pty: &File, bytes: &[u8]) -> std::io::Result<()> {
+    let fd = OwnedFd::from(pty.try_clone()?);
+    rustix::io::ioctl_fionbio(&fd, true)?;
+    let tx = tokio::net::unix::pipe::Sender::from_owned_fd_unchecked(fd);
+    let wrote = async { tx?.write_all(bytes).await }.await;
+    rustix::io::ioctl_fionbio(pty, false)?;
+    wrote
 }
 
 const DEPTH: usize = 256;
@@ -547,6 +586,9 @@ fn read_loop(pty: &File, chunks: &SyncSender<Vec<u8>>) {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                poll(&mut [PollFd::new(pty, PollFlags::IN)], None).ok();
+            }
             Err(_) => return,
         }
     }
@@ -554,7 +596,7 @@ fn read_loop(pty: &File, chunks: &SyncSender<Vec<u8>>) {
 
 fn feed_loop(
     chunks: &Receiver<Vec<u8>>,
-    pty: &File,
+    pty: &mpsc::UnboundedSender<Input>,
     screen: &Mutex<Screen>,
     outputs: &Outputs,
     watch: &watch::Sender<Status>,
@@ -580,7 +622,7 @@ fn feed_loop(
         if log.as_ref().is_some_and(|l| l.send(relayed).is_err()) {
             log = None;
         }
-        if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {
+        if !replies.is_empty() && pty.send((replies, sync_channel(1).0)).is_err() {
             return;
         }
     }
