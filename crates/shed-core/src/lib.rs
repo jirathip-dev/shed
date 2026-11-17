@@ -16,7 +16,7 @@ pub use history::History;
 pub use pattern::Pattern;
 pub use proctree::Usage;
 pub use screen::{Color, Pen, Report, Run, STATES, Screen, Size, Snapshot};
-pub use terminal::{Terminal, Wake};
+pub use terminal::{Rule, Terminal, Wake};
 
 /// Errors from shed-core.
 #[derive(Debug, thiserror::Error)]

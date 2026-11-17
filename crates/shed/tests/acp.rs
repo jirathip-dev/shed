@@ -298,7 +298,7 @@ fn cancel_ends_a_turn_mid_way() {
         let info: Value = serde_json::from_str(&ok(&dir, &["get", "c"])).expect("JSON");
         assert_eq!(
             info["reported"],
-            json!({"state": "done", "note": "cancelled"})
+            json!({"state": "done", "note": "cancelled", "from": "reported"})
         );
     }
     assert_eq!(
@@ -365,7 +365,7 @@ fn an_agent_that_fails_the_handshake_reports_error() {
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "e"])).expect("JSON");
     assert_eq!(
         info["reported"],
-        json!({"state": "error", "note": "acp: the agent closed its stdout"}),
+        json!({"state": "error", "note": "acp: the agent closed its stdout", "from": "reported"}),
         "{out:?}"
     );
     let missing = shed(&dir, &["run", "--acp", "nope"]);
@@ -412,7 +412,7 @@ fn an_expired_login_ends_the_turn_as_an_auth_error() {
     assert!(took < std::time::Duration::from_secs(1), "took {took:?}");
     assert_eq!(
         reported(&dir, "x"),
-        json!({"state": "error", "note": format!("auth: {line}")})
+        json!({"state": "error", "note": format!("auth: {line}"), "from": "reported"})
     );
     let events = events_until(&dir, "x", |e| e["event"] == "reply");
     let reply: Value = serde_json::from_str(events.last().expect("a reply")).expect("JSON");
@@ -447,13 +447,13 @@ fn the_watchdog_ends_a_silent_turn_but_not_a_busy_one() {
     assert_eq!(ok(&dir, &until), "w done\n");
     assert_eq!(
         reported(&dir, "w"),
-        json!({"state": "done", "note": "end_turn"})
+        json!({"state": "done", "note": "end_turn", "from": "reported"})
     );
     ok(&dir, &["send", "w", "silent"]);
     assert_eq!(ok(&dir, &until), "w error\n");
     assert_eq!(
         reported(&dir, "w"),
-        json!({"state": "error", "note": "no response"})
+        json!({"state": "error", "note": "no response", "from": "reported"})
     );
     assert_eq!(
         ok(&dir, &["read", "w"]),
@@ -559,7 +559,7 @@ fn resume_is_refused_without_load_session() {
     ok(&dir, &["wait", "n", "--until", "error", "--timeout", "10"]);
     assert_eq!(
         reported(&dir, "n"),
-        json!({"state": "error", "note": "acp: the agent cannot resume a session (no loadSession)"})
+        json!({"state": "error", "note": "acp: the agent cannot resume a session (no loadSession)", "from": "reported"})
     );
 }
 
@@ -924,7 +924,7 @@ fn an_unknown_update_kind_is_skipped() {
     ok(&dir, &["wait", "u", "--until", "done", "--timeout", "10"]);
     assert_eq!(
         reported(&dir, "u"),
-        json!({"state": "done", "note": "end_turn"})
+        json!({"state": "done", "note": "end_turn", "from": "reported"})
     );
 }
 
@@ -1039,7 +1039,10 @@ fn sse_servers_pass_only_when_the_agent_advertises_them() {
     start_with_mcp(&dir, "s2", &file, &[], &["--mcp-caps", "http"]);
     ok(&dir, &["wait", "s2", "--until", "error", "--timeout", "10"]);
     let why = "acp: MCP server events: the agent takes no sse servers (mcpCapabilities)";
-    assert_eq!(reported(&dir, "s2"), json!({"state": "error", "note": why}));
+    assert_eq!(
+        reported(&dir, "s2"),
+        json!({"state": "error", "note": why, "from": "reported"})
+    );
 }
 
 #[test]
@@ -1131,7 +1134,10 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
     first_turn(&dir, "h");
     until(&dir, "h", "hibernated");
     assert_eq!(processes(&dir, "h"), 1, "the agent is gone");
-    assert_eq!(reported(&dir, "h"), json!({"state": "hibernated"}));
+    assert_eq!(
+        reported(&dir, "h"),
+        json!({"state": "hibernated", "from": "reported"})
+    );
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "h"])).expect("JSON");
     assert_eq!(
         (&info["state"], &info["session"]["id"]),

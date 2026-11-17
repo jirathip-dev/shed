@@ -246,6 +246,7 @@ fn to_reported(r: Report) -> Reported {
         state: r.state,
         note: r.note,
         state_source: r.source,
+        from: r.from,
         id: r.id,
         kind: r.kind,
         progress: r.progress,
@@ -822,6 +823,9 @@ impl Registry {
             p.acp.is_some().then_some(acp.as_slice()),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
+        if let Some(agent) = p.labels.get("agent").filter(|_| p.acp.is_none()) {
+            term.set_rules(self.rules(agent));
+        }
         let info = TerminalInfo {
             name: name.clone(),
             labels: p.labels,
@@ -843,6 +847,21 @@ impl Registry {
         let entry = Entry::new(info.clone(), Some(Arc::new(term)));
         self.entries.insert(name, entry);
         Ok(self.saved(info))
+    }
+
+    fn rules(&self, agent: &str) -> Vec<shed_core::Rule> {
+        let records = crate::providers::load(&self.providers).0;
+        let found = records.into_iter().find(|(p, _)| p.agent == agent);
+        let rules = found.map(|(p, _)| p.rules).unwrap_or_default();
+        let rule = |r: crate::proto::Rule| shed_core::Rule {
+            id: r.id,
+            state: r.state,
+            kind: r.kind,
+            priority: r.priority,
+            region: r.region,
+            any: r.any,
+        };
+        rules.into_iter().map(rule).collect()
     }
 
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
@@ -1154,6 +1173,55 @@ mod tests {
         );
         let osc = registry.get("osc").unwrap().reported.unwrap();
         assert_eq!(osc.state_source.as_deref(), Some("jan-osc9999"));
+    }
+
+    #[tokio::test]
+    async fn each_shipped_rule_matches_its_golden_screen_and_unlabelled_terminals_never_check() {
+        let path = dir("rules").join("state.json");
+        let mut reg = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let screens = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
+        let records = crate::providers::load(&reg.providers).0;
+        let rules = records
+            .iter()
+            .flat_map(|(p, _)| p.rules.iter().map(|r| (&p.agent, r)));
+        let mut shipped = 0;
+        for (n, (agent, rule)) in rules.enumerate() {
+            assert!(!rule.version.is_empty(), "{}", rule.id);
+            let golden = screens.join(format!("{agent}-{}.txt", rule.id));
+            assert!(golden.exists(), "{}", golden.display());
+            let mut run = |name: &str, labels: serde_json::Value| {
+                let golden = golden.to_str().unwrap();
+                let p = serde_json::json!({
+                    "name": name, "cwd": "/", "labels": labels,
+                    "cmd": ["sh", "-c", "cat \"$0\"; exec sleep 60", golden],
+                });
+                reg.run(serde_json::from_value(p).unwrap()).unwrap();
+                Arc::clone(reg.live(name).unwrap())
+            };
+            let lane = run(&format!("lane{n}"), serde_json::json!({ "agent": agent }));
+            let plain = run(&format!("plain{n}"), serde_json::json!({}));
+            let deadline = shed_core::clock::now() + Duration::from_secs(10);
+            let from = Some(format!("rule:{}", rule.id));
+            let matched =
+                lane.wait_until(|t| t.report().and_then(|r| r.from) == from, Some(deadline));
+            assert_eq!(
+                matched.await.unwrap(),
+                shed_core::Wake::Matched,
+                "{}",
+                golden.display()
+            );
+            assert_eq!(lane.report().map(|r| r.state), Some(rule.state.clone()));
+            let shown = plain.wait_until(|t| t.screen().contains(&rule.any[0]), Some(deadline));
+            assert_eq!(shown.await.unwrap(), shed_core::Wake::Matched);
+            assert_eq!(plain.report(), None);
+            assert!(lane.rule_checks() > 0);
+            assert_eq!(plain.rule_checks(), 0);
+            for t in [lane, plain] {
+                t.kill(Duration::ZERO).unwrap();
+            }
+            shipped += 1;
+        }
+        assert!(shipped > 0);
     }
 
     #[test]
