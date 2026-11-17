@@ -1,0 +1,7 @@
+Decided: the serve-restart lane test waits for working or done after sending busy, not working alone
+Because: crates/shed-server/src/lib.rs:837
+Because: crates/shed/tests/acp.rs:1696
+Rejected: lengthening the fake agent's busy turn — it still races, only less often
+Rejected: making wait remember past states — a behaviour change no issue asked for
+Check: staging CI at 38721ec failed this same test on the same wait line before any #147 code
+Owner: a flaky test that also failed on staging is fixed; the warm-session feature itself is unchanged
