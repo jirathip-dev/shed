@@ -11,6 +11,13 @@ config_dir_var = "CLAUDE_CONFIG_DIR"
 effort_args = ["--effort", "{effort}"]
 efforts = ["low", "medium", "high", "xhigh"]
 
+[quota]
+path = ["quota", "token_count"]
+input = "inputTokens"
+cache_read = "cachedInputTokens"
+cache_write = "cachedWriteTokens"
+output = "outputTokens"
+
 [hooks]
 file = ".claude/settings.json"
 events = [

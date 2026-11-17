@@ -1082,7 +1082,7 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
 
 fn table(list: &[TerminalInfo], tokens: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-    let head = "NAME STATE EXIT PID RSS CPU TOKENS LABELS CMD".split(' ');
+    let head = "NAME STATE EXIT PID RSS CPU TOKENS CACHE LABELS CMD".split(' ');
     let mut rows = vec![head.map(str::to_owned).collect::<Vec<_>>()];
     for t in list {
         let labels: Vec<String> = t.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -1099,6 +1099,11 @@ fn table(list: &[TerminalInfo], tokens: bool) -> String {
             dash(t.resources.map(|r| format!("{}M", r.rss_mb))),
             dash(t.resources.map(|r| format!("{}%", r.cpu_pct))),
             dash(usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000))),
+            dash(
+                usage
+                    .and_then(|u| u.turn?.cache_share())
+                    .map(|p| format!("{p}%")),
+            ),
             if labels.is_empty() {
                 "-".to_owned()
             } else {
@@ -1108,7 +1113,7 @@ fn table(list: &[TerminalInfo], tokens: bool) -> String {
         ]);
     }
     for row in rows.iter_mut().filter(|_| !tokens) {
-        row.remove(6);
+        row.drain(6..8);
     }
     let mut widths = vec![0; rows.first().map_or(0, Vec::len)];
     for row in &rows {

@@ -57,6 +57,16 @@ streams `turn`, `text` (reply chunks), `tool_call` (each status change), `plan`,
 context window's `size` and the session's `cost`, also kept as `session.usage`; `shed top` shows it as
 `TOKENS`, e.g. `53k/200k`) next to the usual `started`, `state` and `exited`; see [protocol.md](protocol.md).
 
+ACP's `usage_update` has no cache counts, so for an agent whose provider record has a `[quota]` table shed
+also reads the turn's tokens from each prompt response's `_meta` (for `claude-acp`, `_meta.quota.token_count`):
+`usage.turn` and `usage.total` (the session's sum since the lane started, kept through a hibernation) each
+hold `input`, `cache_read`, `cache_write` and `output`. A response without them, or with a counter that is
+not a number, leaves both out. `shed top`'s `CACHE` is the last turn's cache reads as a share of all its input,
+`cache_read / (input + cache_read + cache_write)`, and `-` without a count. A low share on a turn that
+follows others means the prompt cache was lost: a model switch, a changed system prompt or tools, or a gap
+past the cache's lifetime (minutes) before a hibernated lane woke. The first turn of a session is always low,
+since it writes the cache. Codex reports cache reads but no cache writes, and has no `[quota]` record yet.
+
 `--resume <id>` (the `run` method's `resume`) needs an agent that advertises `loadSession`, else the terminal
 ends as `error`. `shed agents sessions <id>` lists the agent's sessions (`session/list`, every page; run in the
 current folder) when it advertises `sessionCapabilities.list`, and refuses otherwise; `--json` gives ACP's
@@ -103,7 +113,7 @@ is built in, and `<name>.toml` in `providers/` beside the config file (`~/.confi
 read each time a lane starts, so a changed banner needs no rebuild. Keys: `id` (the ACP agent id), `agent`
 (the PTY name `shed setup` takes), `auth_failures`, `limit`, `resets`, `[hooks]` (`file`, `events` as
 `[event, state]` pairs), `login`, `status` and `logout` (commands), `config_dir_var`, `settings_var`,
-`effort_args` (`{effort}` stands for the level) and `efforts`. A user file that is not TOML or not a record
+`effort_args` (`{effort}` stands for the level), `efforts` and `[quota]` (`path`, the keys from a prompt response's `_meta` down to the turn's counters, and the `input`, `cache_read`, `cache_write` and `output` keys in it; see above). A user file that is not TOML or not a record
 is skipped, the built-in record staying in force, and `shed doctor` names it (`FAIL provider …`).
 
 `shed agents --json` and the `agents` method list every agent with a record or an installed adapter: `id`,
@@ -240,6 +250,20 @@ Node 24.22.2, the `claude` CLI 2.1.311 logged in with `claude.ai` on a Max plan.
   same way). The turn never ended: no `reply` event, so `wait --until done blocked` timed out (exit 124) after
   300 s. Check `claude auth status` (`"loggedIn": true`) before a run. Since #25 this ends the turn as
   `error` (`auth: …`) instead; see [Accounts](#accounts).
+
+## Cache share smoke (2026-11-17)
+
+Run on the mini with this branch's `shed` (`serve --detach` in a scratch `--dir` under `env -i` with `HOME`,
+`PATH`, `USER` and `TERM`, `SHED_ACP_HIBERNATE_AFTER=20`), `claude-acp` 0.107.2 from the registry (binary),
+model `sonnet`, three one-word prompts. `shed get`'s `usage.turn` and `shed top`'s `CACHE`:
+
+| turn | input | cache read | cache write | output | `CACHE` |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2 | 11,372 | 18,290 | 6 | 38% |
+| 2 | 2 | 13,792 | 17,912 | 8 | 43% |
+| 3, the first after `hibernated` and a wake | 2 | 29,679 | 2,657 | 7 | 91% |
+
+Turn 3 woke about 25 s after turn 2, inside the cache's lifetime, so the hibernation kept the cache.
 
 So cooee can talk to Claude through `claude-acp` on the plan login; the `claude -p` stream-json fallback is not
 needed.

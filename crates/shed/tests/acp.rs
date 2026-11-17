@@ -564,20 +564,33 @@ fn resume_is_refused_without_load_session() {
 }
 
 #[test]
-fn a_usage_update_shows_in_get_top_and_as_an_event() {
+fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
     let dir = temp_dir("acp-usage");
     let _server = Server::start(&dir);
+    let providers = Paths::in_dir(&dir).providers();
+    std::fs::create_dir_all(&providers).expect("providers dir");
+    let claude = include_str!("../../shed-server/src/providers/claude.toml");
+    let quota = claude
+        .split_once("[quota]")
+        .expect("claude-acp has a quota table")
+        .1;
+    let record = format!(
+        "id = \"fake\"\n[quota]{}",
+        quota.split("\n[").next().unwrap_or("")
+    );
+    std::fs::write(providers.join("fake.toml"), record).expect("write the record");
     start_fake(&dir, "g", "fake");
     ok(&dir, &["send", "g", "hi"]);
     ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
     assert_eq!(info["session"].get("usage"), None, "{info}");
-    let tokens = || {
+    let column = |n: usize| {
         let top = ok(&dir, &["top"]);
-        let cells = |l: &str| l.split_whitespace().nth(6).map(str::to_owned);
+        let cells = |l: &str| l.split_whitespace().nth(n).map(str::to_owned);
         let row = top.lines().find(|l| l.starts_with("g "));
         (top.lines().next().and_then(cells), row.and_then(cells))
     };
+    let tokens = || column(6);
     assert_eq!(tokens(), (Some("TOKENS".into()), Some("-".into())));
     ok(&dir, &["send", "g", "usage"]);
     ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
@@ -599,7 +612,23 @@ fn a_usage_update_shows_in_get_top_and_as_an_event() {
         info["session"]["model"] == "smart" && info["session"]["usage"] == usage
     });
     assert_eq!(tokens(), (Some("TOKENS".into()), Some("53k/200k".into())));
+    assert_eq!(column(7), (Some("CACHE".into()), Some("-".into())));
     assert!(!ok(&dir, &["ls"]).contains("TOKENS"));
+    assert!(!ok(&dir, &["ls"]).contains("CACHE"));
+
+    let turn = json!({"input": 100, "cache_read": 900, "cache_write": 1000, "output": 50});
+    let total = json!({"input": 200, "cache_read": 1800, "cache_write": 2000, "output": 100});
+    for _ in 0..2 {
+        ok(&dir, &["send", "g", "quota"]);
+        ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    }
+    let events = events_until(&dir, "g", |e| e["event"] == "usage" && e["total"] == total);
+    let event: Value = serde_json::from_str(events.last().expect("a usage event")).expect("JSON");
+    assert_eq!((&event["turn"], &event["used"]), (&turn, &json!(53_000)));
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert_eq!(info["session"]["usage"]["turn"], turn);
+    assert_eq!(info["session"]["usage"]["total"], total);
+    assert_eq!(column(7), (Some("CACHE".into()), Some("45%".into())));
 }
 
 #[test]
