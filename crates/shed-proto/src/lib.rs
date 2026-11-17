@@ -1001,6 +1001,46 @@ pub struct AcpUsage {
     /// The session's total cost so far (`amount`, `currency`), when the agent reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<Value>,
+    /// The last turn's tokens, when the agent's prompt responses carry them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<Tokens>,
+    /// The session's tokens over its turns so far, when the agent's prompt responses carry them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<Tokens>,
+}
+
+/// Tokens a turn or a session spent, as the agent's prompt responses report them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Tokens {
+    /// Input tokens neither read from nor written to the prompt cache.
+    pub input: u64,
+    /// Input tokens read from the prompt cache.
+    pub cache_read: u64,
+    /// Input tokens written to the prompt cache.
+    pub cache_write: u64,
+    /// Output tokens.
+    pub output: u64,
+}
+
+impl Tokens {
+    /// Both counts added up.
+    #[must_use]
+    pub fn plus(self, o: Self) -> Self {
+        Self {
+            input: self.input.saturating_add(o.input),
+            cache_read: self.cache_read.saturating_add(o.cache_read),
+            cache_write: self.cache_write.saturating_add(o.cache_write),
+            output: self.output.saturating_add(o.output),
+        }
+    }
+
+    /// Cache reads as a percentage of all input tokens, or `None` with no input.
+    #[must_use]
+    pub fn cache_share(&self) -> Option<u64> {
+        let all = (self.input.saturating_add(self.cache_read)).saturating_add(self.cache_write);
+        self.cache_read.saturating_mul(100).checked_div(all)
+    }
 }
 
 /// `emit` params.
@@ -1165,6 +1205,25 @@ pub struct Provider {
     pub effort_args: Vec<String>,
     /// The effort levels it takes.
     pub efforts: Vec<String>,
+    /// Where its prompt responses' `_meta` carries the turn's tokens.
+    pub quota: Option<Quota>,
+}
+
+/// The keys of a turn's tokens in a prompt response's `_meta`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Quota {
+    /// The keys from `_meta` down to the object of counters.
+    pub path: Vec<String>,
+    /// The input tokens' key.
+    pub input: String,
+    /// The cache reads' key.
+    pub cache_read: String,
+    /// The cache writes' key.
+    pub cache_write: String,
+    /// The output tokens' key.
+    pub output: String,
 }
 
 impl Provider {
@@ -1179,6 +1238,21 @@ impl Provider {
             line,
             at.map(|(_, at)| at.trim().trim_end_matches('.').to_owned()),
         ))
+    }
+
+    /// The turn's tokens in a prompt response's `meta`, or `None` when they are absent or not counts.
+    #[must_use]
+    pub fn tokens(&self, meta: &serde_json::Map<String, Value>) -> Option<Tokens> {
+        let quota = self.quota.as_ref()?;
+        let (first, rest) = quota.path.split_first()?;
+        let counts = rest.iter().try_fold(meta.get(first)?, |v, k| v.get(k))?;
+        let count = |key: &String| counts.get(key).and_then(Value::as_u64);
+        Some(Tokens {
+            input: count(&quota.input)?,
+            cache_read: count(&quota.cache_read)?,
+            cache_write: count(&quota.cache_write)?,
+            output: count(&quota.output)?,
+        })
     }
 
     /// The first line of `text` that says the login expired.

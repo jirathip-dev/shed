@@ -15,6 +15,8 @@ reason on stderr) on the first that does not fit. Prompts:
   bench timing from the first chunk to the reply times shed's throughput rather than this agent.
 - "unknown": an update of a kind no ACP schema has, then the reply "still here".
 - "usage": a usage_update (53,000 of 200,000 tokens, 0.045 USD), then the reply "counted".
+- "quota": the same usage_update, then the reply "counted" whose response's `_meta.quota.token_count`
+  has claude-acp 0.100.0's counters (100 input, 900 cache reads, 1,000 cache writes, 50 output).
 - "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
 - "replay": with `--replay FILE`, FILE's recorded session updates (JSON lines) in order; a line
   `{"request_permission": {...}}` is sent as that request and waits for its answer.
@@ -289,7 +291,7 @@ def main():
                 update({"sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "commands sent"}})
                 stop = "end_turn"
-            elif text == "usage":
+            elif text in ("usage", "quota"):
                 update({"sessionUpdate": "usage_update", "used": 53000, "size": 200000,
                         "cost": {"amount": 0.045, "currency": "USD"}})
                 update({"sessionUpdate": "agent_message_chunk",
@@ -306,7 +308,10 @@ def main():
                         "content": {"type": "text", "text": said}})
                 stop = "end_turn"
             keep()
-            send({"id": rid, "result": {"stopReason": stop}})
+            counts = {"totalTokens": 2050, "inputTokens": 100, "cachedInputTokens": 900,
+                      "cachedWriteTokens": 1000, "outputTokens": 50, "reasoningOutputTokens": 0}
+            meta = {"_meta": {"quota": {"token_count": counts}}} if text == "quota" else {}
+            send({"id": rid, "result": {"stopReason": stop, **meta}})
         elif method == "session/cancel":
             pass
         else:
