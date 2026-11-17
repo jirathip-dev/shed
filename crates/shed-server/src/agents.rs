@@ -8,23 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::Error;
+pub use crate::proto::Agent;
 
 /// The ACP registry `add` reads by default.
 pub const REGISTRY: &str = "https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json";
-
-/// One installed agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Agent {
-    /// The registry id.
-    pub id: String,
-    /// The pinned version.
-    pub version: String,
-    /// The distribution it came from: `binary`, `npx` or `uvx`.
-    pub distribution: String,
-    /// The ACP adapter's command line (`env K=V …` first when the registry sets variables).
-    pub cmd: Vec<String>,
-}
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

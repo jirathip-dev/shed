@@ -194,7 +194,8 @@ pub(crate) async fn keep_saved(registry: Arc<Mutex<Registry>>) {
 
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
-    path: PathBuf,
+    pub(crate) path: PathBuf,
+    pub(crate) providers: PathBuf,
     socket: PathBuf,
     pub(crate) saver: Saver,
     pub(crate) events: Events,
@@ -440,6 +441,7 @@ impl Registry {
         let registry = Self {
             entries,
             path: path.to_owned(),
+            providers: path.with_file_name("providers"),
             socket: socket.to_owned(),
             saver,
             events,
@@ -666,6 +668,8 @@ impl Registry {
             policy.to_owned(),
             "--agent".to_owned(),
             id.to_owned(),
+            "--providers".to_owned(),
+            path(&self.providers),
             "--".to_owned(),
         ];
         Ok([bridge.to_vec(), cmd].concat())

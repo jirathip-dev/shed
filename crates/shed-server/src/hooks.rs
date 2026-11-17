@@ -8,31 +8,48 @@ use std::path::{Path, PathBuf};
 use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
-use crate::providers::{Hooks, hook_tables};
+use crate::proto::Hooks;
 
 /// One agent's config file and, when `shed setup` changes it, its new text.
 pub struct HookFile {
     /// The agent's name, as `shed setup <agent>` takes it.
-    pub agent: &'static str,
+    pub agent: String,
     /// Its config file.
     pub file: PathBuf,
     /// The new text (`None`: unchanged; empty: the file shed created is deleted).
     pub after: Option<String>,
 }
 
-/// Adds (or with `remove` takes out) the `shed state` hooks of the installed `agents` (all when
-/// empty) in their config files under `home`, keeping every other entry; `dry` writes nothing.
+/// Adds (or with `remove` takes out) the `shed state` hooks, as the provider records in `providers`
+/// give them, of the installed `agents` (all when empty) in their config files under `home`, keeping
+/// every other entry; `dry` writes nothing.
 ///
 /// # Errors
 /// An agent with no hooks, a config file that is not JSON objects, or I/O.
-pub fn setup(home: &Path, agents: &[String], remove: bool, dry: bool) -> io::Result<Vec<HookFile>> {
-    if let Some(a) = agents.iter().find(|a| hook_tables().all(|h| h.agent != *a)) {
+pub fn setup(
+    home: &Path,
+    providers: &Path,
+    agents: &[String],
+    remove: bool,
+    dry: bool,
+) -> io::Result<Vec<HookFile>> {
+    let records = crate::providers::load(providers).0;
+    let tables = || {
+        records
+            .iter()
+            .filter_map(|(p, _)| Some((&p.agent, p.hooks.as_ref()?)))
+    };
+    if let Some(a) = agents
+        .iter()
+        .find(|a| tables().all(|(agent, _)| agent != *a))
+    {
         return Err(io::Error::other(format!("shed has no hooks for {a}")));
     }
-    let wanted = |h: &&Hooks| agents.is_empty() || agents.iter().any(|a| a == h.agent);
-    let installed = |h: &&Hooks| home.join(h.file).parent().is_some_and(Path::is_dir);
-    let chosen = hook_tables().filter(wanted).filter(installed);
-    chosen.map(|h| edit(home, h, remove, dry)).collect()
+    let wanted = |(a, _): &(&String, &Hooks)| agents.is_empty() || agents.contains(a);
+    let installed =
+        |(_, h): &(&String, &Hooks)| home.join(&h.file).parent().is_some_and(Path::is_dir);
+    let chosen = tables().filter(wanted).filter(installed);
+    chosen.map(|(a, h)| edit(home, a, h, remove, dry)).collect()
 }
 
 type Object<'a> = HashMap<String, &'a RawValue>;
@@ -47,7 +64,7 @@ fn member(event: &str, state: &str) -> String {
 }
 
 fn whole(h: &Hooks) -> String {
-    let members: Vec<String> = h.events.iter().map(|(e, s)| member(e, s)).collect();
+    let members: Vec<String> = h.events.iter().map(|[e, s]| member(e, s)).collect();
     format!("\"hooks\":{{ {}}}", members.join(","))
 }
 
@@ -64,8 +81,8 @@ fn add(text: &str, h: &Hooks) -> serde_json::Result<String> {
     let mut at: BTreeMap<usize, (Vec<String>, bool)> = BTreeMap::new();
     if let Some(hooks) = root.get("hooks") {
         let events: Object = serde_json::from_str(hooks.get())?;
-        for (event, state) in h.events {
-            let (raw, piece, len) = match events.get(*event) {
+        for [event, state] in &h.events {
+            let (raw, piece, len) = match events.get(event) {
                 Some(list) => {
                     let groups: Vec<Value> = serde_json::from_str(list.get())?;
                     if groups.contains(&group(state)) {
@@ -93,8 +110,8 @@ fn add(text: &str, h: &Hooks) -> serde_json::Result<String> {
 
 fn strip(text: &str, h: &Hooks) -> String {
     let mut out = text.to_owned();
-    let members = h.events.iter().map(|(e, s)| member(e, s));
-    let groups = h.events.iter().map(|(_, s)| group(s).to_string());
+    let members = h.events.iter().map(|[e, s]| member(e, s));
+    let groups = h.events.iter().map(|[_, s]| group(s).to_string());
     for piece in std::iter::once(whole(h)).chain(members).chain(groups) {
         while let Some(i) = out.find(&piece) {
             let end = i + piece.len();
@@ -105,8 +122,8 @@ fn strip(text: &str, h: &Hooks) -> String {
     out
 }
 
-fn edit(home: &Path, h: &Hooks, remove: bool, dry: bool) -> io::Result<HookFile> {
-    let file = home.join(h.file);
+fn edit(home: &Path, agent: &str, h: &Hooks, remove: bool, dry: bool) -> io::Result<HookFile> {
+    let file = home.join(&h.file);
     let created = format!("{{\n{}\n}}\n", whole(h));
     let before = match fs::read_to_string(&file) {
         Err(e) if e.kind() == ErrorKind::NotFound => None,
@@ -126,7 +143,7 @@ fn edit(home: &Path, h: &Hooks, remove: bool, dry: bool) -> io::Result<HookFile>
         _ => {}
     }
     Ok(HookFile {
-        agent: h.agent,
+        agent: agent.to_owned(),
         file,
         after,
     })
@@ -138,6 +155,7 @@ mod tests {
     use std::path::Path;
 
     use super::setup;
+    use crate::providers::tests::fake_dir;
 
     const OTHERS: &[&str] = &[
         "{\"model\":\"x\",\n    \"permissions\": {\"allow\": [\"Bash(ls:*)\"]}, \"n\": 1.0}",
@@ -150,7 +168,7 @@ mod tests {
 
     fn run(home: &Path, remove: bool, dry_run: bool) -> Option<String> {
         let fake = ["fake".to_owned()];
-        let files = setup(home, &fake, remove, dry_run).expect("setup");
+        let files = setup(home, &fake_dir(), &fake, remove, dry_run).expect("setup");
         let [file] = files.as_slice() else {
             panic!("{} files", files.len())
         };
@@ -161,14 +179,14 @@ mod tests {
     fn setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte() {
         let home = crate::temp_dir("setup-hooks");
         let file = home.join(".fake/settings.json");
-        assert!(setup(&home, &["nope".to_owned()], false, false).is_err());
+        assert!(setup(&home, &fake_dir(), &["nope".to_owned()], false, false).is_err());
         assert!(
-            setup(&home, &["fake".to_owned()], false, false)
+            setup(&home, &fake_dir(), &["fake".to_owned()], false, false)
                 .expect("none")
                 .is_empty()
         );
         fs::create_dir(home.join(".fake")).expect("agent dir");
-        let found = setup(&home, &[], false, true).expect("dry run");
+        let found = setup(&home, &fake_dir(), &[], false, true).expect("dry run");
         assert!(found.iter().any(|f| f.agent == "fake"));
 
         let added = run(&home, false, false).expect("added");

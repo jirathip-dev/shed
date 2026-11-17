@@ -139,7 +139,8 @@ fn registry_installs_pinned_agents_from_a_fixture() {
         .as_array()
         .expect("a list")
         .iter()
-        .map(|a| (a["id"].as_str().expect("id"), &a["cmd"]))
+        .filter(|a| a["installed"].is_object())
+        .map(|a| (a["id"].as_str().expect("id"), &a["installed"]["cmd"]))
         .collect();
     assert_eq!(
         cmds,

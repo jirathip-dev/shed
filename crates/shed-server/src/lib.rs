@@ -12,7 +12,7 @@ pub mod hooks;
 mod input;
 mod links;
 pub mod machines;
-mod providers;
+pub mod providers;
 mod registry;
 mod screen;
 mod stats;
@@ -121,6 +121,12 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// The user's provider records, `providers/` beside the config file.
+    #[must_use]
+    pub fn providers(&self) -> PathBuf {
+        self.config.with_file_name("providers")
+    }
+
     /// `shed.sock` and `state.json`, both in `dir`.
     #[must_use]
     pub fn in_dir(dir: &Path) -> Self {
@@ -308,7 +314,9 @@ fn stop_signals() -> io::Result<impl Future<Output = ()>> {
 
 async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     let stop = stop_signals()?;
-    let registry = Arc::new(Mutex::new(Registry::load(&paths.state, &paths.socket)?));
+    let mut loaded = Registry::load(&paths.state, &paths.socket)?;
+    loaded.providers = paths.providers();
+    let registry = Arc::new(Mutex::new(loaded));
     for (name, term) in lock(&registry).running() {
         watch(&registry, name, term);
     }
@@ -590,6 +598,7 @@ async fn dispatch(
         }
         Method::MachineStats => return machine_stats(registry, params(request)?).await,
         Method::Discover => return Ok(proto::openrpc()),
+        Method::Agents | Method::AgentsMatch => return agents(registry, method, request).await,
         _ => {}
     }
     let mut reg = lock(registry);
@@ -639,6 +648,25 @@ async fn dispatch(
         Method::State => json(&reg.state(params(request)?)?),
         _ => Err(RpcError::new(ErrorCode::Internal, "handled above")),
     }
+}
+
+async fn agents(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
+    let (state, dir) = {
+        let reg = lock(registry);
+        (reg.path.clone(), reg.providers.clone())
+    };
+    if method == Method::Agents {
+        let known = blocking(move || providers::known(&state, &dir)).await?;
+        return json(&known.map_err(io_error)?);
+    }
+    let proto::MatchParams { id, text } = params(request)?;
+    let rules = blocking(move || providers::find(&dir, &id)).await?;
+    let limit = rules.limit_hit(&text);
+    json(&proto::Matched {
+        limit: limit.as_ref().map(|l| l.0.to_owned()),
+        resets: limit.and_then(|l| l.1),
+        auth: rules.auth_failure(&text).map(str::to_owned),
+    })
 }
 
 async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {

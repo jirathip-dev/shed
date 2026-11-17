@@ -1,0 +1,22 @@
+# Claude Code, and its ACP adapter. A file of the same name in <config>/providers/ overrides keys of this one.
+id = "claude-acp"
+agent = "claude"
+auth_failures = ["Failed to authenticate", "OAuth session expired"]
+limit = ["hit your limit", "usage limit reached"]
+resets = ["resets "]
+login = "claude auth login"
+status = "claude auth status"
+logout = "claude auth logout"
+config_dir_var = "CLAUDE_CONFIG_DIR"
+effort_args = ["--effort", "{effort}"]
+efforts = ["low", "medium", "high", "xhigh"]
+
+[hooks]
+file = ".claude/settings.json"
+events = [
+  ["UserPromptSubmit", "working"],
+  ["PostToolUse", "working"],
+  ["PermissionRequest", "blocked"],
+  ["Stop", "done"],
+  ["StopFailure", "error"]
+]

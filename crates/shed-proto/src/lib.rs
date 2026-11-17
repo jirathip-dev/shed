@@ -301,13 +301,17 @@ pub enum Method {
     FileWrite,
     /// Keep the connection alive: `{}` → `{}`, usually as a notification.
     Heartbeat,
+    /// The agents shed knows: `{}` → `[AgentInfo]`.
+    Agents,
+    /// Apply an agent's limit and auth rules to text: [`MatchParams`] → [`Matched`].
+    AgentsMatch,
     /// The API as an `OpenRPC` document: `{}` → `openrpc()` (the `schema` feature).
     Discover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 30] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -335,6 +339,8 @@ impl Method {
         Self::FileRead,
         Self::FileWrite,
         Self::Heartbeat,
+        Self::Agents,
+        Self::AgentsMatch,
         Self::Discover,
     ];
 
@@ -369,6 +375,8 @@ impl Method {
             Self::FileRead => "file.read",
             Self::FileWrite => "file.write",
             Self::Heartbeat => "heartbeat",
+            Self::Agents => "agents",
+            Self::AgentsMatch => "agents.match",
             Self::Discover => "rpc.discover",
         }
     }
@@ -457,6 +465,12 @@ impl Method {
             }
             Self::Heartbeat => {
                 "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection."
+            }
+            Self::Agents => {
+                "Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it)."
+            }
+            Self::AgentsMatch => {
+                "Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing."
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
@@ -1119,6 +1133,124 @@ pub struct Link {
     pub error: Option<String>,
 }
 
+/// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
+/// the same name in `<config>/providers/` (`docs/acp.md`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Provider {
+    /// The ACP agent id (`shed agents add <id>`).
+    pub id: String,
+    /// The PTY agent's name, as `shed setup` takes it.
+    pub agent: String,
+    /// Text in a line that says the login expired.
+    pub auth_failures: Vec<String>,
+    /// Text in a line that says a usage limit was hit.
+    pub limit: Vec<String>,
+    /// Markers in a limit line that the reset time follows.
+    pub resets: Vec<String>,
+    /// The `shed state` hooks `shed setup` writes.
+    pub hooks: Option<Hooks>,
+    /// The command that logs in.
+    pub login: Option<String>,
+    /// The command that shows whether it is logged in.
+    pub status: Option<String>,
+    /// The command that logs out.
+    pub logout: Option<String>,
+    /// The variable that moves its config folder.
+    pub config_dir_var: Option<String>,
+    /// The variable that names its settings.
+    pub settings_var: Option<String>,
+    /// The arguments that set the effort, `{effort}` standing for one of `efforts`.
+    pub effort_args: Vec<String>,
+    /// The effort levels it takes.
+    pub efforts: Vec<String>,
+}
+
+impl Provider {
+    /// The first line of `text` that says a usage limit was hit, and the reset time after a marker in it.
+    #[must_use]
+    pub fn limit_hit<'t>(&self, text: &'t str) -> Option<(&'t str, Option<String>)> {
+        let line = text
+            .lines()
+            .find(|l| self.limit.iter().any(|s| l.contains(s)))?;
+        let at = self.resets.iter().find_map(|r| line.split_once(r));
+        Some((
+            line,
+            at.map(|(_, at)| at.trim().trim_end_matches('.').to_owned()),
+        ))
+    }
+
+    /// The first line of `text` that says the login expired.
+    #[must_use]
+    pub fn auth_failure<'t>(&self, text: &'t str) -> Option<&'t str> {
+        text.lines()
+            .find(|l| self.auth_failures.iter().any(|s| l.contains(s)))
+    }
+}
+
+/// A PTY agent's hook table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    /// Its config file, under the home folder.
+    pub file: String,
+    /// Each hook event and the state it reports.
+    pub events: Vec<[String; 2]>,
+}
+
+/// One installed ACP agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Agent {
+    /// The registry id.
+    pub id: String,
+    /// The pinned version.
+    pub version: String,
+    /// The distribution it came from: `binary`, `npx` or `uvx`.
+    pub distribution: String,
+    /// The ACP adapter's command line (`env K=V …` first when the registry sets variables).
+    pub cmd: Vec<String>,
+}
+
+/// One `agents` entry: an agent shed has a provider record for, installed, or both.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AgentInfo {
+    /// The ACP agent id.
+    pub id: String,
+    /// Where the record came from: `built-in` or the user file's path.
+    pub source: Option<String>,
+    /// The provider record.
+    pub provider: Option<Provider>,
+    /// The installed adapter.
+    pub installed: Option<Agent>,
+}
+
+/// `agents.match` params: an agent's id and text to apply its rules to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct MatchParams {
+    /// The ACP agent id.
+    pub id: String,
+    /// The text, e.g. a pane's screen.
+    pub text: String,
+}
+
+/// `agents.match` result: the lines the agent's rules find.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Matched {
+    /// The first line that says a usage limit was hit (the state `rate-limited`).
+    pub limit: Option<String>,
+    /// The reset time that line gives.
+    pub resets: Option<String>,
+    /// The first line that says the login expired.
+    pub auth: Option<String>,
+}
+
 /// `machine.stats` result: a sample taken now, and the kept ones after `since`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -1338,6 +1470,8 @@ impl Method {
             Self::FileRead => pair::<FileParams, Vec<u8>>(g),
             Self::FileWrite => pair::<FileParams, Empty>(g),
             Self::Heartbeat => pair::<Empty, Empty>(g),
+            Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
+            Self::AgentsMatch => pair::<MatchParams, Matched>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
         }
     }

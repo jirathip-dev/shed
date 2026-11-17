@@ -84,20 +84,32 @@ A process counts as the agent's own when it was in the agent's process tree as a
 its MCP servers); any other live descendant once the turn ended makes the lane `running`, the one nearest the
 agent named in the note, checked every 5 s until it exits. A tool call left open when the next turn starts is
 forgotten. `rate-limited` lasts until the next turn starts: shed neither retries, wakes nor continues the
-lane, nor switches its account. An agent's limit pattern is data, one entry per registry id in
-`crates/shed-server/src/providers/<agent>.rs`:
+lane, nor switches its account. An agent's limit pattern is data, in its provider record (below):
 
-```rust
-static LIMIT: Limit = Limit {
-    says: &["hit your limit", "usage limit reached"], // a reply or error line holding one of these
-    resets: &["resets "],                             // the reset time follows one of these on that line
-};
+```toml
+limit = ["hit your limit", "usage limit reached"] # a reply or error line holding one of these
+resets = ["resets "]                              # the reset time follows one of these on that line
 ```
 
 `claude-acp` (`You've hit your limit · resets 3pm` → `3pm`) and `codex-acp` (`You've hit your usage limit. …
 try again at 3:05 PM.` → `3:05 PM`) have entries. An agent without one never shows `rate-limited`; its limit
-text stays its reply (`done`) or error (`error`). Adding one is a data entry and one line in
-`providers/mod.rs`'s list, never a change to `acp.rs`.
+text stays its reply (`done`) or error (`error`).
+
+### Provider records
+
+What shed knows about an agent is one TOML file, never code: `crates/shed-server/src/providers/<name>.toml`
+is built in, and `<name>.toml` in `providers/` beside the config file (`~/.config/shed/providers/`, or
+`~/Library/Application Support/shed/providers/` on macOS) overrides its keys one by one or adds an agent,
+read each time a lane starts, so a changed banner needs no rebuild. Keys: `id` (the ACP agent id), `agent`
+(the PTY name `shed setup` takes), `auth_failures`, `limit`, `resets`, `[hooks]` (`file`, `events` as
+`[event, state]` pairs), `login`, `status` and `logout` (commands), `config_dir_var`, `settings_var`,
+`effort_args` (`{effort}` stands for the level) and `efforts`. A user file that is not TOML or not a record
+is skipped, the built-in record staying in force, and `shed doctor` names it (`FAIL provider …`).
+
+`shed agents --json` and the `agents` method list every agent with a record or an installed adapter: `id`,
+`source` (`built-in` or the user file), `provider` (the record) and `installed`. `agents.match {id, text}`
+applies an agent's limit and auth rules to text of a caller's own (a pane's screen) and returns the `limit`
+line, its `resets` time and the `auth` line, as a lane would read them.
 
 ### Hibernation
 
@@ -189,8 +201,8 @@ its own way (its own login command, config file or API key variable); log in onc
 (for `claude-acp`, e.g. `auth: Failed to authenticate: OAuth session expired and could not be refreshed`),
 and the `reply` event carries that text with `stop_reason` `auth_error`. To recover, check
 `claude auth status` (`"loggedIn": true`), log in again (`claude auth login`, or `/login` in `claude`), then
-`send` the prompt again; the session needs no restart. The known lines are listed per agent next to the
-registry code (`auth_failures` in `crates/shed-server/src/agents.rs`); another agent's expired login ends
+`send` the prompt again; the session needs no restart. The known lines are each agent's `auth_failures` in
+its provider record (above); another agent's expired login ends
 by the idle timeout instead.
 
 **The Claude adapter** (`claude-acp`, `@agentclientprotocol/claude-agent-acp`) runs Claude Code through the
