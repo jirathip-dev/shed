@@ -165,6 +165,10 @@ All notable changes to this project are documented here. The format follows
   (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
   [--full]` lists that terminal's processes over 50 MB: pid, memory, CPU, age and the command's name (the
   whole command line with `--full`).
+- `shed run --acp … --warm` keeps one ready spare session per recipe (agent, command, folder, policy, MCP
+  servers, meta, size): the next `--warm` run of that recipe takes it, renamed to its name and labels, with
+  `session.ready_ms` 0, and a new spare starts. Spares are listed as `.warm-N`; `$SHED_WARM_MAX` (default 2)
+  caps them and `$SHED_WARM_IDLE` (default 600 s) kills one nobody took.
 - `shed ls --json` and `get` show each ACP session's start-to-ready time (`session.ready_ms`) and its first
   prompt's time to the first reply chunk (`session.first_token_ms`); `shed agents --json` gives each agent's
   `medians` of both over its last `$SHED_MEDIAN_OF` (default 20) sessions.

@@ -395,7 +395,7 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
             }
             Self::Ls => {
                 "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal."
@@ -584,6 +584,9 @@ pub struct RunParams {
     /// ACP: never hibernate the agent when idle.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_hibernate: bool,
+    /// ACP: take this recipe's ready spare session if there is one, and keep a spare ready for the next run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub warm: bool,
     /// Start it on this machine, over its held link (`machine.links`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
