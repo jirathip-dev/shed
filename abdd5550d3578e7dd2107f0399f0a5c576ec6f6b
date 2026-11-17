@@ -1,0 +1,15 @@
+Decided: rules are [[rules]] in the provider TOML record; a terminal labelled agent=<agent> (non-ACP) gets that record's rules at run
+Because: "A provider record gains `rules`: each has a state, a priority, a region"
+Decided: the report has priority 0; a rule above 0 wins while it matches, one at or below applies only without a report
+Because: crates/shed-core/src/terminal.rs:338
+Decided: rules are checked lazily in report(), only after the screen changed and at most every 250 ms; wait_until wakes when a skipped check comes due
+Because: "Rules run on screen change, at most a few times a second, for terminals labelled with a known agent only"
+Decided: get shows the origin in a new reported.from field; state_source already means a foreign escape and is unchanged
+Because: "`get` says where the state came from: `reported`, `rule:<id>` or `silence`"
+Decided: one shipped rule, Claude Code's folder trust prompt, captured from 2.1.326 in a scratch folder; path replaced by /home/user/project
+Because: "Collect the real screens first and keep them as golden files; do not write rules from memory"
+Rejected: login, usage-limit and shell-prompt rules — no real screen captured in this lane, so none shipped
+Decided: the staging merge keeps both Provider.rules and #126's Provider.quota; the generated docs were rerun, not hand-merged
+Check: Claude Code 2.1.326 itself also sends OSC 7501 blocked on that prompt; the rule covers a stale hook working over it
+Check: the drain bench labels its terminal agent=claude so the rules run during the drain
+Owner: an agent's on-screen trust prompt now reads blocked even after a stale working report, and get says where each state came from
