@@ -107,6 +107,8 @@ pub struct Report {
     pub title: Option<String>,
     /// A one-line description.
     pub msg: Option<String>,
+    /// Where the state came from: `reported`, `rule:<id>` or `silence`.
+    pub from: Option<String>,
 }
 
 /// A VT screen: feed it the program's output and read back plain text.

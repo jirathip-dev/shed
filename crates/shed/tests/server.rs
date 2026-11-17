@@ -533,7 +533,7 @@ fn jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored()
     let info = c.result("get", &json!({"name": "jan"}));
     assert_eq!(
         info["reported"],
-        json!({"state": "done", "state_source": "jan-osc9999"})
+        json!({"state": "done", "state_source": "jan-osc9999", "from": "reported"})
     );
     let read = c.result("read", &json!({"name": "jan"}));
     assert_eq!(read["text"], "ab\nc", "no escape reaches the screen");
@@ -557,7 +557,7 @@ fn osc_7501_state_events_carry_the_keys_and_each_id() {
         e.retain(|k, _| !["seq", "name", "labels", "time"].contains(&k.as_str()));
         Value::Object(e)
     };
-    let root = json!({"event": "state", "state": "blocked", "kind": "auth", "progress": 7, "app": "gh", "title": "Login"});
+    let root = json!({"event": "state", "state": "blocked", "kind": "auth", "progress": 7, "app": "gh", "title": "Login", "from": "reported"});
     let sub = json!({"event": "state", "state": "working", "id": "sub/a"});
     let got = [keys(live.event()), keys(live.event())];
     assert_eq!(got, [root, sub]);

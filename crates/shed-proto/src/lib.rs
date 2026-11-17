@@ -744,6 +744,9 @@ pub struct Reported {
     /// The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_source: Option<String>,
+    /// Where the state came from: `reported`, `rule:<id>` (a screen rule) or `silence` (`idle_after`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
     /// OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -1222,6 +1225,8 @@ pub struct Provider {
     pub effort_args: Vec<String>,
     /// The effort levels it takes.
     pub efforts: Vec<String>,
+    /// The screens that set its state, for a terminal labelled `agent=<agent>`.
+    pub rules: Vec<Rule>,
     /// Where its prompt responses' `_meta` carries the turn's tokens.
     pub quota: Option<Quota>,
     /// How long its prompt cache lives on each login.
@@ -1239,6 +1244,29 @@ pub struct Cache {
     pub api: u64,
     /// Variables that, set and not empty in the agent's environment, mean an API key.
     pub api_vars: Vec<String>,
+}
+
+/// A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is
+/// `state`. Above priority 0 it outranks the agent's own report; at or below, it applies only without one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    /// Its name; `get` shows `rule:<id>` as the state's `from`.
+    pub id: String,
+    /// The state it sets.
+    pub state: String,
+    /// Why it is blocked: `permission`, `question` or `auth`.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The highest matching rule wins; the agent's own report has priority 0.
+    pub priority: i32,
+    /// How many of the screen's last non-blank lines it looks at.
+    pub region: usize,
+    /// The texts it matches, any one of them.
+    pub any: Vec<String>,
+    /// The agent version its golden screen was captured from.
+    pub version: String,
 }
 
 /// The keys of a turn's tokens in a prompt response's `_meta`.

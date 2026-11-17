@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, EmitParams, Event, EventKind,
-    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Quota, State, Tokens,
+    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Quota, Rule, State,
+    Tokens,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -189,6 +190,15 @@ fn agent_info() -> AgentInfo {
         settings_var: None,
         effort_args: strings(&["--effort", "{effort}"]),
         efforts: strings(&["low", "high"]),
+        rules: vec![Rule {
+            id: "trust".into(),
+            state: "blocked".into(),
+            kind: Some("permission".into()),
+            priority: 10,
+            region: 20,
+            any: strings(&["Trust this folder?"]),
+            version: "0.1.0".into(),
+        }],
         quota: Some(Quota {
             path: strings(&["quota", "token_count"]),
             input: "inputTokens".into(),
