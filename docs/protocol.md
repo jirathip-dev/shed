@@ -270,6 +270,24 @@ Keep the connection alive. Once a connection sends one, the server closes it whe
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
+### `agents`
+
+Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it).
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"config_dir_var":"FAKE_HOME","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","resets":["back at "],"settings_var":null,"status":"fake login status"},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+```
+
+### `agents.match`
+
+Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"agents.match","params":{"id":"fake-acp","text":"working…\nfake: limit hit, back at 3pm."}}
+{"jsonrpc":"2.0","id":1,"result":{"auth":null,"limit":"fake: limit hit, back at 3pm.","resets":"3pm"}}
+```
+
 ### `rpc.discover`
 
 The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.

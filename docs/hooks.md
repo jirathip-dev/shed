@@ -25,5 +25,6 @@ created is deleted again while it is still exactly as shed wrote it.
 | --- | --- | --- | --- |
 | Claude Code | `~/.claude/` exists | `~/.claude/settings.json` (the `hooks` key) | `UserPromptSubmit` → working, `PostToolUse` → working, `PermissionRequest` → blocked, `Stop` → done, `StopFailure` → error |
 
-Each agent's table lives in its module, `crates/shed-server/src/providers/<name>.rs`; an agent without one
+Each agent's table is the `[hooks]` of its provider record, `crates/shed-server/src/providers/<name>.toml` or
+a user file overriding it (docs/acp.md, Provider records); an agent without one
 is not touched.

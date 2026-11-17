@@ -126,18 +126,7 @@ enum Command {
         action: Option<AgentsCommand>,
     },
     #[command(hide = true)]
-    AcpBridge {
-        #[arg(long)]
-        socket: PathBuf,
-        #[arg(long)]
-        state: PathBuf,
-        #[arg(long, value_parser = policy)]
-        policy: Policy,
-        #[arg(long)]
-        agent: String,
-        #[arg(last = true, required = true)]
-        cmd: Vec<String>,
-    },
+    AcpBridge(BridgeArgs),
     Connect {
         #[arg(long)]
         autostart: bool,
@@ -157,6 +146,22 @@ enum Command {
     Uninstall,
     Doctor,
     Setup(SetupArgs),
+}
+
+#[derive(Args)]
+struct BridgeArgs {
+    #[arg(long)]
+    socket: PathBuf,
+    #[arg(long)]
+    state: PathBuf,
+    #[arg(long, value_parser = policy)]
+    policy: Policy,
+    #[arg(long)]
+    agent: String,
+    #[arg(long)]
+    providers: PathBuf,
+    #[arg(last = true, required = true)]
+    cmd: Vec<String>,
 }
 
 #[derive(Args)]
@@ -243,7 +248,7 @@ impl Server<'_> {
                     MachineCommand::Add { .. } | MachineCommand::Ls | MachineCommand::Rm { .. }
                 )
                 | Command::Agents { .. }
-                | Command::AcpBridge { .. }
+                | Command::AcpBridge(_)
                 | Command::Install { .. }
                 | Command::Uninstall
                 | Command::Doctor
@@ -520,13 +525,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             print(json, &done, String::new)?;
         }
         Command::Agents { action } => agents_cmd(&paths, json, action)?,
-        Command::AcpBridge {
-            socket,
-            state,
-            policy,
-            agent,
-            cmd,
-        } => return bridge(&cmd, &socket, &state, policy, &agent),
+        Command::AcpBridge(a) => return bridge(&a),
         Command::Keys { name, keys } => {
             let done: Value = server
                 .connect(None)?
@@ -564,7 +563,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
         Command::Doctor => {}
-        Command::Setup(args) => setup(&args)?,
+        Command::Setup(args) => setup(&paths, &args)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -686,16 +685,11 @@ fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
     print(json, &done, String::new)
 }
 
-fn bridge(
-    cmd: &[String],
-    socket: &Path,
-    state: &Path,
-    policy: Policy,
-    agent: &str,
-) -> anyhow::Result<ExitCode> {
+fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
-    let code = acp::bridge(cmd, &here, socket, state, policy, agent)?;
+    let rules = shed_server::providers::find(&a.providers, &a.agent);
+    let code = acp::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
@@ -719,9 +713,10 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
     let line = |a: &agents::Agent| format!("{} {} ({})\n", a.id, a.version, a.distribution);
     match action {
         None => {
-            let list = agents::list(&paths.state)?;
+            let list = shed_server::providers::known(&paths.state, &paths.providers())?;
             print(json, &list, || {
                 list.iter()
+                    .filter_map(|a| a.installed.as_ref())
                     .map(|a| format!("{}  {}", line(a).trim_end(), a.cmd.join(" ")) + "\n")
                     .collect()
             })
@@ -781,9 +776,10 @@ fn state(
     print(json, &info, String::new)
 }
 
-fn setup(a: &SetupArgs) -> anyhow::Result<()> {
+fn setup(paths: &Paths, a: &SetupArgs) -> anyhow::Result<()> {
     let home = shed_server::config::var("HOME").context("HOME is not set")?;
-    let files = shed_server::hooks::setup(Path::new(&home), &a.agents, a.remove, a.dry_run)?;
+    let (home, dir) = (Path::new(&home), paths.providers());
+    let files = shed_server::hooks::setup(home, &dir, &a.agents, a.remove, a.dry_run)?;
     if files.is_empty() {
         bail!("no installed agent has hooks shed can set up");
     }

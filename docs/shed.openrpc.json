@@ -1607,6 +1607,50 @@
       }
     },
     {
+      "name": "agents",
+      "description": "Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it).",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/AgentInfo"
+          }
+        }
+      }
+    },
+    {
+      "name": "agents.match",
+      "description": "Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The ACP agent id."
+          }
+        },
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The text, e.g. a pane's screen."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Matched"
+        }
+      }
+    },
+    {
       "name": "rpc.discover",
       "description": "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.",
       "paramStructure": "by-name",
@@ -3113,6 +3157,243 @@
           "stderr"
         ],
         "description": "`exec` result."
+      },
+      "AgentInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ACP agent id."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the record came from: `built-in` or the user file's path."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider record."
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The installed adapter."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "description": "One `agents` entry: an agent shed has a provider record for, installed, or both."
+      },
+      "Provider": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ACP agent id (`shed agents add <id>`).",
+            "default": ""
+          },
+          "agent": {
+            "type": "string",
+            "description": "The PTY agent's name, as `shed setup` takes it.",
+            "default": ""
+          },
+          "auth_failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Text in a line that says the login expired.",
+            "default": []
+          },
+          "limit": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Text in a line that says a usage limit was hit.",
+            "default": []
+          },
+          "resets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Markers in a limit line that the reset time follows.",
+            "default": []
+          },
+          "hooks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Hooks"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `shed state` hooks `shed setup` writes.",
+            "default": null
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that logs in.",
+            "default": null
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that shows whether it is logged in.",
+            "default": null
+          },
+          "logout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that logs out.",
+            "default": null
+          },
+          "config_dir_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that moves its config folder.",
+            "default": null
+          },
+          "settings_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that names its settings.",
+            "default": null
+          },
+          "effort_args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that set the effort, `{effort}` standing for one of `efforts`.",
+            "default": []
+          },
+          "efforts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The effort levels it takes.",
+            "default": []
+          }
+        },
+        "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
+      },
+      "Hooks": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Its config file, under the home folder."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Each hook event and the state it reports."
+          }
+        },
+        "required": [
+          "file",
+          "events"
+        ],
+        "description": "A PTY agent's hook table."
+      },
+      "Agent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The registry id."
+          },
+          "version": {
+            "type": "string",
+            "description": "The pinned version."
+          },
+          "distribution": {
+            "type": "string",
+            "description": "The distribution it came from: `binary`, `npx` or `uvx`."
+          },
+          "cmd": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The ACP adapter's command line (`env K=V …` first when the registry sets variables)."
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "distribution",
+          "cmd"
+        ],
+        "description": "One installed ACP agent."
+      },
+      "Matched": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first line that says a usage limit was hit (the state `rate-limited`)."
+          },
+          "resets": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reset time that line gives."
+          },
+          "auth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first line that says the login expired."
+          }
+        },
+        "description": "`agents.match` result: the lines the agent's rules find."
       }
     },
     "errors": {

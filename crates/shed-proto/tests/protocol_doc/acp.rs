@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    AcpSession, AcpUsage, ApprovalOption, EmitParams, Event, EventKind, EventsParams, Method,
-    ModelParams, State,
+    AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, EmitParams, Event, EventKind,
+    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, State,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -129,6 +129,20 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
     Some(match method {
         Method::Events => (events_params(), json!({})),
         Method::Emit => (emit_params(), json!({})),
+        Method::Agents => (json!({}), to_value(vec![agent_info()]).unwrap()),
+        Method::AgentsMatch => (
+            to_value(MatchParams {
+                id: "fake-acp".into(),
+                text: "working…\nfake: limit hit, back at 3pm.".into(),
+            })
+            .unwrap(),
+            to_value(Matched {
+                limit: Some("fake: limit hit, back at 3pm.".into()),
+                resets: Some("3pm".into()),
+                auth: None,
+            })
+            .unwrap(),
+        ),
         Method::Model => (
             to_value(ModelParams {
                 name: "agent".into(),
@@ -139,4 +153,37 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
         ),
         _ => return None,
     })
+}
+
+fn agent_info() -> AgentInfo {
+    let strings = |s: &[&str]| s.iter().map(|&s| s.to_owned()).collect();
+    let provider = Provider {
+        id: "fake-acp".into(),
+        agent: "fake".into(),
+        auth_failures: strings(&["fake: login gone"]),
+        limit: strings(&["fake: limit hit"]),
+        resets: strings(&["back at "]),
+        hooks: Some(Hooks {
+            file: ".fake/settings.json".into(),
+            events: vec![["Stop".into(), "done".into()]],
+        }),
+        login: Some("fake login".into()),
+        status: Some("fake login status".into()),
+        logout: Some("fake logout".into()),
+        config_dir_var: Some("FAKE_HOME".into()),
+        settings_var: None,
+        effort_args: strings(&["--effort", "{effort}"]),
+        efforts: strings(&["low", "high"]),
+    };
+    AgentInfo {
+        id: "fake-acp".into(),
+        source: Some("/home/me/.config/shed/providers/fake.toml".into()),
+        provider: Some(provider),
+        installed: Some(Agent {
+            id: "fake-acp".into(),
+            version: "0.1.0".into(),
+            distribution: "npx".into(),
+            cmd: strings(&["npx", "-y", "fake-acp@0.1.0"]),
+        }),
+    }
 }

@@ -188,6 +188,31 @@ fn doctor_reports_a_missing_job_and_server_with_their_fix_lines() {
     );
     let version = format!("ok    version  shed {LONG_VERSION}\n");
     assert!(report.contains(&version), "{report}");
+    assert!(!report.contains("provider"), "{report}");
+
+    std::fs::create_dir(home.join("providers")).expect("providers dir");
+    let bad = home.join("providers/claude.toml");
+    std::fs::write(&bad, "limit = \"not a list\"\n").expect("bad record");
+    let out = shed(&home, &["--dir", d, "doctor"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let report = text(&out);
+    let named = format!("FAIL  provider {}: ", bad.display());
+    assert!(
+        report.contains(&named) && report.contains("; skipped\n"),
+        "{report}"
+    );
+    let agents: serde_json::Value =
+        serde_json::from_str(&text(&shed(&home, &["--dir", d, "--json", "agents"]))).expect("JSON");
+    let claude = agents
+        .as_array()
+        .expect("a list")
+        .iter()
+        .find(|a| a["id"] == "claude-acp");
+    assert_eq!(
+        claude.expect("claude-acp")["source"],
+        "built-in",
+        "the built-in record stays"
+    );
 }
 
 #[test]

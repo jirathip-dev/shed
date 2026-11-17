@@ -45,7 +45,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_proto::{
-    AcpSession, ApprovalOption, EmitParams, EventKind, Method, Reported, StateParams, TerminalInfo,
+    AcpSession, ApprovalOption, EmitParams, EventKind, Method, Provider, Reported, StateParams,
+    TerminalInfo,
 };
 use tokio::io::{
     AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader,
@@ -452,7 +453,7 @@ struct Session {
     asks: VecDeque<(Asked, Vec<ApprovalOption>)>,
     titles: BTreeMap<String, (String, Option<String>)>,
     reply: String,
-    auth: &'static [&'static str],
+    rules: Provider,
     heard: Instant,
     stirred: Arc<AtomicBool>,
     idle: Duration,
@@ -469,7 +470,6 @@ struct Session {
     open: Vec<String>,
     ended: Option<String>,
     child: Option<String>,
-    limit: Option<&'static crate::providers::Limit>,
 }
 
 impl Session {
@@ -500,15 +500,14 @@ impl Session {
     }
 
     fn auth(&self, text: &str) -> Option<String> {
-        let bad = |l: &&str| self.auth.iter().any(|p| l.contains(p));
-        text.lines().find(bad).map(|l| format!("auth: {l}"))
+        self.rules.auth_failure(text).map(|l| format!("auth: {l}"))
     }
 
     fn fail(&mut self, why: String) -> AcpResult<()> {
         let cancelled = self.input(Input::Cancel);
         self.prompts.clear();
-        if let Some(reset) = self.limit.and_then(|l| l.hit(&why)) {
-            self.state("rate-limited", reset.resets);
+        if let Some((_, resets)) = self.rules.limit_hit(&why) {
+            self.state("rate-limited", resets);
             return cancelled;
         }
         let auth = self.auth(&why);
@@ -646,11 +645,11 @@ impl Session {
                 Ok(r) => {
                     let (text, stop_reason) =
                         (std::mem::take(&mut self.reply), wire(&r.stop_reason));
-                    let limited = self.limit.and_then(|l| l.hit(&text));
+                    let limited = self.rules.limit_hit(&text).map(|(_, at)| at);
                     let stop = stop_reason.clone();
                     self.emit(EventKind::Reply { text, stop_reason });
-                    if let Some(reset) = limited {
-                        self.state("rate-limited", reset.resets);
+                    if let Some(resets) = limited {
+                        self.state("rate-limited", resets);
                     } else {
                         (self.ended, self.child) = (Some(stop), self.spawned());
                         self.settle();
@@ -1050,7 +1049,8 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 /// Runs the ACP adapter `cmd` in `cwd` for terminal `$SHED` of the server on `socket` (state file
 /// `state`): `initialize`, then `session/load` of `$SHED_ACP_RESUME` (its history replayed) or
 /// `session/new`, both with the MCP servers in `$SHED_ACP_MCP` and the `_meta` in `$SHED_ACP_META`,
-/// then prompts, updates and permission requests until the agent exits. Returns the agent's exit code.
+/// then prompts, updates and permission requests until the agent exits, reading its limit and expired-login
+/// lines by `rules`. Returns the agent's exit code.
 ///
 /// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, `0` never) it stops the agent's process
 /// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
@@ -1068,10 +1068,10 @@ pub fn bridge(
     socket: &Path,
     state: &Path,
     policy: Policy,
-    agent_id: &str,
+    rules: Provider,
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
-    let result = run(cmd, cwd, socket, state, policy, agent_id, &name);
+    let result = run(cmd, cwd, socket, state, policy, rules, &name);
     if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
         let report = Reported {
             state: "error".to_owned(),
@@ -1265,7 +1265,7 @@ fn run(
     socket: &Path,
     state: &Path,
     policy: Policy,
-    agent_id: &str,
+    rules: Provider,
     name: &str,
 ) -> Result<i32, Error> {
     let (mcp, meta) = launch_options()?;
@@ -1307,7 +1307,7 @@ fn run(
             asks: VecDeque::new(),
             titles: BTreeMap::new(),
             reply: String::new(),
-            auth: crate::providers::auth_failures(agent_id),
+            rules: rules.clone(),
             heard: shed_core::clock::tokio_now(),
             stirred,
             idle: turn_idle_timeout(),
@@ -1324,7 +1324,6 @@ fn run(
             open: Vec::new(),
             ended: None,
             child: None,
-            limit: crate::providers::limit(agent_id),
         },
     };
     let mut resume = crate::config::var("SHED_ACP_RESUME");
@@ -1373,6 +1372,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::providers::tests::fake;
 
     #[test]
     fn the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line() {
@@ -1492,7 +1492,7 @@ mod tests {
             asks: VecDeque::new(),
             titles: BTreeMap::new(),
             reply: String::new(),
-            auth: &[],
+            rules: Provider::default(),
             heard: shed_core::clock::tokio_now(),
             stirred,
             idle,
@@ -1509,7 +1509,6 @@ mod tests {
             open: Vec::new(),
             ended: None,
             child: None,
-            limit: None,
         }
     }
 
@@ -1672,7 +1671,11 @@ mod tests {
 
     type States = Vec<(String, Option<String>)>;
 
-    async fn lane(steps: Vec<Step>, pid: Option<i32>, agent: &str) -> (States, Option<Duration>) {
+    async fn lane(
+        steps: Vec<Step>,
+        pid: Option<i32>,
+        rules: Provider,
+    ) -> (States, Option<Duration>) {
         let (bridge, fake) = tokio::io::duplex(1 << 16);
         let (_, err_ours) = tokio::io::duplex(1 << 16);
         tokio::spawn(scripted(fake, steps, pid.unwrap_or(0)));
@@ -1687,7 +1690,7 @@ mod tests {
             err_ours,
             async |cx, back, from_agent, stirred| {
                 let mut s = session(cx, back, out, stirred, Duration::from_secs(5));
-                (s.pid, s.limit) = (pid, crate::providers::limit(agent));
+                (s.pid, s.rules) = (pid, rules);
                 drive(s, from_agent, &mut inputs, Path::new("/"), None, None).await
             },
         );
@@ -1719,7 +1722,7 @@ mod tests {
             Step::Wait(700),
             Step::Update(call("completed")),
         ];
-        let (states, slept) = lane(steps, None, "fake-acp").await;
+        let (states, slept) = lane(steps, None, fake("fake-acp")).await;
         let running = st("running", Some("cargo test"));
         let done = st("done", Some("end_turn"));
         assert_eq!(states, [st("working", None), running, done]);
@@ -1742,7 +1745,7 @@ mod tests {
             Step::Wait(700),
             Step::Kill,
         ];
-        let (states, slept) = lane(steps, pid, "fake-acp").await;
+        let (states, slept) = lane(steps, pid, fake("fake-acp")).await;
         agent.wait().await.unwrap();
         let [working, running, done] = states.as_slice() else {
             panic!("states {states:?}");
@@ -1764,23 +1767,43 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern() {
         let line = "fake: limit hit, back at 3pm.";
-        let (states, slept) = lane(vec![Step::EndTurn(line)], None, "fake-acp").await;
+        let (states, slept) = lane(vec![Step::EndTurn(line)], None, fake("fake-acp")).await;
         assert_eq!(
             states,
             [st("working", None), st("rate-limited", Some("3pm"))]
         );
         assert_eq!(slept, None, "a rate-limited lane never hibernates");
-        let (states, slept) = lane(vec![Step::EndTurn(line)], None, "unknown-acp").await;
+        let (states, slept) = lane(vec![Step::EndTurn(line)], None, fake("unknown-acp")).await;
         assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
         assert!(slept.is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild() {
+        let dir = crate::temp_dir("acp-provider");
+        let line = "Out of tokens, back at 6pm.";
+        let rules = || crate::providers::find(&dir, "claude-acp");
+        let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
+        assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
+        let file = "limit = [\"Out of tokens\"]\nresets = [\"back at \"]\n";
+        std::fs::write(dir.join("claude.toml"), file).unwrap();
+        let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
+        assert_eq!(
+            states,
+            [st("working", None), st("rate-limited", Some("6pm"))]
+        );
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_permission_request_waits_for_approval_and_never_times_out() {
         let call = json!({"sessionUpdate": "tool_call", "toolCallId": "t", "title": "rm notes",
             "status": "pending"});
-        let (states, slept) =
-            lane(vec![Step::Update(call), Step::Ask("rm notes")], None, "x").await;
+        let (states, slept) = lane(
+            vec![Step::Update(call), Step::Ask("rm notes")],
+            None,
+            fake("x"),
+        )
+        .await;
         let waiting = st("waiting-approval", Some("rm notes"));
         assert_eq!(
             states,
