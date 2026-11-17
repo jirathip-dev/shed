@@ -1,0 +1,13 @@
+Decided: the quota field names live in a [quota] table of the provider record, read by Provider::tokens in shed-proto
+Because: "The field names live in the agent's provider module, not in `acp.rs`"
+Rejected: a Rust const in providers.rs — #129 made provider facts data files, so a key name is TOML
+Decided: the bridge reads _meta.quota.token_count from each session/prompt response, the message claude-agent-acp 0.100.0 puts it on
+Because: crates/shed/tests/fake_acp.py:313
+Decided: turn and total are kept on the bridge Session and merged into every usage event, so a usage_update never drops them
+Because: crates/shed-server/src/acp.rs:756
+Decided: Box::pin on the bridge connect future, clippy's own fix once Session grew past large_futures' 16 KiB
+Because: crates/shed-server/src/acp.rs:1355
+Rejected: a [quota] record for codex-acp — its adapter was not available here to confirm the keys
+Check: the e2e test builds the fake agent's record from claude.toml's [quota], so it exercises the built-in key names
+Check: machine_stats fails at base 73af884 on this host too; arch-check's only violation is just missing
+Owner: shed top now shows how much of each turn came from the prompt cache; real Claude showed 38%, 43%, then 91% after a wake
