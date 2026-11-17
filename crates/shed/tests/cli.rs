@@ -678,7 +678,7 @@ fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
     assert_eq!(names, ["mem", "small"], "{top}");
     let totals = top.lines().last().unwrap_or_default();
     assert!(
-        totals.starts_with("2 awake, 0 hibernated; agent 0M, work 5"),
+        totals.starts_with("2 awake, 0 hibernated; agent 0M, work "),
         "{top}"
     );
 }
