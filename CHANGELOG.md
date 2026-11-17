@@ -155,16 +155,16 @@ All notable changes to this project are documented here. The format follows
   installed adapter (now under `installed`); `agents.match {id, text}` applies an agent's limit and auth
   rules to a caller's text. See docs/acp.md.
 - cooee and drover: read program facts from `shed agents --json` in place of their own copies.
-- `shed top` and `shed ls` show an ACP terminal's agent state (`working`, `done`, `hibernated`, …) as STATE.
-  `top` splits an ACP terminal's memory into AGENT (the bridge, adapter and agent as the turn began) and WORK
-  (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
-  [--full]` lists that terminal's processes over 50 MB: pid, memory, CPU, age and the command's name (the
-  whole command line with `--full`).
 - Screen rules for PTY agents: a terminal labelled `agent=<agent>` checks its provider record's `[[rules]]`
   (a state, a priority, the last N screen lines and texts to match) on screen changes, at most every 250 ms;
   a rule above the agent's own report outranks it while its screen shows. Claude Code's folder-trust prompt
   reads `blocked` (`permission`). `get` says where a state came from: `reported.from` is `reported`,
   `rule:<id>` or `silence`. See docs/hooks.md.
+- `shed top` and `shed ls` show an ACP terminal's agent state (`working`, `done`, `hibernated`, …) as STATE.
+  `top` splits an ACP terminal's memory into AGENT (the bridge, adapter and agent as the turn began) and WORK
+  (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
+  [--full]` lists that terminal's processes over 50 MB: pid, memory, CPU, age and the command's name (the
+  whole command line with `--full`).
 
 ### Changed
 
