@@ -27,6 +27,7 @@ shed run --acp claude-acp --label issue=7 --cwd /home/user/project
 shed send t1 "Fix the failing test"
 shed wait t1 --until done waiting-approval rate-limited error
 shed approve t1 allow-once        # an option id, or a kind: allow_once, reject_once, …
+shed approve t1 allow-once --request 7   # the approval_request with id 7 (default: the oldest)
 shed read t1                      # > prompt, [tool] title (status), the final reply
 shed read t1 --events             # the same events drawn: › prompt, ✓ kind title, the reply styled
 shed read t1 --events --json      # each event with its seq; page with --before <seq> --lines <n>
@@ -51,8 +52,9 @@ usage, tool-call progress), any request, and each line it writes to stderr; a pe
 `approve` does not time out. The default is long because a model thinking at high effort can send nothing
 for minutes on a healthy turn, and the watchdog is off while a tool call is `pending` or `in_progress`; an expired login is caught at once by its reply, so the watchdog is only a
 backstop for an agent that really hangs. `shed events`
-streams `turn`, `text` (reply chunks), `tool_call` (each status change), `plan`, `mode`, `approval_request`,
-`approved`, `reply` (the whole reply and its `stop_reason`), `session` (its id, the current `model` and the
+streams `turn`, `text` (reply chunks), `tool_call` (each status change, with ACP's `locations` paths and its
+`raw_input` up to 4 KiB), `plan`, `mode`, `approval_request` (its `id`, the `tool`, the `options` and ACP's
+`toolCall` as `call`, without `content`), `approved`, `reply` (the whole reply and its `stop_reason`), `session` (its id, the current `model` and the
 `models`, also kept as the terminal's `session`) and `usage` (the agent's `usage_update`: tokens `used` of the
 context window's `size` and the session's `cost`, also kept as `session.usage`; `shed top` shows it as
 `TOKENS`, e.g. `53k/200k`) next to the usual `started`, `state` and `exited`; see [protocol.md](protocol.md).
@@ -211,7 +213,8 @@ bridge speaks ACP through the [`agent-client-protocol`](https://crates.io/crates
 tokio runtime of its own. It runs the adapter with piped stdio, sends `initialize` (no `fs` or `terminal` client
 capabilities) and `session/new` (the terminal's cwd and MCP servers) or `session/load`, and then:
 
-- reads its PTY in raw mode: `send`, `approve` and `cancel` write one framed line (`RS`, JSON, newline); a line
+- reads its PTY in raw mode: `send`, `approve` (`{"approve": "<option>", "request": "<id>"}`, no `request`: the
+  oldest) and `cancel` write one framed line (`RS`, JSON, newline); a line
   typed in `attach` is a prompt; `Esc` or `Ctrl+C` alone cancels;
 - reports its events with the `emit` method and its states with `state`, as notifications over the server
   socket, written in batches by a task of their own;

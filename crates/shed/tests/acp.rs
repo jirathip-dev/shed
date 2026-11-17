@@ -354,6 +354,63 @@ fn the_deny_policy_rejects_permission_requests() {
 }
 
 #[test]
+fn two_requests_in_flight_are_each_answered_by_id_and_tool_calls_carry_locations_and_raw_input() {
+    let dir = temp_dir("acp-two");
+    let _server = Server::start(&dir);
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    let args = [
+        "run", "--name", "w", "--label", "run=two", "--acp", "fake", "--",
+    ];
+    ok(&dir, &[&args[..], &["python3", agent]].concat());
+    ok(
+        &dir,
+        &[
+            "wait",
+            "w",
+            "--output",
+            "ACP session ready",
+            "--timeout",
+            "10",
+        ],
+    );
+    ok(&dir, &["send", "w", "pair"]);
+    let asked = std::cell::Cell::new(0);
+    let events = events_until(&dir, "two", |e| {
+        asked.set(asked.get() + usize::from(e["event"] == "approval_request"));
+        asked.get() == 2
+    });
+    let events: Vec<Value> = events
+        .iter()
+        .map(|l| serde_json::from_str(l).expect("JSON"))
+        .collect();
+    let of = |kind: &str| -> Vec<&Value> { events.iter().filter(|e| e["event"] == kind).collect() };
+    let calls = of("tool_call");
+    assert_eq!(calls[0]["locations"], json!(["/work/call-a.rs"]));
+    assert_eq!(calls[0].get("raw_input"), None, "over 4 KiB: {}", calls[0]);
+    assert_eq!(calls[1]["locations"], json!(["/work/call-b.rs"]));
+    assert_eq!(calls[1]["raw_input"], json!({"command": "ls -la"}));
+    let asks = of("approval_request");
+    let ids: Vec<&Value> = asks.iter().map(|a| &a["id"]).collect();
+    assert_eq!(ids, [&json!("101"), &json!("102")]);
+    let call = &asks[1]["call"];
+    assert_eq!(call["toolCallId"], "call-b");
+    assert_eq!(call["rawInput"], json!({"command": "ls -la"}));
+    assert_eq!(
+        call["locations"],
+        json!([{"path": "/work/call-b.rs", "line": 3}])
+    );
+    assert_eq!(call.get("content"), None, "{call}");
+    ok(&dir, &["approve", "w", "reject-once", "--request", "102"]);
+    ok(&dir, &["approve", "w", "allow-once", "--request", "101"]);
+    ok(&dir, &["wait", "w", "--until", "done", "--timeout", "10"]);
+    assert_eq!(
+        ok(&dir, &["read", "w"]),
+        "> pair\n[tool] Edit a.rs (completed)\n[tool] Run ls (failed)\ncall-a allow-once, call-b reject-once\n"
+    );
+}
+
+#[test]
 fn an_agent_that_fails_the_handshake_reports_error() {
     let dir = temp_dir("acp-error");
     let _server = Server::start(&dir);
