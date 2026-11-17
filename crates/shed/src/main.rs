@@ -525,8 +525,14 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
-            let params = ModelParams { name, model };
-            let done: Value = server.connect(None)?.call(Method::Model, &params)?;
+            let mut client = server.connect(None)?;
+            let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
+            let done: Value = client.call(Method::Model, &ModelParams { name, model })?;
+            if info.session.is_some_and(|s| s.turn_ended.is_some()) {
+                out::err(
+                    "shed: the model switch drops the prompt cache; the next turn reads the conversation uncached",
+                );
+            }
             print(json, &done, String::new)?;
         }
         Command::Agents { action } => agents_cmd(&paths, json, action)?,
@@ -1158,7 +1164,7 @@ fn table(list: &[TerminalInfo], top: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
     let mb = |v: Option<u64>| dash(v.map(|v| format!("{v}M")));
     let head = if top {
-        "NAME STATE EXIT PID AGENT WORK CPU TOKENS CACHE LABELS CMD"
+        "NAME STATE EXIT PID AGENT WORK CPU TOKENS CACHE CACHE-LIKELY LABELS CMD"
     } else {
         "NAME STATE EXIT PID RSS CPU LABELS CMD"
     };
@@ -1186,6 +1192,9 @@ fn table(list: &[TerminalInfo], top: bool) -> String {
             ));
             let cache = usage.and_then(|u| u.turn?.cache_share());
             row.push(dash(cache.map(|p| format!("{p}%"))));
+            row.push(dash(
+                t.session.as_ref().and_then(|s| s.cache_likely.clone()),
+            ));
         }
         row.push(if labels.is_empty() {
             "-".to_owned()
