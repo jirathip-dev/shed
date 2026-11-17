@@ -70,6 +70,8 @@ pub(crate) fn events() -> Vec<Event> {
             title: "Edit src/lib.rs".into(),
             status: "pending".into(),
             kind: Some("edit".into()),
+            locations: vec!["/work/src/lib.rs".into()],
+            raw_input: Some(json!({"file_path": "/work/src/lib.rs"})),
         },
         EventKind::Plan {
             entries: vec![
@@ -80,6 +82,7 @@ pub(crate) fn events() -> Vec<Event> {
             mode: "default".into(),
         },
         EventKind::ApprovalRequest {
+            id: "7".into(),
             tool: "Edit src/lib.rs".into(),
             options: vec![
                 ApprovalOption {
@@ -93,6 +96,8 @@ pub(crate) fn events() -> Vec<Event> {
                     kind: "reject_once".into(),
                 },
             ],
+            call: Some(json!({"toolCallId": "call_1", "kind": "edit",
+                "locations": [{"path": "/work/src/lib.rs"}]})),
         },
         EventKind::Approved {
             option: "allow".into(),
