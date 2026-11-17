@@ -1,0 +1,11 @@
+Decided: the request id is the agent's own JSON-RPC id (Responder::raw_id), not a shed counter
+Because: "two requests in flight are each answered by id"
+Rejected: the toolCallId as the id — one tool call can be asked about twice; a shed counter would add state the agent already gives
+Decided: Input::Approve is a serde untagged variant so the line is {"approve": "<option>", "request": "<id>"} and the old {"approve": "<option>"} still parses
+Because: crates/shed-server/src/acp.rs:78
+Decided: tool_call passes on only what each update carries (no carrying forward of locations or raw_input)
+Rejected: carrying them forward like the title — the ADR says shed passes ACP's own on and reads none of the new fields
+Decided: the Event enum in watch.rs is boxed because Event grew and clippy's large_enum_variant fired
+Because: crates/shed/src/watch.rs:28
+Check: answering 102 then 101 by id gives "call-a allow-once, call-b reject-once" (crates/shed/tests/acp.rs two_requests_in_flight test)
+Owner: cooee can now answer each permission request by id and see the tool call's paths and input
