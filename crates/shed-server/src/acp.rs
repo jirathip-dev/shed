@@ -75,6 +75,8 @@ pub enum Input {
     Cancel,
     /// Switch to this model (`session/set_config_option`, the `model` option).
     Model(String),
+    /// Report under this terminal name from now on: a spare session taken by `run --warm`.
+    Name(String),
     /// Answer permission request `request` (else the oldest) with this option id or kind.
     #[serde(untagged)]
     Approve {
@@ -431,6 +433,7 @@ enum Out {
     Emit(EventKind, bool, bool),
     State(Reported),
     Say(String),
+    Name(String),
 }
 
 fn wire<T: Serialize>(value: &T) -> String {
@@ -633,6 +636,7 @@ impl Session {
                     Self::answer(asked, None)?;
                 }
             }
+            Input::Name(name) => return self.send(Out::Name(name)),
             Input::Model(model) => {
                 let Some(option) = self.model.clone() else {
                     return self.say("shed: the agent offers no models".to_owned());
@@ -1021,6 +1025,10 @@ impl Writer {
                         *crate::lock(&self.reported) = Some(report.clone());
                         let params = StateParams { name, report };
                         crate::notification(Method::State, &params)
+                    }
+                    Out::Name(name) => {
+                        self.name = name;
+                        Ok(Vec::new())
                     }
                     Out::Say(line) => {
                         self.preview.blocks.push(Err(line));

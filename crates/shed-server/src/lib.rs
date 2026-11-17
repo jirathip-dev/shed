@@ -203,7 +203,7 @@ fn watch(registry: &Shared, name: String, term: Arc<Terminal>) {
                 let orphans = {
                     let mut reg = lock(&registry);
                     reg.refresh().ok();
-                    reg.orphans(&name)
+                    reg.orphans(&reg.named(&name))
                 };
                 for child in orphans {
                     let registry = Arc::clone(&registry);
@@ -229,6 +229,16 @@ async fn kill(registry: &Shared, name: &str) -> Result<TerminalInfo, RpcError> {
 async fn sample(registry: Shared, every: Duration) {
     loop {
         tokio::time::sleep(every).await;
+        for name in lock(&registry).stale_spares() {
+            let registry = Arc::clone(&registry);
+            tokio::spawn(async move {
+                kill(&registry, &name).await.ok();
+                let files = lock(&registry).rm(&name).map(|(_, files)| files);
+                if let Ok(files) = files {
+                    blocking(files).await.ok();
+                }
+            });
+        }
         if let Ok(Ok(procs)) = blocking(|| proctree::system().list()).await {
             lock(&registry).sample(&procs, shed_core::clock::now());
         }
@@ -605,9 +615,14 @@ async fn dispatch(
     reg.refresh()?;
     match method {
         Method::Run => {
-            let info = reg.run(params(request)?)?;
-            if let (Some(term), _) = reg.to_wait(&info.name)? {
-                watch(registry, info.name.clone(), term);
+            let p: proto::RunParams = params(request)?;
+            let spare = p.warm.then(|| p.clone());
+            let info = reg.run(p)?;
+            let spare = spare.and_then(|p| reg.warm_up(p));
+            for name in [Some(info.name.clone()), spare].into_iter().flatten() {
+                if let Some(term) = reg.fresh(&name) {
+                    watch(registry, name, term);
+                }
             }
             json(&info)
         }

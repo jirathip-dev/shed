@@ -92,6 +92,7 @@ pub(crate) fn run_params() -> Value {
         mcp_servers: Vec::new(),
         meta: None,
         no_hibernate: false,
+        warm: false,
         machine: None,
         parent: Some(lead()),
         rows: None,

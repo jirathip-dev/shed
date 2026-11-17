@@ -345,6 +345,10 @@ fn links(paths: &Paths) -> BTreeMap<String, Link> {
 }
 
 #[derive(Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent command-line switch"
+)]
 struct RunArgs {
     #[arg(long)]
     name: Option<String>,
@@ -370,6 +374,8 @@ struct RunArgs {
     meta: Option<Map<String, Value>>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
+    #[arg(long, requires = "acp", conflicts_with = "resume")]
+    warm: bool,
     #[command(flatten)]
     parent: ParentArgs,
     #[arg(long, value_name = "RxC", value_parser = size)]
@@ -631,6 +637,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         mcp_servers,
         meta: args.meta,
         no_hibernate: args.no_hibernate,
+        warm: args.warm,
         parent: match (args.parent.no_parent, &server.on) {
             (true, _) => None,
             (false, None) => (args.parent.parent).or_else(|| shed_server::config::var("SHED")),
