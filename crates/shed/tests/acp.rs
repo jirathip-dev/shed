@@ -1692,7 +1692,10 @@ fn a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches() {
     start_fake(&dir, "r", "fake");
     let before: Value = serde_json::from_str(&ok(&dir, &["get", "r"])).expect("JSON");
     ok(&dir, &["send", "r", "busy"]);
-    until(&dir, "r", "working");
+    ok(
+        &dir,
+        &["wait", "r", "--until", "working", "done", "--timeout", "10"],
+    );
     stop(&mut server);
     std::thread::sleep(std::time::Duration::from_secs(3));
     let _server = Server::start(&dir);
