@@ -7,7 +7,7 @@ mod service;
 mod watch;
 
 use shed_server::runner::ExitCode;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Read as _, Write as _};
@@ -19,10 +19,11 @@ use std::time::Duration;
 use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
+use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
     Children, Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState,
     LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported,
@@ -105,7 +106,11 @@ enum Command {
         #[arg(long, value_name = "N")]
         since: Option<u64>,
     },
-    Top,
+    Top {
+        name: Option<String>,
+        #[arg(long, requires = "name")]
+        full: bool,
+    },
     Watch {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
@@ -553,7 +558,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             };
             events(&server, &params)?;
         }
-        Command::Top => top(&server, json)?,
+        Command::Top { name, full } => top(&server, json, name, full)?,
         Command::Watch { labels } => watch::watch(&server, labels.into_iter().collect())?,
         Command::Connect { autostart } => relay(&paths, cli.dir.as_deref(), autostart)?,
         Command::Machine(command) => return machine(&server, json, command),
@@ -744,12 +749,73 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
     }
 }
 
-fn top(server: &Server, json: bool) -> anyhow::Result<()> {
-    let mut list: Vec<TerminalInfo> = server
-        .connect(None)?
-        .call(Method::Ls, &LsParams::default())?;
+fn top(server: &Server, json: bool, name: Option<String>, full: bool) -> anyhow::Result<()> {
+    let mut client = server.connect(None)?;
+    if let Some(name) = name {
+        if server.on.is_some() {
+            bail!("shed top <terminal> reads this machine's process table; run it there");
+        }
+        let info: TerminalInfo = client.call(Method::Get, &Target { name })?;
+        return processes(json, &info, full);
+    }
+    let mut list: Vec<TerminalInfo> = client.call(Method::Ls, &LsParams::default())?;
     list.sort_by_key(|t| std::cmp::Reverse(t.resources.map(|r| r.rss_mb)));
-    print(json, &list, || table(&list, true))
+    print(json, &list, || table(&list, true) + &totals(&list))
+}
+
+fn totals(list: &[TerminalInfo]) -> String {
+    let (mut awake, mut asleep, mut agent, mut work) = (0, 0, 0, 0);
+    for t in list.iter().filter(|t| t.state == State::Running) {
+        if state_word(t) == "hibernated" {
+            asleep += 1;
+        } else {
+            awake += 1;
+        }
+        if let Some(r) = t.resources {
+            agent += r.agent_mb.unwrap_or(0);
+            work += r.work_mb.unwrap_or(r.rss_mb);
+        }
+    }
+    format!("{awake} awake, {asleep} hibernated; agent {agent}M, work {work}M\n")
+}
+
+fn processes(json: bool, info: &TerminalInfo, full: bool) -> anyhow::Result<()> {
+    let pid = info
+        .pid
+        .with_context(|| format!("{} is not running", info.name))?;
+    let procs = proctree::system().list().context("the process table")?;
+    let mut tree = proctree::tree(&procs, pid, &BTreeSet::new());
+    tree.retain(|p| p.rss_bytes > 50 << 20);
+    tree.sort_by_key(|p| std::cmp::Reverse(p.rss_bytes));
+    let rows: Vec<Value> = (tree.iter())
+        .filter_map(|p| {
+            let (cmd, age) = proctree::command(p.pid)?;
+            let name = cmd.split_whitespace().next().unwrap_or_default();
+            let name = name.rsplit('/').next().unwrap_or_default().to_owned();
+            let cpu_pct = p.cpu.as_millis() * 100 / age.as_millis().max(1000);
+            let cmd = if full { cmd } else { name };
+            let (rss_mb, age_s) = (p.rss_bytes >> 20, age.as_secs());
+            Some(json!({"pid": p.pid, "rss_mb": rss_mb, "cpu_pct": cpu_pct, "age_s": age_s, "cmd": cmd}))
+        })
+        .collect();
+    print(json, &rows, || {
+        let head = ["PID", "MEM", "CPU", "AGE", "CMD"]
+            .map(str::to_owned)
+            .to_vec();
+        let cell = |r: &Value, k: &str, unit: &str| format!("{}{unit}", r[k]);
+        let body = rows.iter().map(|r| {
+            let cmd = r["cmd"].as_str().unwrap_or_default().to_owned();
+            let age = format!("{}m", r["age_s"].as_u64().unwrap_or(0) / 60);
+            vec![
+                cell(r, "pid", ""),
+                cell(r, "rss_mb", "M"),
+                cell(r, "cpu_pct", "%"),
+                age,
+                cmd,
+            ]
+        });
+        columns(&[vec![head], body.collect()].concat())
+    })
 }
 
 fn state(
@@ -1080,49 +1146,67 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     Ok(())
 }
 
-fn table(list: &[TerminalInfo], tokens: bool) -> String {
+fn state_word(t: &TerminalInfo) -> &str {
+    match (t.state, &t.reported) {
+        (State::Running, Some(r)) if t.acp.is_some() => &r.state,
+        (State::Running, _) => "running",
+        (State::Exited, _) => "exited",
+    }
+}
+
+fn table(list: &[TerminalInfo], top: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-    let head = "NAME STATE EXIT PID RSS CPU TOKENS CACHE LABELS CMD".split(' ');
-    let mut rows = vec![head.map(str::to_owned).collect::<Vec<_>>()];
+    let mb = |v: Option<u64>| dash(v.map(|v| format!("{v}M")));
+    let head = if top {
+        "NAME STATE EXIT PID AGENT WORK CPU TOKENS CACHE LABELS CMD"
+    } else {
+        "NAME STATE EXIT PID RSS CPU LABELS CMD"
+    };
+    let mut rows = vec![head.split(' ').map(str::to_owned).collect::<Vec<_>>()];
     for t in list {
         let labels: Vec<String> = t.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
         let usage = t.session.as_ref().and_then(|s| s.usage.as_ref());
-        rows.push(vec![
+        let r = t.resources;
+        let mut row = vec![
             t.name.clone(),
-            match t.state {
-                State::Running => "running",
-                State::Exited => "exited",
-            }
-            .to_owned(),
+            state_word(t).to_owned(),
             dash(t.exit.map(|v| v.to_string())),
             dash(t.pid.map(|v| v.to_string())),
-            dash(t.resources.map(|r| format!("{}M", r.rss_mb))),
-            dash(t.resources.map(|r| format!("{}%", r.cpu_pct))),
-            dash(usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000))),
-            dash(
-                usage
-                    .and_then(|u| u.turn?.cache_share())
-                    .map(|p| format!("{p}%")),
-            ),
-            if labels.is_empty() {
-                "-".to_owned()
-            } else {
-                labels.join(",")
-            },
-            t.cmd.join(" "),
-        ]);
+        ];
+        if top {
+            row.push(mb(r.and_then(|r| r.agent_mb)));
+            row.push(mb(r.map(|r| r.work_mb.unwrap_or(r.rss_mb))));
+        } else {
+            row.push(mb(r.map(|r| r.rss_mb)));
+        }
+        row.push(dash(r.map(|r| format!("{}%", r.cpu_pct))));
+        if top {
+            row.push(dash(
+                usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000)),
+            ));
+            let cache = usage.and_then(|u| u.turn?.cache_share());
+            row.push(dash(cache.map(|p| format!("{p}%"))));
+        }
+        row.push(if labels.is_empty() {
+            "-".to_owned()
+        } else {
+            labels.join(",")
+        });
+        row.push(t.cmd.join(" "));
+        rows.push(row);
     }
-    for row in rows.iter_mut().filter(|_| !tokens) {
-        row.drain(6..8);
-    }
+    columns(&rows)
+}
+
+fn columns(rows: &[Vec<String>]) -> String {
     let mut widths = vec![0; rows.first().map_or(0, Vec::len)];
-    for row in &rows {
+    for row in rows {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = cell.chars().count().max(*w);
         }
     }
     let mut out = String::new();
-    for row in &rows {
+    for row in rows {
         let cells: Vec<String> = row
             .iter()
             .zip(&widths)

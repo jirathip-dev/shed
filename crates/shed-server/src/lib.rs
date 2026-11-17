@@ -40,9 +40,9 @@ use rustix::process::{Resource, Rlimit, Signal, getrlimit, setrlimit};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use shed_core::proctree::{self, ProcessTable as _};
+use shed_core::proctree::ProcessTable as _;
 use shed_core::{Pattern, STATES, Terminal, Wake};
-pub use shed_core::{clock, runner};
+pub use shed_core::{clock, proctree, runner};
 pub use shed_proto as proto;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 

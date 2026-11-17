@@ -957,6 +957,14 @@
               "prompt": {
                 "type": "string",
                 "description": "The prompt text."
+              },
+              "agent": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "description": "The bridge's to the server: the agent's own pids as the turn began; never in the event stream."
               }
             },
             "required": [
@@ -1962,6 +1970,24 @@
             "format": "uint64",
             "minimum": 0,
             "description": "CPU use since the previous sample, in percent of one core."
+          },
+          "agent_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "ACP: the agent's own processes' memory, in MiB: the bridge, and the adapter and agent as the turn began."
+          },
+          "work_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "ACP: the memory of everything else in the tree, what the agent started, in MiB."
           }
         },
         "required": [
@@ -2232,6 +2258,14 @@
               "prompt": {
                 "type": "string",
                 "description": "The prompt text."
+              },
+              "agent": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "description": "The bridge's to the server: the agent's own pids as the turn began; never in the event stream."
               }
             },
             "required": [
@@ -2631,6 +2665,14 @@
               "prompt": {
                 "type": "string",
                 "description": "The prompt text."
+              },
+              "agent": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "description": "The bridge's to the server: the agent's own pids as the turn began; never in the event stream."
               }
             },
             "required": [

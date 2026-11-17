@@ -54,6 +54,7 @@ pub(crate) fn events() -> Vec<Event> {
         EventKind::Killed,
         EventKind::Turn {
             prompt: "Fix the failing test".into(),
+            agent: Vec::new(),
         },
         EventKind::Text {
             text: "Looking at the test".into(),

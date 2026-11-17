@@ -887,6 +887,9 @@ pub enum EventKind {
     Turn {
         /// The prompt text.
         prompt: String,
+        /// The bridge's to the server: the agent's own pids as the turn began; never in the event stream.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agent: Vec<i32>,
     },
     /// ACP: a chunk of the agent's reply.
     Text {
@@ -1345,6 +1348,12 @@ pub struct Resources {
     pub rss_mb: u64,
     /// CPU use since the previous sample, in percent of one core.
     pub cpu_pct: u64,
+    /// ACP: the agent's own processes' memory, in MiB: the bridge, and the adapter and agent as the turn began.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mb: Option<u64>,
+    /// ACP: the memory of everything else in the tree, what the agent started, in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_mb: Option<u64>,
 }
 
 /// Whether a terminal's program runs.

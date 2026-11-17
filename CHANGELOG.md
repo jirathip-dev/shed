@@ -151,6 +151,11 @@ All notable changes to this project are documented here. The format follows
   installed adapter (now under `installed`); `agents.match {id, text}` applies an agent's limit and auth
   rules to a caller's text. See docs/acp.md.
 - cooee and drover: read program facts from `shed agents --json` in place of their own copies.
+- `shed top` and `shed ls` show an ACP terminal's agent state (`working`, `done`, `hibernated`, …) as STATE.
+  `top` splits an ACP terminal's memory into AGENT (the bridge, adapter and agent as the turn began) and WORK
+  (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
+  [--full]` lists that terminal's processes over 50 MB: pid, memory, CPU, age and the command's name (the
+  whole command line with `--full`).
 
 ### Changed
 

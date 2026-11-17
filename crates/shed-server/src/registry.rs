@@ -77,6 +77,7 @@ struct Entry {
     killing: bool,
     resources: Option<Resources>,
     emitted: Option<Resources>,
+    agent: Option<BTreeSet<i32>>,
     sampled: (Instant, Duration),
     notes: Vec<String>,
 }
@@ -91,6 +92,7 @@ impl Entry {
             killing: false,
             resources: None,
             emitted: None,
+            agent: None,
             sampled: (shed_core::clock::now(), Duration::ZERO),
             notes: Vec::new(),
         }
@@ -606,6 +608,12 @@ impl Registry {
                 continue;
             }
             let usage = proctree::usage(&tree);
+            let own = |p: &&ProcessInfo| {
+                Some(p.pid) == entry.info.pid
+                    || entry.agent.as_ref().is_none_or(|a| a.contains(&p.pid))
+            };
+            let agent: u64 = tree.iter().filter(own).map(|p| p.rss_bytes).sum();
+            let acp = entry.info.acp.is_some();
             let (then, cpu) = entry.sampled;
             let wall = now.saturating_duration_since(then).as_micros().max(1);
             let busy = usage.cpu.saturating_sub(cpu).as_micros();
@@ -614,6 +622,8 @@ impl Registry {
             let now = Resources {
                 rss_mb: usage.rss_bytes / (1 << 20),
                 cpu_pct,
+                agent_mb: acp.then_some(agent / (1 << 20)),
+                work_mb: acp.then_some(usage.rss_bytes.saturating_sub(agent) / (1 << 20)),
             };
             entry.resources = Some(now);
             if entry
@@ -974,7 +984,7 @@ impl Registry {
         self.get(&p.name)
     }
 
-    pub(crate) fn emit(&mut self, p: EmitParams) -> Result<(), RpcError> {
+    pub(crate) fn emit(&mut self, mut p: EmitParams) -> Result<(), RpcError> {
         if !p.kind.is_acp() {
             return Err(RpcError::new(
                 ErrorCode::InvalidParams,
@@ -982,8 +992,17 @@ impl Registry {
             ));
         }
         self.live(&p.name)?;
-        let entry = self.entries.get_mut(&p.name);
-        let info = &mut entry.ok_or_else(|| not_found(&p.name))?.info;
+        let entry = self
+            .entries
+            .get_mut(&p.name)
+            .ok_or_else(|| not_found(&p.name))?;
+        if let EventKind::Turn { agent, .. } = &mut p.kind {
+            let agent = std::mem::take(agent);
+            if !p.replay {
+                entry.agent = Some(agent.into_iter().collect());
+            }
+        }
+        let info = &mut entry.info;
         let session = match &p.kind {
             EventKind::Session(s) => info
                 .session
