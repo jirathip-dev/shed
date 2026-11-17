@@ -95,7 +95,7 @@ pub(crate) mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{find, load};
-    use crate::proto::Provider;
+    use crate::proto::{Provider, Tokens};
 
     pub(crate) fn fake_dir() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/providers")
@@ -157,6 +157,34 @@ pub(crate) mod tests {
         assert_eq!(hit("codex-acp", bare), Some(None));
         assert_eq!(hit("claude-acp", "all tests pass"), None);
         assert_eq!(hit("unknown-acp", claude), None);
+    }
+
+    #[test]
+    fn claude_turn_tokens_are_read_from_the_quota_meta_and_a_malformed_one_is_none() {
+        let claude = fake("claude-acp");
+        let meta = |counts: serde_json::Value| {
+            let meta = serde_json::json!({"quota": {"token_count": counts}});
+            meta.as_object().cloned().unwrap_or_default()
+        };
+        let counts = serde_json::json!({"inputTokens": 3, "cachedInputTokens": 90,
+            "cachedWriteTokens": 7, "outputTokens": 5});
+        let tokens = claude.tokens(&meta(counts.clone()));
+        assert_eq!(
+            tokens,
+            Some(Tokens {
+                input: 3,
+                cache_read: 90,
+                cache_write: 7,
+                output: 5
+            })
+        );
+        assert_eq!(tokens.and_then(|t| t.cache_share()), Some(90));
+        let mut bad = counts.clone();
+        bad["outputTokens"] = "5".into();
+        assert_eq!(claude.tokens(&meta(bad)), None);
+        assert_eq!(claude.tokens(&meta(serde_json::json!([1]))), None);
+        assert_eq!(claude.tokens(&serde_json::Map::new()), None);
+        assert_eq!(fake("codex-acp").tokens(&meta(counts)), None);
     }
 
     #[test]

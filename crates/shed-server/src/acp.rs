@@ -46,7 +46,7 @@ use serde_json::Value;
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_proto::{
     AcpSession, ApprovalOption, EmitParams, EventKind, Method, Provider, Reported, StateParams,
-    TerminalInfo,
+    TerminalInfo, Tokens,
 };
 use tokio::io::{
     AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader,
@@ -462,6 +462,7 @@ struct Session {
     last: (String, Option<String>),
     model: Option<String>,
     shown: AcpSession,
+    tokens: Option<(Tokens, Tokens)>,
     mcp: Vec<McpServer>,
     meta: Option<Meta>,
     pid: Option<i32>,
@@ -647,6 +648,11 @@ impl Session {
                         (std::mem::take(&mut self.reply), wire(&r.stop_reason));
                     let limited = self.rules.limit_hit(&text).map(|(_, at)| at);
                     let stop = stop_reason.clone();
+                    if let Some(turn) = r.meta.as_ref().and_then(|m| self.rules.tokens(m)) {
+                        let total = self.tokens.map_or(turn, |(_, t)| t.plus(turn));
+                        self.tokens = Some((turn, total));
+                        self.show_usage();
+                    }
                     self.emit(EventKind::Reply { text, stop_reason });
                     if let Some(resets) = limited {
                         self.state("rate-limited", resets);
@@ -726,9 +732,7 @@ impl Session {
                 self.shown.usage = serde_json::to_value(u)
                     .and_then(serde_json::from_value)
                     .ok();
-                if let Some(usage) = self.shown.usage.clone() {
-                    self.emit(EventKind::Usage(usage));
-                }
+                self.show_usage();
             }
             SessionUpdate::AvailableCommandsUpdate(u) => {
                 let commands: Vec<_> = (u.available_commands.into_iter())
@@ -747,6 +751,14 @@ impl Session {
             _ => {}
         }
         Ok(())
+    }
+
+    fn show_usage(&mut self) {
+        if let Some(usage) = &mut self.shown.usage {
+            (usage.turn, usage.total) = (self.tokens.map(|t| t.0), self.tokens.map(|t| t.1));
+            let usage = usage.clone();
+            self.emit(EventKind::Usage(usage));
+        }
     }
 
     fn end_replayed_turn(&mut self) {
@@ -1316,6 +1328,7 @@ fn run(
             last: ("idle".to_owned(), None),
             model: None,
             shown: AcpSession::default(),
+            tokens: None,
             mcp: mcp.clone(),
             meta: meta.clone(),
             pid,
@@ -1339,7 +1352,7 @@ fn run(
             let (mut child, stdin, stdout, stderr) = start(cmd, cwd)?;
             let pid = child.id().and_then(|p| i32::try_from(p).ok());
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
-            let slept = connect(
+            let slept = Box::pin(connect(
                 stdin,
                 stdout,
                 stderr,
@@ -1347,7 +1360,7 @@ fn run(
                     let s = session(cx, back, stirred, pid, prev);
                     drive(s, from_agent, rx, cwd, loaded, first).await
                 },
-            )
+            ))
             .await?;
             let Some(mut s) = slept else {
                 return Ok(child.wait().await?.code().unwrap_or(1));
@@ -1501,6 +1514,7 @@ mod tests {
             last: ("idle".to_owned(), None),
             model: None,
             shown: AcpSession::default(),
+            tokens: None,
             mcp: Vec::new(),
             meta: None,
             pid: None,

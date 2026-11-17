@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, EmitParams, Event, EventKind,
-    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Rule, State,
+    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Quota, Rule, State,
+    Tokens,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -30,6 +31,18 @@ fn usage() -> AcpUsage {
         used: 53_000,
         size: 200_000,
         cost: Some(json!({"amount": 0.045, "currency": "USD"})),
+        turn: Some(Tokens {
+            input: 100,
+            cache_read: 900,
+            cache_write: 1000,
+            output: 50,
+        }),
+        total: Some(Tokens {
+            input: 200,
+            cache_read: 1800,
+            cache_write: 2000,
+            output: 100,
+        }),
     }
 }
 
@@ -183,6 +196,13 @@ fn agent_info() -> AgentInfo {
             any: strings(&["Trust this folder?"]),
             version: "0.1.0".into(),
         }],
+        quota: Some(Quota {
+            path: strings(&["quota", "token_count"]),
+            input: "inputTokens".into(),
+            cache_read: "cachedInputTokens".into(),
+            cache_write: "cachedWriteTokens".into(),
+            output: "outputTokens".into(),
+        }),
     };
     AgentInfo {
         id: "fake-acp".into(),

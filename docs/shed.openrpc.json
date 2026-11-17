@@ -2065,6 +2065,28 @@
           },
           "cost": {
             "description": "The session's total cost so far (`amount`, `currency`), when the agent reports it."
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tokens"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last turn's tokens, when the agent's prompt responses carry them."
+          },
+          "total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tokens"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The session's tokens over its turns so far, when the agent's prompt responses carry them."
           }
         },
         "required": [
@@ -2072,6 +2094,42 @@
           "size"
         ],
         "description": "An ACP session's context window use and cost, as the agent last reported it."
+      },
+      "Tokens": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens neither read from nor written to the prompt cache."
+          },
+          "cache_read": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens read from the prompt cache."
+          },
+          "cache_write": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens written to the prompt cache."
+          },
+          "output": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Output tokens."
+          }
+        },
+        "required": [
+          "input",
+          "cache_read",
+          "cache_write",
+          "output"
+        ],
+        "description": "Tokens a turn or a session spent, as the agent's prompt responses report them."
       },
       "ReadResult": {
         "type": "object",
@@ -3331,6 +3389,18 @@
             },
             "description": "The screens that set its state, for a terminal labelled `agent=<agent>`.",
             "default": []
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quota"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where its prompt responses' `_meta` carries the turn's tokens.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
@@ -3414,6 +3484,43 @@
           "version"
         ],
         "description": "A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is\n`state`. Above priority 0 it outranks the agent's own report; at or below, it applies only without one."
+      },
+      "Quota": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys from `_meta` down to the object of counters."
+          },
+          "input": {
+            "type": "string",
+            "description": "The input tokens' key."
+          },
+          "cache_read": {
+            "type": "string",
+            "description": "The cache reads' key."
+          },
+          "cache_write": {
+            "type": "string",
+            "description": "The cache writes' key."
+          },
+          "output": {
+            "type": "string",
+            "description": "The output tokens' key."
+          }
+        },
+        "required": [
+          "path",
+          "input",
+          "cache_read",
+          "cache_write",
+          "output"
+        ],
+        "description": "The keys of a turn's tokens in a prompt response's `_meta`."
       },
       "Agent": {
         "type": "object",

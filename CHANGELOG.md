@@ -140,6 +140,9 @@ All notable changes to this project are documented here. The format follows
 - `shed-core` terminals (M1a): programs on real PTYs, a VT screen model with bounded scrollback,
   named keys, and process-tree kill (SIGTERM, a grace period, SIGKILL) with per-tree RSS/CPU.
 - The workspace skeleton (M0): `shed hello`, `--help`, `--version`, and every CI gate.
+- ACP usage carries the turn's and the session's input, cache-read, cache-write and output tokens (`usage.turn`
+  and `usage.total` in `get` and the `usage` event) when the agent's prompt responses report them, as
+  `claude-acp`'s `_meta.quota` does; `shed top` shows the last turn's cache-read share as `CACHE`.
 - Agent facts are data: each agent's limit and login-expired lines, hook table, login, status and logout
   commands, config-folder and settings variables and effort flags are one TOML provider record, built in
   from `crates/shed-server/src/providers/<name>.toml` and overridden key by key, or added, by `<name>.toml`
