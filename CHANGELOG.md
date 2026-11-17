@@ -168,6 +168,10 @@ All notable changes to this project are documented here. The format follows
 - `shed ls --json` and `get` show each ACP session's start-to-ready time (`session.ready_ms`) and its first
   prompt's time to the first reply chunk (`session.first_token_ms`); `shed agents --json` gives each agent's
   `medians` of both over its last `$SHED_MEDIAN_OF` (default 20) sessions.
+- ACP permission requests by id: `approval_request` carries its `id` (the agent's JSON-RPC request id) and ACP's
+  `toolCall` as `call` (without `content`); `shed approve <t> <option> --request <id>` (the bridge's
+  `{"approve": …, "request": …}` line) answers that request, and without it the oldest as before. `tool_call`
+  carries ACP's `locations` (paths) and `raw_input` (left out over 4 KiB). All additive.
 
 ### Changed
 

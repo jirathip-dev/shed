@@ -71,12 +71,20 @@ pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited
 pub enum Input {
     /// Start a turn (`session/prompt`).
     Prompt(String),
-    /// Answer the oldest permission request with this option id or kind.
-    Approve(String),
     /// Cancel the turn (`session/cancel`).
     Cancel,
     /// Switch to this model (`session/set_config_option`, the `model` option).
     Model(String),
+    /// Answer permission request `request` (else the oldest) with this option id or kind.
+    #[serde(untagged)]
+    Approve {
+        /// The option id or kind.
+        #[serde(rename = "approve")]
+        option: String,
+        /// The `approval_request`'s id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+    },
 }
 
 /// The bytes that deliver `input` to a bridge through its terminal: `RS`, the JSON, a newline.
@@ -258,7 +266,7 @@ impl Preview {
                         put("", mark, "    ", e["content"].as_str().unwrap_or(""));
                     }
                 }
-                Ok(EventKind::ApprovalRequest { tool, options }) => {
+                Ok(EventKind::ApprovalRequest { tool, options, .. }) => {
                     let options = options.iter().map(|o| format!("{} ({})", o.id, o.name));
                     let options = options.collect::<Vec<_>>().join(" | ");
                     let tool = tool.lines().next().unwrap_or("");
@@ -450,7 +458,7 @@ struct Session {
     policy: Policy,
     prompts: BTreeSet<u64>,
     next: u64,
-    asks: VecDeque<(Asked, Vec<ApprovalOption>)>,
+    asks: VecDeque<(String, Asked, Vec<ApprovalOption>)>,
     titles: BTreeMap<String, (String, Option<String>)>,
     reply: String,
     rules: Provider,
@@ -589,9 +597,17 @@ impl Session {
                     })?;
                 self.prompts.insert(n);
             }
-            Input::Approve(choice) => {
-                let Some((asked, options)) = self.asks.pop_front() else {
-                    return self.say("shed: no permission request is waiting".to_owned());
+            Input::Approve {
+                option: choice,
+                request,
+            } => {
+                let at = match &request {
+                    Some(r) => self.asks.iter().position(|a| a.0 == *r),
+                    None => (!self.asks.is_empty()).then_some(0),
+                };
+                let Some((id, asked, options)) = at.and_then(|at| self.asks.remove(at)) else {
+                    let which = request.map_or_else(String::new, |r| format!(" {r:?}"));
+                    return self.say(format!("shed: no permission request{which} is waiting"));
                 };
                 let Some(option) = options
                     .iter()
@@ -601,7 +617,7 @@ impl Session {
                 else {
                     let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
                     let ids = ids.join(", ");
-                    self.asks.push_front((asked, options));
+                    self.asks.insert(at.unwrap_or(0), (id, asked, options));
                     return self.say(format!("shed: no option {choice:?}; one of {ids}"));
                 };
                 Self::answer(asked, Some(option.clone()))?;
@@ -613,7 +629,7 @@ impl Session {
                     let cancel = CancelNotification::new(self.id.clone());
                     self.cx.send_notification(cancel)?;
                 }
-                while let Some((asked, _)) = self.asks.pop_front() {
+                while let Some((_, asked, _)) = self.asks.pop_front() {
                     Self::answer(asked, None)?;
                 }
             }
@@ -710,11 +726,18 @@ impl Session {
                         self.open.push(id.clone());
                     }
                 }
+                let locations = call.fields.locations.unwrap_or_default();
+                let raw_input = call
+                    .fields
+                    .raw_input
+                    .filter(|v| v.to_string().len() <= 4096);
                 self.emit(EventKind::ToolCall {
                     id,
                     title,
                     status,
                     kind,
+                    locations: locations.into_iter().map(|l| l.path).collect(),
+                    raw_input,
                 });
                 if given {
                     self.settle();
@@ -794,6 +817,11 @@ impl Session {
     }
 
     fn permission(&mut self, p: RequestPermissionRequest, asked: Asked) -> AcpResult<()> {
+        let id = asked.raw_id().to_string();
+        let mut sent = serde_json::to_value(&p.tool_call).ok();
+        if let Some(Value::Object(fields)) = &mut sent {
+            fields.remove("content");
+        }
         let call = p.tool_call;
         let tool = (call.fields.title)
             .or_else(|| (self.titles.get(&call.tool_call_id.to_string())).map(|t| t.0.clone()))
@@ -806,12 +834,14 @@ impl Session {
             })
             .collect();
         self.emit(EventKind::ApprovalRequest {
+            id: id.clone(),
             tool: tool.clone(),
             options: options.clone(),
+            call: sent,
         });
         let kinds = match self.policy {
             Policy::Ask => {
-                self.asks.push_back((asked, options));
+                self.asks.push_back((id, asked, options));
                 self.state("waiting-approval", Some(tool));
                 return Ok(());
             }
@@ -1404,6 +1434,8 @@ mod tests {
             title: "line one\nline two".into(),
             status: status.into(),
             kind: kind.map(Into::into),
+            locations: Vec::new(),
+            raw_input: None,
         };
         let mut preview = Preview::default();
         assert!(preview.push(call("a", "pending", Some("execute"))));
@@ -1859,5 +1891,14 @@ mod tests {
         let framed = frame(&Input::Prompt("a\nb".to_owned()));
         assert_eq!(framed, "\x1e{\"prompt\":\"a\\nb\"}\n");
         assert_eq!(frame(&Input::Cancel), "\x1e\"cancel\"\n");
+        let approve = |request: Option<&str>| Input::Approve {
+            option: "allow".to_owned(),
+            request: request.map(str::to_owned),
+        };
+        let line = "{\"approve\":\"allow\",\"request\":\"7\"}";
+        assert_eq!(frame(&approve(Some("7"))), format!("\x1e{line}\n"));
+        let read = |l: &str| serde_json::from_str::<Input>(l).unwrap();
+        assert_eq!(read(line), approve(Some("7")));
+        assert_eq!(read("{\"approve\":\"allow\"}"), approve(None));
     }
 }

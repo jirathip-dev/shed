@@ -1027,6 +1027,16 @@
                   "null"
                 ],
                 "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The paths ACP's `locations` name in this update."
+              },
+              "raw_input": {
+                "description": "ACP's `rawInput` in this update, left out over 4 KiB."
               }
             },
             "required": [
@@ -1081,6 +1091,11 @@
                 "type": "string",
                 "const": "approval_request"
               },
+              "id": {
+                "type": "string",
+                "description": "The request's id, which `shed approve --request` names.",
+                "default": ""
+              },
               "tool": {
                 "type": "string",
                 "description": "The tool call's title."
@@ -1091,6 +1106,9 @@
                   "$ref": "#/components/schemas/ApprovalOption"
                 },
                 "description": "The choices."
+              },
+              "call": {
+                "description": "ACP's `toolCall` as the agent sent it, without `content`."
               }
             },
             "required": [
@@ -2378,6 +2396,16 @@
                   "null"
                 ],
                 "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The paths ACP's `locations` name in this update."
+              },
+              "raw_input": {
+                "description": "ACP's `rawInput` in this update, left out over 4 KiB."
               }
             },
             "required": [
@@ -2432,6 +2460,11 @@
                 "type": "string",
                 "const": "approval_request"
               },
+              "id": {
+                "type": "string",
+                "description": "The request's id, which `shed approve --request` names.",
+                "default": ""
+              },
               "tool": {
                 "type": "string",
                 "description": "The tool call's title."
@@ -2442,6 +2475,9 @@
                   "$ref": "#/components/schemas/ApprovalOption"
                 },
                 "description": "The choices."
+              },
+              "call": {
+                "description": "ACP's `toolCall` as the agent sent it, without `content`."
               }
             },
             "required": [
@@ -2785,6 +2821,16 @@
                   "null"
                 ],
                 "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The paths ACP's `locations` name in this update."
+              },
+              "raw_input": {
+                "description": "ACP's `rawInput` in this update, left out over 4 KiB."
               }
             },
             "required": [
@@ -2839,6 +2885,11 @@
                 "type": "string",
                 "const": "approval_request"
               },
+              "id": {
+                "type": "string",
+                "description": "The request's id, which `shed approve --request` names.",
+                "default": ""
+              },
               "tool": {
                 "type": "string",
                 "description": "The tool call's title."
@@ -2849,6 +2900,9 @@
                   "$ref": "#/components/schemas/ApprovalOption"
                 },
                 "description": "The choices."
+              },
+              "call": {
+                "description": "ACP's `toolCall` as the agent sent it, without `content`."
               }
             },
             "required": [

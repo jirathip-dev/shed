@@ -115,10 +115,7 @@ enum Command {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
     },
-    Approve {
-        name: String,
-        option: String,
-    },
+    Approve(ApproveArgs),
     Cancel {
         name: String,
     },
@@ -187,7 +184,7 @@ impl Command {
             | Self::Keys { name, .. }
             | Self::Kill { name }
             | Self::Rm { name }
-            | Self::Approve { name, .. }
+            | Self::Approve(ApproveArgs { name, .. })
             | Self::Cancel { name }
             | Self::Model { name, .. }
             | Self::Wait(WaitArgs {
@@ -382,6 +379,14 @@ struct RunArgs {
 }
 
 #[derive(Args)]
+struct ApproveArgs {
+    name: String,
+    option: String,
+    #[arg(long)]
+    request: Option<String>,
+}
+
+#[derive(Args)]
 struct SendArgs {
     name: String,
     text: String,
@@ -522,7 +527,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             read(&server, json, &params)?;
         }
         Command::Send(args) => send(&server, json, args)?,
-        Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
+        Command::Approve(args) => approve(&server, json, args)?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
             let mut client = server.connect(None)?;
@@ -702,6 +707,15 @@ fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let rules = shed_server::providers::find(&a.providers, &a.agent);
     let code = acp::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
+}
+
+fn approve(server: &Server, json: bool, args: ApproveArgs) -> anyhow::Result<()> {
+    let ApproveArgs {
+        name,
+        option,
+        request,
+    } = args;
+    to_acp(server, json, name, &Input::Approve { option, request })
 }
 
 fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::Result<()> {

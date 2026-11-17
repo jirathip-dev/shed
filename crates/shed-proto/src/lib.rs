@@ -910,6 +910,12 @@ pub enum EventKind {
         /// ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
+        /// The paths ACP's `locations` name in this update.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<PathBuf>,
+        /// ACP's `rawInput` in this update, left out over 4 KiB.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_input: Option<Value>,
     },
     /// ACP: the agent's plan, as it sent it.
     Plan {
@@ -923,10 +929,16 @@ pub enum EventKind {
     },
     /// ACP: the agent asks to run a tool; `shed approve` answers with one option.
     ApprovalRequest {
+        /// The request's id, which `shed approve --request` names.
+        #[serde(default)]
+        id: String,
         /// The tool call's title.
         tool: String,
         /// The choices.
         options: Vec<ApprovalOption>,
+        /// ACP's `toolCall` as the agent sent it, without `content`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<Value>,
     },
     /// ACP: a permission request was answered (by `shed approve` or the `--policy`).
     Approved {
