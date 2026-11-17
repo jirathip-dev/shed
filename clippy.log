@@ -1,0 +1,4 @@
+    Checking shed-core v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-core)
+    Checking shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-server)
+    Checking shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.29s

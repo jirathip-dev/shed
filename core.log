@@ -1,0 +1,70 @@
+   Compiling shed-core v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.83s
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/shed_core-46a29a483e4a626b)
+
+running 26 tests
+test keys::tests::unknown_keys_are_errors ... ok
+test screen::tests::a_wide_character_at_the_last_column_wraps_whole ... ok
+test keys::tests::key_encoding_table ... ok
+test screen::tests::alternate_screen_keeps_the_primary_and_no_history ... ok
+test proctree::tests::parses_proc_stat ... ok
+test proctree::tests::tree_takes_the_group_descendants_and_known_orphans ... ok
+test screen::tests::answers_cursor_position_queries ... ok
+test pattern::tests::rejects_broken_patterns ... ok
+test proctree::tests::parses_ps_lines ... ok
+test pattern::tests::matches_the_supported_subset ... ok
+test screen::tests::cursor_moves_and_erases ... ok
+test screen::tests::jan_osc_9999_maps_waiting_to_blocked_and_ignores_garbage ... ok
+test screen::tests::osc_7501_probe_gets_the_spec_reply_in_the_same_terminator ... ok
+test screen::tests::osc_7501_reports_state_and_never_reaches_the_screen ... ok
+test screen::tests::osc_7501_drops_garbled_reports ... ok
+test screen::tests::prints_lines_and_drops_trailing_blanks ... ok
+test screen::tests::osc_7501_reads_every_state_and_key ... ok
+test screen::tests::resize_moves_rows_into_scrollback ... ok
+test screen::tests::rows_past_their_written_cells_read_as_blanks ... ok
+test screen::tests::scrollback_bytes_are_bounded_by_whole_lines ... ok
+test screen::tests::scrollback_is_bounded ... ok
+test screen::tests::sgr_sets_the_pen_and_snapshot_groups_cells_into_runs ... ok
+test screen::tests::wide_and_combining_characters_keep_the_box_edge_in_its_column ... ok
+test screen::tests::wraps_at_the_last_column ... ok
+test history::tests::the_log_stays_under_twice_the_cap_and_restores_the_tail ... ok
+test history::tests::tail_reads_only_the_tail_and_skips_a_cut_character ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/drain_raw.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/drain_raw-726ad6d927e27768)
+
+running 1 test
+test drain_raw ... ignored, a timing report: scripts/bench-drain.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/history.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/history-36d514f4e1af0177)
+
+running 2 tests
+test a_terminal_starts_from_its_log ... ok
+test throughput_report_with_full_scrollback ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.35s
+
+     Running tests/terminal.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/terminal-a04f20ad05796c2d)
+
+running 9 tests
+test reads_printf_output_exactly ... ok
+test a_subscriber_that_never_reads_is_dropped_while_the_program_runs ... ok
+test kill_ends_the_group_when_the_process_table_cannot_be_read ... ok
+test scrollback_is_bounded ... ok
+test passes_cwd_env_and_input ... ok
+test subscribers_get_raw_output_until_the_pty_closes ... ok
+test kill_ends_the_whole_tree ... ok
+test resize_reaches_the_program_and_the_screen ... ok
+test kill_escalates_to_sigkill_after_the_grace_period ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.49s
+
+   Doc-tests shed_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

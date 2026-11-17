@@ -1,0 +1,18 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.17s
+     Running tests/machines.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/machines-85d3948dc0b71c32)
+
+running 10 tests
+down added
+test connect_carries_the_protocol_over_a_socketpair ... ok
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test events_on_a_machine_pass_reset_and_lagged_notices_through ... ok
+test an_acp_agent_not_installed_on_the_machine_is_refused_with_the_machines_agents ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused ... ok
+test an_acp_session_is_started_waited_on_replied_approved_and_cancelled_on_a_machine_over_the_held_link ... ok
+test a_dropped_link_reconnects_and_the_merged_stream_loses_no_events ... ok
+test exec_and_file_return_exact_bytes_and_codes_here_and_over_the_held_link ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 11.10s
+

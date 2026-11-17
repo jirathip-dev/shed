@@ -1,0 +1,36 @@
+   Compiling shed-proto v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-proto)
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-server)
+   Compiling shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.29s
+     Running tests/cli.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/cli-160243d45e0a7881)
+
+running 26 tests
+test a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail ... ok
+test help_lists_every_command ... ok
+test a_client_of_a_newer_protocol_exits_at_once_with_the_mismatch_line ... ok
+test hello_reports_a_server_of_another_build ... ok
+test hello_prints_the_version ... ok
+test a_terminal_has_shed_set ... ok
+test a_child_started_inside_a_terminal_has_that_parent ... ok
+test attach_ends_when_the_program_exits ... ok
+test a_query_the_screen_answers_reaches_the_program_once_with_a_client_attached ... ok
+test a_server_that_exits_before_it_is_ready_is_reported_as_an_exit ... ok
+test schema_prints_the_committed_openrpc_document ... ok
+test version_flag_prints_the_version_and_the_git_sha ... ok
+test serve_prints_one_ready_line_once_its_socket_accepts ... ok
+test notify_puts_one_note_in_an_idle_parent_and_none_while_it_works ... ok
+test run_autostart_starts_a_detached_server ... ok
+test run_size_sets_the_program_size_and_the_default_is_wide ... ok
+test killing_the_parent_ends_a_child_and_spares_one_started_to_outlive_it ... ok
+test run_read_send_exit_ls_and_labels_match_the_golden ... ok
+test a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each ... ok
+test program_status_osc_7501_keys_ids_probe_clear_and_lifetime ... ok
+test wait_children_any_returns_on_the_next_child_with_news ... ok
+test wait_children_all_returns_only_after_both_children_report_done ... ok
+test attach_types_resizes_and_detaches_in_a_pty ... ok
+test a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list ... ok
+test wait_matches_output_by_pattern_and_falls_back_to_idle ... ok
+test timing_report ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.88s
+

@@ -1,0 +1,34 @@
+   Compiling syn v3.0.9
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling indexmap v2.14.2
+   Compiling zmij v1.0.23
+   Compiling foldhash v0.2.0
+   Compiling itoa v1.0.18
+   Compiling memchr v2.8.3
+   Compiling serde_derive_internals v0.30.0
+   Compiling dyn-clone v1.0.20
+   Compiling shed-proto v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-proto)
+   Compiling ref-cast-impl v1.0.27
+   Compiling serde_derive v1.0.229
+   Compiling schemars_derive v1.2.3
+   Compiling ref-cast v1.0.27
+   Compiling serde_json v1.0.154
+   Compiling schemars v1.2.3
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.61s
+     Running tests/protocol_doc/main.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/protocol_doc-e101acd960f1c669)
+
+running 8 tests
+test method_names_round_trip ... ok
+test version_refusal_reads_as_specified ... ok
+test acp::emit_params_round_trip ... ok
+test the_schemas_refuse_broken_messages ... ok
+test every_method_is_in_the_openrpc_document ... ok
+test render::protocol_md_matches_the_types ... ok
+test every_golden_message_validates_against_its_schema ... ok
+test render::openrpc_json_matches_the_types ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

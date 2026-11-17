@@ -1,0 +1,83 @@
+   Compiling serde_with v3.24.0
+   Compiling shed-core v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-core)
+   Compiling agent-client-protocol-schema v1.15.1
+   Compiling agent-client-protocol v5.0.0
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-131/crates/shed-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 28.06s
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-131/debug/deps/shed_server-ed2a0421cc8d49c2)
+
+running 41 tests
+test events::bench::fanout ... ignored, a timing bench: scripts/bench-fanout.sh
+test acp::tests::frames_are_one_line_of_json ... ok
+test acp::tests::the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line ... ok
+test acp::tests::render_keeps_prompts_one_line_per_tool_call_and_replies ... ok
+test acp::tests::a_text_chunk_skips_the_sdk_parse_and_matches_it ... ok
+test events::tests::an_idle_stream_beats_every_fifteen_seconds_only_when_asked ... ok
+test acp::tests::a_silent_turn_ends_as_no_response_after_the_timeout ... ok
+test events::tests::every_subscriber_shares_the_one_serialised_line ... ok
+test events::tests::since_beyond_seq_still_gets_new_events ... ok
+test events::tests::events_emitted_while_a_write_is_pending_are_sent_without_another_event ... ok
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+test events::tests::a_subscriber_more_than_the_ring_behind_has_missed_events ... ok
+test events::tests::text_rings_go_once_the_main_ring_has_moved_past_them ... ok
+test events::tests::a_reconnect_after_text_floods_from_other_lanes_gets_every_state_event_in_order ... ok
+still thinking
+test machines::tests::add_ls_rm_round_trip_through_the_file ... ok
+still thinking
+still thinking
+test machines::tests::bad_names_targets_and_files_are_refused ... ok
+still thinking
+still thinking
+test hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte ... ok
+test machines::tests::reconnects_follow_the_backoff_schedule ... ok
+test machines::tests::the_berth_release_config_loads ... ok
+test providers::tests::a_provider_is_one_file_and_one_registry_line ... ok
+test providers::tests::the_limit_messages_give_their_reset_time ... ok
+test registry::tests::a_corrupt_state_file_is_refused_and_kept ... ok
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+test acp::tests::thought_chunks_or_stderr_lines_keep_a_turn_alive_past_the_timeout ... ok
+test acp::tests::the_default_watchdog_lets_a_turn_think_silently_past_two_minutes ... ok
+test machines::tests::parallel_writes_never_share_a_temp_file ... ok
+test events::tests::the_log_keeps_the_last_ring_for_since ... ok
+test events::tests::a_stale_since_starts_with_a_reset_and_a_reader_overrun_ends_with_lagged ... ok
+test input::tests::a_send_waits_for_a_persons_unsent_line_and_times_out_when_they_stay_silent ... ok
+test stats::tests::one_sample_a_minute_on_a_fake_clock_and_24_hours_kept ... ok
+test stats::tests::parses_macos_sysctl ... ok
+test registry::tests::leftovers_go_on_load_and_a_removed_terminal_leaves_nothing ... ok
+test registry::tests::an_exited_terminal_past_the_limit_is_pruned_and_a_running_one_kept ... ok
+test tests::a_silent_peer_is_dropped_after_two_missed_heartbeats ... ok
+test registry::tests::state_files_of_every_past_release_load ... ok
+test tests::a_beating_peer_is_kept_and_one_that_never_beat_is_never_timed_out ... ok
+test registry::tests::seventy_acp_terminals_save_under_300_kb_without_commands_or_models ... ok
+test registry::tests::a_thousand_changes_in_a_second_write_at_most_three_times_and_end_on_disk ... ok
+test acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps ... ok
+test events::tests::a_subscriber_that_never_reads_is_dropped_and_the_log_stays_bounded ... ok
+test acp::tests::a_permission_request_waits_for_approval_and_never_times_out ... ok
+test acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern ... ok
+test acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits ... ok
+
+test result: ok. 40 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.95s
+
