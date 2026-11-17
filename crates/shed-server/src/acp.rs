@@ -165,7 +165,7 @@ pub fn render(transcript: &str) -> String {
         .filter_map(|l| serde_json::from_str::<EventKind>(l).ok())
     {
         match kind {
-            EventKind::Turn { prompt } => lines.push(format!("> {prompt}")),
+            EventKind::Turn { prompt, .. } => lines.push(format!("> {prompt}")),
             EventKind::ToolCall {
                 id, title, status, ..
             } => {
@@ -239,7 +239,7 @@ impl Preview {
             };
             match block {
                 Err(line) => put("", "", "", line),
-                Ok(EventKind::Turn { prompt }) => put("1", "› ", "  ", prompt),
+                Ok(EventKind::Turn { prompt, .. }) => put("1", "› ", "  ", prompt),
                 Ok(EventKind::Reply { text, .. }) => markdown(text, &mut put),
                 Ok(EventKind::ToolCall {
                     title,
@@ -575,6 +575,7 @@ impl Session {
                 self.own.clone_from(&self.seen);
                 self.emit(EventKind::Turn {
                     prompt: text.clone(),
+                    agent: self.own.iter().copied().collect(),
                 });
                 self.state("working", None);
                 let blocks = vec![ContentBlock::Text(TextContent::new(text))];
@@ -687,7 +688,8 @@ impl Session {
             SessionUpdate::UserMessageChunk(c) if self.replay => {
                 if let Some(prompt) = text(c.content) {
                     self.end_replayed_turn();
-                    self.emit(EventKind::Turn { prompt });
+                    let agent = Vec::new();
+                    self.emit(EventKind::Turn { prompt, agent });
                 }
             }
             SessionUpdate::ToolCall(call) => {
@@ -974,9 +976,13 @@ impl Writer {
                 let call = match out {
                     Out::Emit(kind, replay, keep) => {
                         if keep {
-                            let line = serde_json::to_string(&kind).unwrap_or_default();
+                            let mut kept = kind.clone();
+                            if let EventKind::Turn { agent, .. } = &mut kept {
+                                agent.clear();
+                            }
+                            let line = serde_json::to_string(&kept).unwrap_or_default();
                             writeln!(self.transcript, "{line}").ok();
-                            redraw |= self.preview.push(kind.clone());
+                            redraw |= self.preview.push(kept);
                         }
                         let params = EmitParams { name, kind, replay };
                         crate::notification(Method::Emit, &params)

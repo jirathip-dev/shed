@@ -39,6 +39,8 @@ fn lead() -> Parent {
 pub(crate) const RESOURCES: Resources = Resources {
     rss_mb: 52,
     cpu_pct: 3,
+    agent_mb: None,
+    work_mb: None,
 };
 
 pub(crate) fn done() -> Reported {

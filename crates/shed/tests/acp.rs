@@ -590,7 +590,7 @@ fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
         let row = top.lines().find(|l| l.starts_with("g "));
         (top.lines().next().and_then(cells), row.and_then(cells))
     };
-    let tokens = || column(6);
+    let tokens = || column(7);
     assert_eq!(tokens(), (Some("TOKENS".into()), Some("-".into())));
     ok(&dir, &["send", "g", "usage"]);
     ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
@@ -612,7 +612,7 @@ fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
         info["session"]["model"] == "smart" && info["session"]["usage"] == usage
     });
     assert_eq!(tokens(), (Some("TOKENS".into()), Some("53k/200k".into())));
-    assert_eq!(column(7), (Some("CACHE".into()), Some("-".into())));
+    assert_eq!(column(8), (Some("CACHE".into()), Some("-".into())));
     assert!(!ok(&dir, &["ls"]).contains("TOKENS"));
     assert!(!ok(&dir, &["ls"]).contains("CACHE"));
 
@@ -628,7 +628,88 @@ fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
     assert_eq!(info["session"]["usage"]["turn"], turn);
     assert_eq!(info["session"]["usage"]["total"], total);
-    assert_eq!(column(7), (Some("CACHE".into()), Some("45%".into())));
+    assert_eq!(column(8), (Some("CACHE".into()), Some("45%".into())));
+}
+
+fn row(dir: &Path, args: &[&str], name: &str) -> Vec<String> {
+    let out = ok(dir, args);
+    let head = out.lines().next().unwrap_or_default().split_whitespace();
+    let line = out.lines().find(|l| l.starts_with(&format!("{name} ")));
+    let cells = line.unwrap_or_default().split_whitespace();
+    head.zip(cells).map(|(h, c)| format!("{h}={c}")).collect()
+}
+
+#[test]
+fn top_splits_the_memory_of_a_child_the_agent_started_into_work_and_lists_it_by_name() {
+    let dir = temp_dir("acp-top-split");
+    let _server = Server::sampling(&dir, "0.2");
+    start_fake(&dir, "g", "fake");
+    ok(&dir, &["send", "g", "hi"]);
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    for args in [&["top"][..], &["ls"]] {
+        assert!(
+            row(&dir, args, "g").contains(&"STATE=done".to_owned()),
+            "{args:?}"
+        );
+    }
+    ok(&dir, &["send", "g", "hog"]);
+    let mb = |info: &Value, k: &str| info["resources"][k].as_u64().unwrap_or(0);
+    common::eventually("the child's memory under work", || {
+        let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+        mb(&info, "work_mb") >= 200
+    });
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert!(mb(&info, "agent_mb") < 100, "{info}");
+    let top = row(&dir, &["top"], "g");
+    let cell = |k: &str| {
+        top.iter()
+            .find_map(|c| c.strip_prefix(k))
+            .unwrap_or_default()
+    };
+    let agent: u64 = cell("AGENT=").trim_end_matches('M').parse().expect("AGENT");
+    let work: u64 = cell("WORK=").trim_end_matches('M').parse().expect("WORK");
+    assert!(agent < 100 && work >= 200, "{top:?}");
+    let totals = ok(&dir, &["top"]);
+    let totals = totals.lines().last().unwrap_or_default();
+    assert!(
+        totals.starts_with("1 awake, 0 hibernated; agent "),
+        "{totals}"
+    );
+
+    let short = ok(&dir, &["top", "g"]);
+    assert!(short.starts_with("PID"), "{short}");
+    let name = short
+        .lines()
+        .nth(1)
+        .and_then(|l| l.split_whitespace().last());
+    assert!(
+        name.is_some_and(|n| n.to_lowercase().starts_with("python")),
+        "{short}"
+    );
+    assert!(
+        !short.contains("example.invalid") && !short.contains("-c"),
+        "{short}"
+    );
+    assert!(ok(&dir, &["top", "g", "--full"]).contains("https://user:secret@example.invalid/"));
+    ok(&dir, &["kill", "g"]);
+}
+
+#[test]
+fn top_and_ls_show_a_hibernated_agent_as_hibernated() {
+    let dir = temp_dir("acp-top-hibernated");
+    let _server = sleepy_server(&dir);
+    start_with_history(&dir, "h", &dir.join("history.jsonl"), &[]);
+    first_turn(&dir, "h");
+    until(&dir, "h", "hibernated");
+    for args in [&["top"][..], &["ls"]] {
+        assert!(
+            row(&dir, args, "h").contains(&"STATE=hibernated".to_owned()),
+            "{args:?}"
+        );
+    }
+    let top = ok(&dir, &["top"]);
+    let totals = top.lines().last().unwrap_or_default();
+    assert!(totals.starts_with("0 awake, 1 hibernated; agent "), "{top}");
 }
 
 #[test]
@@ -800,7 +881,7 @@ fn an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_s
     };
     let likely = || {
         let top = ok(&dir, &["top"]);
-        let cell = |l: &str| l.split_whitespace().nth(8).map(str::to_owned);
+        let cell = |l: &str| l.split_whitespace().nth(9).map(str::to_owned);
         let head = top.lines().next().and_then(cell);
         (
             head,

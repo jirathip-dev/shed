@@ -39,6 +39,7 @@ those `mcpCapabilities`.
 must carry no `_meta` and no key shed did not send before.
 """
 import json
+import subprocess
 import sys
 import time
 
@@ -296,6 +297,13 @@ def main():
                         "cost": {"amount": 0.045, "currency": "USD"}})
                 update({"sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "counted"}})
+                stop = "end_turn"
+            elif text == "hog":
+                hold = "import time; b = b'x' * (200 << 20); time.sleep(60)"
+                subprocess.Popen([sys.executable, "-c", hold, "https://user:secret@example.invalid/"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+                update({"sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "started it"}})
                 stop = "end_turn"
             elif text == "unknown":
                 update({"sessionUpdate": "brand_new_kind", "whatever": [1, 2]})
