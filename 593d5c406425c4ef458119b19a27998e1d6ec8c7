@@ -1,0 +1,5 @@
+Decided: merged origin/staging; the import list in acp.rs keeps both Cache and Rule, and docs/protocol.md was rerun with the generator, not hand-merged
+Because: crates/shed-proto/tests/protocol_doc/acp.rs:5
+Rejected: none
+Check: the agents example in docs/protocol.md shows both the cache and the rules fields
+Owner: the branch is up to date with staging again; no behaviour change this round
