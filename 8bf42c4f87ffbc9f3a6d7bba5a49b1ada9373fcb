@@ -1,0 +1,15 @@
+Decided: a [cache] table in the provider record (plan, api seconds, api_vars) gives the login's lifetime; a var set and not empty means API
+Because: "Each agent's record names the environment variables that mean an API key, and its default"
+Decided: the hibernate default is min(600, lifetime), so an API lane sleeps at 300 s and a plan lane keeps 600 s
+Because: "**Plan default:** stays 600 s"
+Because: crates/shed-server/src/acp.rs:837
+Decided: the server stamps turn_ended on each non-replay reply event and keeps it across session events, so no extra event per turn
+Because: crates/shed-server/src/registry.rs:1007
+Rejected: the bridge emitting a session event at each turn end — it adds an event per turn to every golden log
+Decided: cache_likely is computed at read time, only while done, idle or hibernated, since the bridge sleeps when the cache goes cold
+Because: crates/shed-server/src/registry.rs:104
+Decided: shed model reads get first and prints the stderr line when turn_ended is set, then switches
+Because: crates/shed/src/main.rs:526
+Check: machine_stats fails at base e7b08f4 on this host too; arch-check's only violation is just missing
+Check: the e2e test hibernates on a 3 s API lifetime with no SHED_ACP_HIBERNATE_AFTER set, then sees cold in get and top
+Owner: API-key agents now sleep once their prompt cache has likely expired, and get, top and model say when the cache is likely gone
