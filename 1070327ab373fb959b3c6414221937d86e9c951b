@@ -1,0 +1,12 @@
+Decided: a warm spare is a whole bridge terminal, renamed in the registry when taken; the bridge learns its new name by a `name` input
+Because: "A new session takes the ready one and shed starts the next."
+Because: crates/shed-server/src/registry.rs:897
+Decided: events under the spare's old name resolve to the taker through the saved `was` name, so a rename race or a serve restart loses none
+Because: crates/shed-server/src/registry.rs:974
+Decided: hibernation left as it was (#117, #127); the new test checks it on a taken session
+Because: "a hibernated session resumes with its history and the same id"
+Rejected: hiding spares from ls and top — their memory (about 496 MB each for claude) is real and an operator should see it
+Rejected: a warm pool inside one bridge — the bridge, transcript and events are per terminal, so a whole terminal is the smallest spare
+Check: a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_as_one_session in crates/shed/tests/acp.rs
+Check: codex-acp numbers are missing: it refuses session/new with "Authentication required" on this host
+Owner: warm runs of Claude start at once instead of after about 0.9 s; each spare costs about 500 MB and is off unless asked for
