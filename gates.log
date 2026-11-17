@@ -1,0 +1,56 @@
+== cargo fmt --all --check
+-> exit 0
+== cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-127/crates/shed-server)
+    Checking shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-127/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.25s
+-> exit 0
+== test "$(grep -rE "allow\(" crates | wc -l)" -le 10
+-> exit 0
+== scripts/banned.sh
+ci/fixtures/banned/allow_attributes_without_reason.rs: rejected (allow_attributes_without_reason)
+ci/fixtures/banned/as_conversions.rs: rejected (as_conversions)
+ci/fixtures/banned/dbg_macro.rs: rejected (dbg_macro)
+ci/fixtures/banned/expect_used.rs: rejected (expect_used)
+ci/fixtures/banned/indexing_slicing.rs: rejected (indexing_slicing)
+ci/fixtures/banned/let_underscore_must_use.rs: rejected (let_underscore_must_use)
+ci/fixtures/banned/panic.rs: rejected (panic)
+ci/fixtures/banned/print_stderr.rs: rejected (print_stderr)
+ci/fixtures/banned/print_stdout.rs: rejected (print_stdout)
+ci/fixtures/banned/todo.rs: rejected (todo)
+ci/fixtures/banned/unimplemented.rs: rejected (unimplemented)
+ci/fixtures/banned/unsafe_code.rs: rejected (unsafe_code)
+ci/fixtures/banned/unwrap_used.rs: rejected (unwrap_used)
+-> exit 0
+== RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+    Checking shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-127/crates/shed-server)
+ Documenting shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-127/crates/shed-server)
+ Documenting shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-127/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.85s
+   Generated /Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-127/doc/shed/index.html and 3 other files
+-> exit 0
+== scripts/line-cap.sh
+10354 / cap 11000
+-> exit 0
+== scripts/dep-direction.sh && scripts/proto-features.sh
+shed-core has no workspace deps
+shed-proto default features: no preserve_order, no schemars
+-> exit 0
+== scripts/hygiene.sh
+no setup-specific names
+-> exit 0
+== scripts/neutral-core.sh
+core names no agent or provider
+-> exit 0
+== scripts/comment-rule.py
+comments follow the rule
+-> exit 0
+== scripts/self-hosted.py
+every self-hosted job is gated to same-repo code
+-> exit 0
+== drover arch-check --base e7b08f4
+`just generate` exited 127: sh: just: command not found
+arch-check: 198 files, 1 violations
+-> exit 1
+== drover lesson-check
+-> exit 0
