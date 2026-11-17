@@ -1,0 +1,12 @@
+Decided: the bridge sends its #117 baseline (own pids at the prompt) in the turn event's new agent field; the server keeps it per terminal
+Because: crates/shed-server/src/acp.rs:578
+Because: "as known when the turn began: the same baseline #117 uses"
+Rejected: the server snapshotting its own last sample at the turn — on a wake it predates the restarted adapter, so the adapter would count as work
+Decided: the sampler splits the tree it already has: the bridge pid and the baseline are AGENT, the rest WORK; no baseline yet counts all as AGENT
+Because: crates/shed-server/src/registry.rs:1002
+Decided: shed top <terminal> reads the local process table in the CLI; its CPU is CPU time over age, as Linux ps computes %CPU
+Because: "the full command line with `--full`, since command lines can hold URLs and paths"
+Rejected: a server method for per-process rows — needs a second sample for CPU and a new protocol method for a one-off view
+Decided: ls keeps one RSS column; top shows AGENT and WORK, a plain terminal's memory under WORK with AGENT as -
+Check: the top <terminal> test asserts the child's https://user:secret@… argument appears only with --full
+Owner: shed top now says which lanes are hibernated and whether a lane's memory is the agent or the build it started
