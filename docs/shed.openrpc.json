@@ -2041,6 +2041,31 @@
               }
             ],
             "description": "The agent's last `usage_update`."
+          },
+          "turn_ended": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When the last turn ended, unix seconds."
+          },
+          "cache_lifetime": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The prompt cache's likely lifetime on this login in seconds, from the provider record's `cache`."
+          },
+          "cache_likely": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "While idle, `warm` or `cold`: what the prompt cache likely is, by the idle time against `cache_lifetime`."
           }
         },
         "required": [
@@ -3401,6 +3426,18 @@
             ],
             "description": "Where its prompt responses' `_meta` carries the turn's tokens.",
             "default": null
+          },
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cache"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long its prompt cache lives on each login.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
@@ -3521,6 +3558,37 @@
           "output"
         ],
         "description": "The keys of a turn's tokens in a prompt response's `_meta`."
+      },
+      "Cache": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds on a subscription plan, the login without an API variable."
+          },
+          "api": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds on an API key."
+          },
+          "api_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables that, set and not empty in the agent's environment, mean an API key."
+          }
+        },
+        "required": [
+          "plan",
+          "api",
+          "api_vars"
+        ],
+        "description": "The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key."
       },
       "Agent": {
         "type": "object",

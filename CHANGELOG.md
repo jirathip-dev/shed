@@ -143,6 +143,10 @@ All notable changes to this project are documented here. The format follows
 - ACP usage carries the turn's and the session's input, cache-read, cache-write and output tokens (`usage.turn`
   and `usage.total` in `get` and the `usage` event) when the agent's prompt responses report them, as
   `claude-acp`'s `_meta.quota` does; `shed top` shows the last turn's cache-read share as `CACHE`.
+- A provider record's `[cache]` gives the prompt cache's lifetime on a plan and on an API key and the variables
+  that mean an API key; an ACP lane hibernates after 600 s or that lifetime, whichever is shorter (unless
+  `$SHED_ACP_HIBERNATE_AFTER` is set), `get` shows `session.cache_likely` (`warm` or `cold`) while idle and
+  `shed top` shows it as `CACHE-LIKELY`; `shed model` after a turn says the switch drops the prompt cache.
 - Agent facts are data: each agent's limit and login-expired lines, hook table, login, status and logout
   commands, config-folder and settings variables and effort flags are one TOML provider record, built in
   from `crates/shed-server/src/providers/<name>.toml` and overridden key by key, or added, by `<name>.toml`

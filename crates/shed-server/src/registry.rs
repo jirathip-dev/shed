@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_core::{History, Report, STATES, Size, Terminal};
 use shed_proto::{
-    EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams, MachineStats,
-    ModelParams, Policy, ReadParams, ReadResult, Reported, ResizeParams, Resources, RpcError,
-    RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
+    AcpSession, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams,
+    MachineStats, ModelParams, Policy, ReadParams, ReadResult, Reported, ResizeParams, Resources,
+    RpcError, RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
 };
 
 use tokio::net::unix::OwnedWriteHalf;
@@ -97,10 +97,19 @@ impl Entry {
     }
 
     fn view(&self) -> TerminalInfo {
-        TerminalInfo {
+        let mut info = TerminalInfo {
             resources: self.resources,
             ..self.info.clone()
+        };
+        let idle = ["done", "idle", "hibernated"];
+        let reported = info.reported.as_ref().map(|r| r.state.as_str());
+        if let Some(s) =
+            (info.session.as_mut()).filter(|_| reported.is_some_and(|r| idle.contains(&r)))
+        {
+            let warm = s.cache_warm(shed_core::clock::unix_now());
+            s.cache_likely = warm.map(|w| if w { "warm" } else { "cold" }.to_owned());
         }
+        info
     }
 
     fn saved(&self) -> Saved {
@@ -1003,11 +1012,22 @@ impl Registry {
         self.live(&p.name)?;
         let entry = self.entries.get_mut(&p.name);
         let info = &mut entry.ok_or_else(|| not_found(&p.name))?.info;
+        let ended = info.session.as_ref().and_then(|s| s.turn_ended);
         let session = match &p.kind {
-            EventKind::Session(s) => info
-                .session
-                .replace((**s).clone())
-                .is_none_or(|old| old != **s),
+            EventKind::Session(s) => {
+                let new = AcpSession {
+                    turn_ended: ended,
+                    ..(**s).clone()
+                };
+                info.session
+                    .replace(new.clone())
+                    .is_none_or(|old| old != new)
+            }
+            EventKind::Reply { .. } if !p.replay => {
+                info.session.get_or_insert_default().turn_ended =
+                    Some(shed_core::clock::unix_now());
+                true
+            }
             EventKind::Usage(u) => {
                 info.session.get_or_insert_default().usage = Some(u.clone());
                 false

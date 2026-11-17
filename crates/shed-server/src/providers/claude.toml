@@ -18,6 +18,17 @@ cache_read = "cachedInputTokens"
 cache_write = "cachedWriteTokens"
 output = "outputTokens"
 
+[cache]
+plan = 3600
+api = 300
+api_vars = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY"
+]
+
 [hooks]
 file = ".claude/settings.json"
 events = [
