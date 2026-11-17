@@ -631,6 +631,73 @@ fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
     assert_eq!(column(8), (Some("CACHE".into()), Some("45%".into())));
 }
 
+fn medians(dir: &Path, of: &str) -> Value {
+    let out = Command::new(SHED)
+        .arg("--dir")
+        .arg(dir)
+        .args(["--json", "agents"])
+        .env("SHED_MEDIAN_OF", of)
+        .output()
+        .expect("shed runs");
+    assert!(out.status.success(), "{out:?}");
+    let list: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let fake = list
+        .as_array()
+        .and_then(|l| l.iter().find(|a| a["id"] == "fake"));
+    fake.expect("the fake agent")["medians"].clone()
+}
+
+#[test]
+fn each_session_records_start_to_ready_and_first_token_and_agents_gives_their_medians() {
+    let dir = temp_dir("acp-timings");
+    let _server = Server::start(&dir);
+    let providers = Paths::in_dir(&dir).providers();
+    std::fs::create_dir_all(&providers).expect("providers dir");
+    std::fs::write(providers.join("fake.toml"), "id = \"fake\"\n").expect("write the record");
+    let mut ready = Vec::new();
+    let mut first = Vec::new();
+    for (name, prompt) in [("a", "busy"), ("b", "hi"), ("c", "hi")] {
+        start_fake(&dir, name, "fake");
+        let ls: Value = serde_json::from_str(&ok(&dir, &["ls", "--json"])).expect("JSON");
+        let row = |ls: &Value| {
+            ls.as_array()
+                .and_then(|l| l.iter().find(|t| t["name"] == name))
+                .cloned()
+        };
+        let session = row(&ls).expect("listed")["session"].clone();
+        assert!(session["ready_ms"].as_u64().is_some(), "{session}");
+        assert_eq!(session.get("first_token_ms"), None, "{session}");
+        ok(&dir, &["send", name, prompt]);
+        until(&dir, name, "done");
+        ok(&dir, &["send", name, "hi"]);
+        until(&dir, name, "done");
+        let ls: Value = serde_json::from_str(&ok(&dir, &["ls", "--json"])).expect("JSON");
+        let session = row(&ls).expect("listed")["session"].clone();
+        ready.push(session["ready_ms"].as_u64().expect("ready_ms"));
+        first.push(session["first_token_ms"].as_u64().expect("first_token_ms"));
+        ok(&dir, &["kill", name]);
+    }
+    assert!(
+        first[0] >= 2400,
+        "busy's first text comes after 2.4 s: {first:?}"
+    );
+    assert!(first[1] < 2400 && first[2] < 2400, "{first:?}");
+    let middle = |v: &[u64]| {
+        let mut v = v.to_vec();
+        v.sort_unstable();
+        v[1]
+    };
+    assert_eq!(
+        medians(&dir, "20"),
+        json!({"sessions": 3, "ready_ms": middle(&ready), "first_token_ms": middle(&first)})
+    );
+    assert_eq!(
+        medians(&dir, "2"),
+        json!({"sessions": 2, "ready_ms": ready[1].midpoint(ready[2]),
+            "first_token_ms": first[1].midpoint(first[2])})
+    );
+}
+
 fn row(dir: &Path, args: &[&str], name: &str) -> Vec<String> {
     let out = ok(dir, args);
     let head = out.lines().next().unwrap_or_default().split_whitespace();
@@ -850,7 +917,11 @@ fn a_model_switch_is_reported_and_the_next_turn_uses_it() {
     };
     let models = json!([["fast", "Fast"], ["smart", "Smart"]]);
     let first = json!({"id": "sess-1", "model": "fast", "models": models});
-    common::eventually("the session", || session() == first);
+    common::eventually("the session", || {
+        let mut s = session();
+        let ready = s.as_object_mut().and_then(|s| s.remove("ready_ms"));
+        ready.is_some_and(|r| r.is_u64()) && s == first
+    });
     let before_a_turn = shed(&dir, &["model", "m", "smart"]);
     assert!(before_a_turn.status.success(), "{before_a_turn:?}");
     assert_eq!(String::from_utf8_lossy(&before_a_turn.stderr), "");

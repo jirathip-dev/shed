@@ -3,12 +3,14 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::io::Write as _;
+use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
 use toml::Table;
 
 use crate::Error;
-use crate::proto::{AgentInfo, Provider};
+use crate::proto::{AgentInfo, Medians, Provider};
 
 const BUILT_IN: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/providers.rs"));
 
@@ -68,6 +70,67 @@ pub fn find(dir: &Path, id: &str) -> Provider {
     found.map(|(p, _)| p).unwrap_or_default()
 }
 
+#[derive(Serialize, Deserialize)]
+struct Timed {
+    agent: String,
+    ready_ms: u64,
+    first_token_ms: u64,
+}
+
+fn timings(state: &Path) -> PathBuf {
+    state.with_file_name("timings.jsonl")
+}
+
+pub(crate) fn record_timing(
+    state: &Path,
+    agent: &str,
+    ready_ms: u64,
+    first_token_ms: u64,
+) -> std::io::Result<()> {
+    let agent = agent.to_owned();
+    let mut line = serde_json::to_string(&Timed {
+        agent,
+        ready_ms,
+        first_token_ms,
+    })?;
+    line.push('\n');
+    let mut file = (fs::OpenOptions::new().create(true).append(true)).open(timings(state))?;
+    file.write_all(line.as_bytes())
+}
+
+fn median(mut values: Vec<u64>) -> u64 {
+    values.sort_unstable();
+    let mid = values.len() / 2;
+    let high = values.get(mid).copied().unwrap_or_default();
+    let low = (values.len().is_multiple_of(2))
+        .then(|| mid.checked_sub(1).and_then(|i| values.get(i)).copied())
+        .flatten();
+    low.map_or(high, |low| low.midpoint(high))
+}
+
+fn medians(state: &Path) -> BTreeMap<String, Medians> {
+    let text = fs::read_to_string(timings(state)).unwrap_or_default();
+    let mut by_agent: BTreeMap<String, Vec<(u64, u64)>> = BTreeMap::new();
+    for t in text
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Timed>(l).ok())
+    {
+        (by_agent.entry(t.agent).or_default()).push((t.ready_ms, t.first_token_ms));
+    }
+    let n = crate::config::median_of();
+    let of = |all: Vec<(u64, u64)>| {
+        let last: Vec<_> = all.into_iter().rev().take(n).collect();
+        (!last.is_empty()).then(|| Medians {
+            sessions: u64::try_from(last.len()).unwrap_or(u64::MAX),
+            ready_ms: median(last.iter().map(|t| t.0).collect()),
+            first_token_ms: median(last.iter().map(|t| t.1).collect()),
+        })
+    };
+    (by_agent.into_iter())
+        .filter_map(|(id, all)| Some((id, of(all)?)))
+        .collect()
+}
+
 /// Each agent with a record in `dir` or installed beside the state file `state`, by id.
 ///
 /// # Errors
@@ -80,7 +143,9 @@ pub fn known(state: &Path, dir: &Path) -> Result<Vec<AgentInfo>, Error> {
         let slot = all.entry(agent.id.clone()).or_default();
         slot.2 = Some(agent);
     }
+    let mut medians = medians(state);
     let info = |(id, (provider, source, installed))| AgentInfo {
+        medians: medians.remove(&id),
         id,
         source,
         provider,
