@@ -2092,6 +2092,24 @@
               "null"
             ],
             "description": "While idle, `warm` or `cold`: what the prompt cache likely is, by the idle time against `cache_lifetime`."
+          },
+          "ready_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Milliseconds from `run` to the session being ready."
+          },
+          "first_token_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Milliseconds from the first prompt to the first chunk of its reply."
           }
         },
         "required": [
@@ -3336,6 +3354,17 @@
               }
             ],
             "description": "The installed adapter."
+          },
+          "medians": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Medians"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The medians of its last sessions' timings, when any session got a first token."
           }
         },
         "required": [
@@ -3663,6 +3692,35 @@
           "cmd"
         ],
         "description": "One installed ACP agent."
+      },
+      "Medians": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many sessions they are over."
+          },
+          "ready_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The median of [`AcpSession::ready_ms`]."
+          },
+          "first_token_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The median of [`AcpSession::first_token_ms`]."
+          }
+        },
+        "required": [
+          "sessions",
+          "ready_ms",
+          "first_token_ms"
+        ],
+        "description": "An agent's medians over its last `$SHED_MEDIAN_OF` (default 20) ACP sessions that got a first token."
       },
       "Matched": {
         "type": "object",

@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, EmitParams, Event, EventKind,
-    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Quota, Rule, State,
-    Tokens,
+    EventsParams, Hooks, MatchParams, Matched, Medians, Method, ModelParams, Provider, Quota, Rule,
+    State, Tokens,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -26,6 +26,8 @@ fn session() -> AcpSession {
         turn_ended: Some(1_763_337_600),
         cache_lifetime: Some(3600),
         cache_likely: Some("warm".into()),
+        ready_ms: Some(2400),
+        first_token_ms: Some(1800),
     }
 }
 
@@ -222,6 +224,11 @@ fn agent_info() -> AgentInfo {
             version: "0.1.0".into(),
             distribution: "npx".into(),
             cmd: strings(&["npx", "-y", "fake-acp@0.1.0"]),
+        }),
+        medians: Some(Medians {
+            sessions: 20,
+            ready_ms: 2500,
+            first_token_ms: 1900,
         }),
     }
 }

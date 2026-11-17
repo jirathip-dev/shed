@@ -1003,6 +1003,12 @@ pub struct AcpSession {
     /// While idle, `warm` or `cold`: what the prompt cache likely is, by the idle time against `cache_lifetime`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_likely: Option<String>,
+    /// Milliseconds from `run` to the session being ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready_ms: Option<u64>,
+    /// Milliseconds from the first prompt to the first chunk of its reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
 }
 
 impl AcpSession {
@@ -1372,6 +1378,21 @@ pub struct AgentInfo {
     pub provider: Option<Provider>,
     /// The installed adapter.
     pub installed: Option<Agent>,
+    /// The medians of its last sessions' timings, when any session got a first token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub medians: Option<Medians>,
+}
+
+/// An agent's medians over its last `$SHED_MEDIAN_OF` (default 20) ACP sessions that got a first token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Medians {
+    /// How many sessions they are over.
+    pub sessions: u64,
+    /// The median of [`AcpSession::ready_ms`].
+    pub ready_ms: u64,
+    /// The median of [`AcpSession::first_token_ms`].
+    pub first_token_ms: u64,
 }
 
 /// `agents.match` params: an agent's id and text to apply its rules to.

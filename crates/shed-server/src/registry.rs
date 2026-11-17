@@ -80,6 +80,8 @@ struct Entry {
     agent: Option<BTreeSet<i32>>,
     sampled: (Instant, Duration),
     notes: Vec<String>,
+    started: Option<Instant>,
+    prompted: Option<Instant>,
 }
 
 impl Entry {
@@ -95,6 +97,8 @@ impl Entry {
             agent: None,
             sampled: (shed_core::clock::now(), Duration::ZERO),
             notes: Vec::new(),
+            started: None,
+            prompted: None,
         }
     }
 
@@ -844,7 +848,10 @@ impl Registry {
             parent: p.parent,
         };
         self.events.emit(&info, EventKind::Started);
-        let entry = Entry::new(info.clone(), Some(Arc::new(term)));
+        let entry = Entry {
+            started: Some(shed_core::clock::now()),
+            ..Entry::new(info.clone(), Some(Arc::new(term)))
+        };
         self.entries.insert(name, entry);
         Ok(self.saved(info))
     }
@@ -1030,12 +1037,21 @@ impl Registry {
                 entry.agent = Some(agent.into_iter().collect());
             }
         }
+        let now = shed_core::clock::now();
+        let ms = |since: Instant| {
+            let took = now.saturating_duration_since(since).as_millis();
+            u64::try_from(took).unwrap_or(u64::MAX)
+        };
         let info = &mut entry.info;
-        let ended = info.session.as_ref().and_then(|s| s.turn_ended);
+        let old = info.session.clone().unwrap_or_default();
+        let mut timed = None;
         let session = match &p.kind {
             EventKind::Session(s) => {
+                let ready = (!p.replay).then_some(entry.started).flatten();
                 let new = AcpSession {
-                    turn_ended: ended,
+                    turn_ended: old.turn_ended,
+                    ready_ms: old.ready_ms.or_else(|| ready.map(ms)),
+                    first_token_ms: old.first_token_ms,
                     ..(**s).clone()
                 };
                 info.session
@@ -1051,9 +1067,23 @@ impl Registry {
                 info.session.get_or_insert_default().usage = Some(u.clone());
                 false
             }
+            EventKind::Turn { .. } if !p.replay => {
+                entry.prompted = entry.prompted.or(Some(now));
+                false
+            }
+            EventKind::Text { .. } if !p.replay && old.first_token_ms.is_none() => {
+                let first = entry.prompted.map(ms);
+                let session = info.session.get_or_insert_default();
+                session.first_token_ms = first;
+                timed = (info.acp.clone()).zip(old.ready_ms.zip(first));
+                first.is_some()
+            }
             _ => false,
         };
         self.events.emit_as(info, p.kind, p.replay);
+        if let Some((agent, (ready, first))) = timed {
+            crate::providers::record_timing(&self.path, &agent, ready, first).ok();
+        }
         if session {
             self.save();
         }

@@ -38,3 +38,11 @@ pub fn prune_after() -> u64 {
         .and_then(|s| s.parse().ok())
         .unwrap_or(86_400)
 }
+
+/// How many of an agent's last sessions `agents` takes medians over: `$SHED_MEDIAN_OF`, else 20.
+#[must_use]
+pub fn median_of() -> usize {
+    var("SHED_MEDIAN_OF")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(20)
+}

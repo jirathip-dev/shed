@@ -117,9 +117,16 @@ read each time a lane starts, so a changed banner needs no rebuild. Keys: `id` (
 is skipped, the built-in record staying in force, and `shed doctor` names it (`FAIL provider …`).
 
 `shed agents --json` and the `agents` method list every agent with a record or an installed adapter: `id`,
-`source` (`built-in` or the user file), `provider` (the record) and `installed`. `agents.match {id, text}`
+`source` (`built-in` or the user file), `provider` (the record), `installed` and `medians`. `agents.match {id, text}`
 applies an agent's limit and auth rules to text of a caller's own (a pane's screen) and returns the `limit`
 line, its `resets` time and the `auth` line, as a lane would read them.
+
+Each ACP terminal's `session` in `ls --json` and `get` has `ready_ms`, the time from `run` to the session being
+ready (the agent started, `initialize` and `session/new` or `session/load` answered), and `first_token_ms`, the
+time from its first prompt to the first chunk of the reply (a tool call before it does not count). Both are
+taken once per terminal, so a wake from hibernation does not change them. When a session has both, shed adds
+them to `timings.jsonl` beside the state file, and `medians` in `agents` is each agent's `sessions`,
+`ready_ms` and `first_token_ms`: the medians over its last `$SHED_MEDIAN_OF` (default 20) such sessions.
 
 ### Hibernation
 
