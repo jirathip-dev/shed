@@ -1,0 +1,10 @@
+    Checking tokio v1.54.1
+    Checking shed-proto v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-proto)
+ Documenting shed-proto v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-proto)
+    Checking shed-core v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-core)
+ Documenting shed-core v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-core)
+    Checking shed-server v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-server)
+ Documenting shed-server v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-server)
+ Documenting shed v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.24s
+   Generated /home/user/.local/share/drover/work/.build/berth-impl-147/doc/shed/index.html and 3 other files

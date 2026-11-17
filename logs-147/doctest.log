@@ -1,0 +1,23 @@
+   Compiling serde_with v3.24.0
+   Compiling agent-client-protocol-schema v1.15.1
+   Compiling agent-client-protocol v5.0.0
+   Compiling shed-server v0.0.0 (/home/user/.local/share/drover/work/shed/issue-147/crates/shed-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.41s
+   Doc-tests shed_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_proto
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_server
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
