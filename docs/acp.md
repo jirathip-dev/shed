@@ -113,7 +113,7 @@ is built in, and `<name>.toml` in `providers/` beside the config file (`~/.confi
 read each time a lane starts, so a changed banner needs no rebuild. Keys: `id` (the ACP agent id), `agent`
 (the PTY name `shed setup` takes), `auth_failures`, `limit`, `resets`, `[hooks]` (`file`, `events` as
 `[event, state]` pairs), `login`, `status` and `logout` (commands), `config_dir_var`, `settings_var`,
-`effort_args` (`{effort}` stands for the level), `efforts` and `[quota]` (`path`, the keys from a prompt response's `_meta` down to the turn's counters, and the `input`, `cache_read`, `cache_write` and `output` keys in it; see above). A user file that is not TOML or not a record
+`effort_args` (`{effort}` stands for the level), `efforts`, `[quota]` (`path`, the keys from a prompt response's `_meta` down to the turn's counters, and the `input`, `cache_read`, `cache_write` and `output` keys in it; see above) and `[cache]` (`plan` and `api`, the prompt cache's lifetime in seconds on each login, and `api_vars`, the variables that mean an API key; see [Prompt cache](#prompt-cache)). A user file that is not TOML or not a record
 is skipped, the built-in record staying in force, and `shed doctor` names it (`FAIL provider …`).
 
 `shed agents --json` and the `agents` method list every agent with a record or an installed adapter: `id`,
@@ -124,8 +124,8 @@ line, its `resets` time and the `auth` line, as a lane would read them.
 ### Hibernation
 
 An idle agent hibernates: once its session has had a turn (or was resumed) and has been `done` (or, resumed,
-has had no turn yet) for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment of `shed serve` (default 600; `0`
-never), the bridge stops the agent's process tree and reports the state `hibernated` (a `state` event). The
+has had no turn yet) for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment of `shed serve` (default 600, or
+the record's prompt cache lifetime on this login when that is shorter; `0` never), the bridge stops the agent's process tree and reports the state `hibernated` (a `state` event). The
 terminal, its session id, model, models and slash commands stay; only the bridge (about 8 MB) is left. The next
 send (a prompt, `model`, …) starts the agent again with the same command, folder and environment, loads the
 session (`session/load`, its replayed events marked `"replay": true` but not added to the transcript again)
@@ -135,6 +135,31 @@ never hibernates. Measured on 2026-11-07: ten idle fake agents took 197,248 KiB 
 hibernated (wake 76 ms); one claude-agent-acp 0.100.0 took 502,700 KiB in 7 processes awake and 8,064 KiB in 1
 hibernated, and woke to its first update in 1,946 ms (`crates/shed/tests/acp_bench.rs`, `hibernate` and
 `hibernate_live`).
+
+### Prompt cache
+
+A wake loads the session and the next turn re-sends the conversation; the agent's vendor reads from its prompt
+cache the prefix that is unchanged and still within the cache's lifetime, and charges full input price for the
+rest. Claude Code's docs give that lifetime as 1 hour for the main conversation on a subscription and 5 minutes on
+an API key, usage credits or a cloud provider, and list what drops the cache mid-session: a model switch, an
+effort change, an MCP server added or removed while tool search is off, and a CLI upgrade
+(<https://code.claude.com/docs/en/prompt-caching>). None of this is measured by shed; `CACHE` in `shed top`
+is the number to check it with.
+
+An agent's record says it in `[cache]`: `plan` and `api` seconds, and `api_vars`, the variables that, set and not
+empty in the lane's environment, mean an API key (for `claude-acp` `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`
+and the Bedrock, Vertex and Foundry switches); without one the login counts as a plan. Usage credits on a
+subscription are not told apart and count as a plan. The lane's lifetime is `session.cache_lifetime`, and
+the bridge hibernates after 600 s or that lifetime, whichever is shorter: an API key lane sleeps once its cache
+is likely gone, since a wake after that pays full input price whether or not the process stopped; a plan lane
+keeps 600 s (lowering it waits for cache numbers that show a wake inside the hour reads from cache).
+`$SHED_ACP_HIBERNATE_AFTER`, when set, overrides it as before.
+
+`session.turn_ended` is when the last turn ended (unix seconds). While the lane is `done`, `idle` or
+`hibernated`, `get` shows `session.cache_likely`, `warm` until the idle time reaches the lifetime and `cold`
+after, and `shed top` shows it as `CACHE-LIKELY`; it is a likelihood from the clock, not the vendor's word.
+An agent without `[cache]` shows neither. `shed model` on a session that has had a turn prints one line on
+stderr that the switch drops the prompt cache, and switches.
 
 `shed rm` of an exited ACP terminal closes its session (`session/close`) when the agent advertises
 `sessionCapabilities.close`: the agent's process is gone by then, so shed starts the agent once in the

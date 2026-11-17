@@ -834,9 +834,9 @@ fn turn_idle_timeout() -> Duration {
     Duration::from_secs(secs)
 }
 
-fn hibernate_after() -> Option<Duration> {
-    let secs =
-        crate::config::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
+fn hibernate_after(set: Option<String>, cache_lifetime: Option<u64>) -> Option<Duration> {
+    let fits = cache_lifetime.map_or(600, |c| c.min(600));
+    let secs = set.map_or(fits, |s| s.parse().unwrap_or(600));
     (secs > 0).then(|| Duration::from_secs(secs))
 }
 
@@ -896,6 +896,8 @@ async fn drive(
             new.config_options
         }
     };
+    let api = |v: &str| crate::config::var(v).is_some_and(|v| !v.is_empty());
+    s.shown.cache_lifetime = s.rules.cache_lifetime(api);
     (s.shown.id, s.shown.mcp_servers) = (s.id.to_string(), redacted(&s.mcp));
     s.models(&options.unwrap_or_default())?;
     (s.ended, s.child) = (None, None);
@@ -908,7 +910,8 @@ async fn drive(
         }
         s.input(input)?;
     }
-    let sleep_after = hibernate_after().filter(|_| agent.load_session);
+    let set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+    let sleep_after = hibernate_after(set, s.shown.cache_lifetime).filter(|_| agent.load_session);
     let (mut typing, mut polled) = (true, shed_core::clock::tokio_now());
     loop {
         tokio::select! {
@@ -1064,9 +1067,10 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 /// then prompts, updates and permission requests until the agent exits, reading its limit and expired-login
 /// lines by `rules`. Returns the agent's exit code.
 ///
-/// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, `0` never) it stops the agent's process
-/// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
-/// starts the agent again, loads the session and then delivers it.
+/// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, or the record's shorter prompt cache
+/// lifetime on this login; `0` never) it stops the agent's process tree and reports `hibernated`, keeping
+/// the session (MCP servers included) in memory; the next input starts the agent again, loads the session
+/// and then delivers it.
 ///
 /// A failure to start is reported as the terminal's state `error`, with the reason as its note.
 ///
@@ -1828,6 +1832,20 @@ mod tests {
             ]
         );
         assert_eq!(slept, None);
+    }
+
+    #[test]
+    fn the_hibernate_delay_fits_a_shorter_cache_and_the_variable_overrides_it() {
+        let secs = |set: Option<&str>, cache| {
+            hibernate_after(set.map(str::to_owned), cache).map(|d| d.as_secs())
+        };
+        assert_eq!(secs(None, None), Some(600));
+        assert_eq!(secs(None, Some(3600)), Some(600));
+        assert_eq!(secs(None, Some(300)), Some(300));
+        assert_eq!(secs(Some("2"), Some(300)), Some(2));
+        assert_eq!(secs(Some("900"), Some(300)), Some(900));
+        assert_eq!(secs(Some("junk"), Some(300)), Some(600));
+        assert_eq!(secs(Some("0"), Some(300)), None);
     }
 
     #[test]

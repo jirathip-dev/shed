@@ -188,6 +188,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_api_login_cache_is_likely_cold_after_five_idle_minutes_a_plan_one_after_sixty() {
+        let claude = fake("claude-acp");
+        let api = claude.cache_lifetime(|v| v == "ANTHROPIC_API_KEY");
+        let plan = claude.cache_lifetime(|_| false);
+        assert_eq!((api, plan), (Some(300), Some(3600)));
+        let warm = |lifetime, idle: u64| {
+            let session = crate::proto::AcpSession {
+                turn_ended: Some(1000),
+                cache_lifetime: lifetime,
+                ..Default::default()
+            };
+            session.cache_warm(1000 + idle)
+        };
+        assert_eq!((warm(api, 299), warm(api, 300)), (Some(true), Some(false)));
+        assert_eq!(
+            (warm(plan, 3599), warm(plan, 3600)),
+            (Some(true), Some(false))
+        );
+        assert_eq!(fake("codex-acp").cache_lifetime(|_| true), None);
+        assert_eq!(warm(None, 0), None);
+    }
+
+    #[test]
     fn a_user_file_overrides_its_keys_and_a_bad_one_is_skipped() {
         let dir = crate::temp_dir("providers");
         let banner = "limit = [\n  \"out of tokens\"\n]\n# a comment\nresets = [\"until \"]\n";
