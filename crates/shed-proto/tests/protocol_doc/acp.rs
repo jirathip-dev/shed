@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, EmitParams, Event, EventKind,
+    AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, EmitParams, Event, EventKind,
     EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Quota, State, Tokens,
 };
 
@@ -22,6 +22,9 @@ fn session() -> AcpSession {
         ],
         commands: vec![["review".into(), "Review the diff".into(), "files".into()]],
         usage: Some(usage()),
+        turn_ended: Some(1_763_337_600),
+        cache_lifetime: Some(3600),
+        cache_likely: Some("warm".into()),
     }
 }
 
@@ -192,6 +195,11 @@ fn agent_info() -> AgentInfo {
             cache_read: "cachedInputTokens".into(),
             cache_write: "cachedWriteTokens".into(),
             output: "outputTokens".into(),
+        }),
+        cache: Some(Cache {
+            plan: 3600,
+            api: 300,
+            api_vars: strings(&["FAKE_API_KEY"]),
         }),
     };
     AgentInfo {

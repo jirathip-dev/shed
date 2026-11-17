@@ -520,8 +520,14 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
-            let params = ModelParams { name, model };
-            let done: Value = server.connect(None)?.call(Method::Model, &params)?;
+            let mut client = server.connect(None)?;
+            let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
+            let done: Value = client.call(Method::Model, &ModelParams { name, model })?;
+            if info.session.is_some_and(|s| s.turn_ended.is_some()) {
+                out::err(
+                    "shed: the model switch drops the prompt cache; the next turn reads the conversation uncached",
+                );
+            }
             print(json, &done, String::new)?;
         }
         Command::Agents { action } => agents_cmd(&paths, json, action)?,
@@ -1082,7 +1088,7 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
 
 fn table(list: &[TerminalInfo], tokens: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-    let head = "NAME STATE EXIT PID RSS CPU TOKENS CACHE LABELS CMD".split(' ');
+    let head = "NAME STATE EXIT PID RSS CPU TOKENS CACHE CACHE-LIKELY LABELS CMD".split(' ');
     let mut rows = vec![head.map(str::to_owned).collect::<Vec<_>>()];
     for t in list {
         let labels: Vec<String> = t.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -1104,6 +1110,7 @@ fn table(list: &[TerminalInfo], tokens: bool) -> String {
                     .and_then(|u| u.turn?.cache_share())
                     .map(|p| format!("{p}%")),
             ),
+            dash(t.session.as_ref().and_then(|s| s.cache_likely.clone())),
             if labels.is_empty() {
                 "-".to_owned()
             } else {
@@ -1113,7 +1120,7 @@ fn table(list: &[TerminalInfo], tokens: bool) -> String {
         ]);
     }
     for row in rows.iter_mut().filter(|_| !tokens) {
-        row.drain(6..8);
+        row.drain(6..9);
     }
     let mut widths = vec![0; rows.first().map_or(0, Vec::len)];
     for row in &rows {

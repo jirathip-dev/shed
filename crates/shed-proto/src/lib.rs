@@ -988,6 +988,23 @@ pub struct AcpSession {
     /// The agent's last `usage_update`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<AcpUsage>,
+    /// When the last turn ended, unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_ended: Option<u64>,
+    /// The prompt cache's likely lifetime on this login in seconds, from the provider record's `cache`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_lifetime: Option<u64>,
+    /// While idle, `warm` or `cold`: what the prompt cache likely is, by the idle time against `cache_lifetime`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_likely: Option<String>,
+}
+
+impl AcpSession {
+    /// Whether the prompt cache is likely still warm at `now` (unix seconds), or `None` with no turn or lifetime.
+    #[must_use]
+    pub fn cache_warm(&self, now: u64) -> Option<bool> {
+        Some(now.saturating_sub(self.turn_ended?) < self.cache_lifetime?)
+    }
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.
@@ -1207,6 +1224,21 @@ pub struct Provider {
     pub efforts: Vec<String>,
     /// Where its prompt responses' `_meta` carries the turn's tokens.
     pub quota: Option<Quota>,
+    /// How long its prompt cache lives on each login.
+    pub cache: Option<Cache>,
+}
+
+/// The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Cache {
+    /// Seconds on a subscription plan, the login without an API variable.
+    pub plan: u64,
+    /// Seconds on an API key.
+    pub api: u64,
+    /// Variables that, set and not empty in the agent's environment, mean an API key.
+    pub api_vars: Vec<String>,
 }
 
 /// The keys of a turn's tokens in a prompt response's `_meta`.
@@ -1253,6 +1285,14 @@ impl Provider {
             cache_write: count(&quota.cache_write)?,
             output: count(&quota.output)?,
         })
+    }
+
+    /// The prompt cache's likely lifetime in seconds, by whether `set` says one of the API variables is set.
+    #[must_use]
+    pub fn cache_lifetime(&self, set: impl Fn(&str) -> bool) -> Option<u64> {
+        let cache = self.cache.as_ref()?;
+        let api = cache.api_vars.iter().any(|v| set(v));
+        Some(if api { cache.api } else { cache.plan })
     }
 
     /// The first line of `text` that says the login expired.
