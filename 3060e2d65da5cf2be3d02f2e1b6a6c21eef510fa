@@ -1,0 +1,7 @@
+Decided: no code change for the red bench-acp; merged origin/staging (#130) and pushed, which reruns it
+Because: scripts/bench-acp.sh:25
+Because: crates/shed/tests/acp_bench.rs:90
+Rejected: loosening the shed_only event-count assert — it failed on the base side, staging's own server, not this diff
+Decided: the CHANGELOG conflict keeps both the #130 and #132 entries, in the order scripts/changelog.py writes
+Check: the failing run was the 6th base run (five base/head pairs printed before the panic; base runs first)
+Owner: a timing check failed by chance on the unchanged code; this branch is now up to date and the check runs again
