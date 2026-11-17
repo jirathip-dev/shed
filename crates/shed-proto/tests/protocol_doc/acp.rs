@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, EmitParams, Event, EventKind,
-    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, State,
+    EventsParams, Hooks, MatchParams, Matched, Method, ModelParams, Provider, Rule, State,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -174,6 +174,15 @@ fn agent_info() -> AgentInfo {
         settings_var: None,
         effort_args: strings(&["--effort", "{effort}"]),
         efforts: strings(&["low", "high"]),
+        rules: vec![Rule {
+            id: "trust".into(),
+            state: "blocked".into(),
+            kind: Some("permission".into()),
+            priority: 10,
+            region: 20,
+            any: strings(&["Trust this folder?"]),
+            version: "0.1.0".into(),
+        }],
     };
     AgentInfo {
         id: "fake-acp".into(),
