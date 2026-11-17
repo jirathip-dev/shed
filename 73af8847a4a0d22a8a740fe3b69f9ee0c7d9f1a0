@@ -1,0 +1,10 @@
+Decided: provider records are TOML files built in from crates/shed-server/src/providers/ and overridden key by key by <config>/providers/<name>.toml
+Because: q1821
+Because: "one TOML file per agent built into the binary, plus a user folder"
+Decided: the bridge re-reads records at each lane start via --providers, so a user file needs no rebuild
+Because: crates/shed-server/src/registry.rs:671
+Rejected: a static include_str! list — a new built-in agent would still need a Rust line; build.rs lists the folder
+Rejected: bumping PROTOCOL — agents and agents.match are additive methods
+Check: acp::tests::a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild drives a real lane to rate-limited
+Check: src net is +161 (9999 -> 10160), over the issue's no-growth line but under line_cap 11000
+Owner: shed's per-agent facts are now editable data files; the cooee follow-up and drover#983 note still need filing outside this lane
