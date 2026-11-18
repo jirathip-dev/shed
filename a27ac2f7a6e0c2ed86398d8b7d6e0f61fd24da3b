@@ -1,0 +1,5 @@
+Decided: merged origin/staging 6347cfe into issue-134 with no conflicts; no code changes in this round
+Because: "Gates green, line cap holds"
+Rejected: none
+Check: scripts/line-cap.sh at a27ac2f prints 10969 / cap 11000; cargo test -p shed --test service passes 8/8
+Owner: Brought the branch up to date with staging; nothing in this change itself moved.
