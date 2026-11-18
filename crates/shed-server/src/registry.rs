@@ -96,7 +96,7 @@ struct Guard {
     over: u8,
     last: Option<i32>,
     kills: u64,
-    largest: Option<(u64, String)>,
+    largest: Option<(i32, u64, String)>,
 }
 
 fn process_name(pid: i32) -> String {
@@ -132,6 +132,7 @@ impl Entry {
 
     fn guard(
         &mut self,
+        procs: &[ProcessInfo],
         tree: &[ProcessInfo],
         limit_mb: u64,
     ) -> Option<(String, EventKind, Option<i32>)> {
@@ -146,12 +147,18 @@ impl Entry {
                 crate::limit::kill_first(p.pid);
             }
             let kills = pid.and_then(crate::limit::oom_kills).unwrap_or(g.kills);
-            let now = largest(&started).map(|p| (p.rss_bytes, process_name(p.pid)));
+            let now = largest(&started).map(|p| (p.pid, p.rss_bytes, process_name(p.pid)));
             let seen = std::mem::replace(&mut g.largest, now);
             if kills <= std::mem::replace(&mut g.kills, kills) {
                 return None;
             }
-            let (rss, name) = seen.unwrap_or((0, "?".to_owned()));
+            let alive = |pid: i32| tree.iter().any(|p| p.pid == pid);
+            let gone = seen
+                .filter(|s| !alive(s.0))
+                .map(|(_, rss, name)| (rss, name));
+            let dead = |p: &&ProcessInfo| p.zombie && alive(p.ppid);
+            let zombie = || Some((0, crate::limit::comm(procs.iter().find(dead)?.pid)?));
+            let (rss, name) = gone.or_else(zombie).unwrap_or((0, "?".to_owned()));
             (name, rss, "kernel", None)
         } else {
             let total: u64 = tree.iter().map(|p| p.rss_bytes).sum();
@@ -750,7 +757,7 @@ impl Registry {
                 self.events.emit(&entry.info, EventKind::Resources(now));
             }
             let limit = entry.info.mem_max_mb;
-            if let Some((line, kind, end)) = limit.and_then(|mb| entry.guard(&tree, mb)) {
+            if let Some((line, kind, end)) = limit.and_then(|mb| entry.guard(procs, &tree, mb)) {
                 notes.extend(note(&entry.info, &line));
                 self.events.emit(&entry.info, kind);
                 ended.extend(end);
