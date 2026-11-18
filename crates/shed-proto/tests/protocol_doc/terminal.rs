@@ -39,6 +39,8 @@ fn lead() -> Parent {
 pub(crate) const RESOURCES: Resources = Resources {
     rss_mb: 52,
     cpu_pct: 3,
+    agent_mb: None,
+    work_mb: None,
 };
 
 pub(crate) fn done() -> Reported {
@@ -90,6 +92,7 @@ pub(crate) fn run_params() -> Value {
         mcp_servers: Vec::new(),
         meta: None,
         no_hibernate: false,
+        warm: false,
         machine: None,
         parent: Some(lead()),
         rows: None,

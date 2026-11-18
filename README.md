@@ -48,7 +48,7 @@ around lanes:
 | `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
-| `shed top` | The terminals by memory use, largest first. |
+| `shed top [<t> [--full]]` | The terminals by memory use, largest first, an ACP agent's split into AGENT and WORK (what it started), then a totals line; with `<t>`, that terminal's processes over 50 MB by name (the command line with `--full`). |
 | `shed watch [--label k=v]` | A live list of the terminals beside a read-only preview of the selected one; Enter attaches, `Ctrl+\` comes back, `/` filters, `q` quits. |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed --on <machine> …` / `shed machine add\|ls\|rm` | The same commands on another host over SSH (key login only). The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `wait`, `approve` and `cancel`, and `--on <machine> run --acp` starts an agent installed there; `machine ls --json` shows each link. |

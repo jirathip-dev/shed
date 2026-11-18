@@ -134,6 +134,19 @@ jobs:
       - name: drain bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-drain.sh base .
 
+  # 200 idle terminals start and are listed under a login's default open-file limit, with serve's threads and RSS.
+  idle-terminals:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97.1
+      - run: cargo build --release --locked -p shed
+      - name: 200 idle terminals
+        run: ulimit -Sn 256 && scripts/bench-idle.sh target/release/shed 200
+
   # The ACP benches at the PR's base and head on one runner: throughput (median of 5) and shed-only (canned
   # updates, median of 9); fails if the head is more than 10% slower on either. Then the head's
   # session/load replay time.

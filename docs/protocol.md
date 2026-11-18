@@ -38,7 +38,7 @@ The handshake; must come first on every connection. Another product or protocol 
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true}}}
@@ -270,6 +270,24 @@ Keep the connection alive. Once a connection sends one, the server closes it whe
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
+### `agents`
+
+Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it).
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"settings_var":null,"status":"fake login status"},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+```
+
+### `agents.match`
+
+Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"agents.match","params":{"id":"fake-acp","text":"working…\nfake: limit hit, back at 3pm."}}
+{"jsonrpc":"2.0","id":1,"result":{"auth":null,"limit":"fake: limit hit, back at 3pm.","resets":"3pm"}}
+```
+
 ### `rpc.discover`
 
 The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.
@@ -301,14 +319,14 @@ events marked `"replay": true` so a client does not count them as new. An idle a
 {"seq":5,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"killed"}
 {"seq":6,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"turn","prompt":"Fix the failing test"}
 {"seq":7,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"text","text":"Looking at the test"}
-{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending","kind":"edit"}
+{"seq":8,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"tool_call","id":"call_1","title":"Edit src/lib.rs","status":"pending","kind":"edit","locations":["/work/src/lib.rs"],"raw_input":{"file_path":"/work/src/lib.rs"}}
 {"seq":9,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
 {"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"mode","mode":"default"}
-{"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}]}
+{"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","id":"7","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}],"call":{"toolCallId":"call_1","kind":"edit","locations":[{"path":"/work/src/lib.rs"}]}}
 {"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow"}
 {"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
-{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}}
-{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"}}
+{"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}},"turn_ended":1763337600,"cache_lifetime":3600,"cache_likely":"warm","ready_ms":2400,"first_token_ms":1800}
+{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}}
 ```
 
 ## Screen updates

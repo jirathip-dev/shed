@@ -19,11 +19,23 @@ was. `--remove` deletes exactly the text setup inserted, so setup then remove gi
 byte; entries the agent has since rewritten in its own layout are not recognised and stay. A file shed
 created is deleted again while it is still exactly as shed wrote it.
 
+## Screen rules
+
+Some screens fire no hook: Claude Code's folder-trust question, for one. A terminal labelled `agent=<agent>`
+(`shed run --label agent=claude`) also checks its provider record's `[[rules]]`, at most every 250 ms and
+only after the screen changed; other terminals check nothing. A rule matches while one of its `any` texts
+shows in the screen's last `region` non-blank lines; the highest `priority` wins. The agent's own report has
+priority 0: a rule above it wins while it matches and stops when the screen moves on, one at or below it
+applies only when there is no report. `get` shows where the state came from in `reported.from`:
+`reported`, `rule:<id>` or `silence`. Each shipped rule names the agent `version` its screen was captured
+from, kept in `crates/shed-server/tests/screens/<agent>-<id>.txt`.
+
 ## The files each agent's setup touches
 
 | Agent | Installed when | File | Hooks (event → state) |
 | --- | --- | --- | --- |
 | Claude Code | `~/.claude/` exists | `~/.claude/settings.json` (the `hooks` key) | `UserPromptSubmit` → working, `PostToolUse` → working, `PermissionRequest` → blocked, `Stop` → done, `StopFailure` → error |
 
-Each agent's table lives in its module, `crates/shed-server/src/providers/<name>.rs`; an agent without one
+Each agent's table is the `[hooks]` of its provider record, `crates/shed-server/src/providers/<name>.toml` or
+a user file overriding it (docs/acp.md, Provider records); an agent without one
 is not touched.

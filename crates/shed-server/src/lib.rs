@@ -12,7 +12,7 @@ pub mod hooks;
 mod input;
 mod links;
 pub mod machines;
-mod providers;
+pub mod providers;
 mod registry;
 mod screen;
 mod stats;
@@ -40,9 +40,9 @@ use rustix::process::{Resource, Rlimit, Signal, getrlimit, setrlimit};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use shed_core::proctree::{self, ProcessTable as _};
+use shed_core::proctree::ProcessTable as _;
 use shed_core::{Pattern, STATES, Terminal, Wake};
-pub use shed_core::{clock, runner};
+pub use shed_core::{clock, proctree, runner};
 pub use shed_proto as proto;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
@@ -121,6 +121,12 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// The user's provider records, `providers/` beside the config file.
+    #[must_use]
+    pub fn providers(&self) -> PathBuf {
+        self.config.with_file_name("providers")
+    }
+
     /// `shed.sock` and `state.json`, both in `dir`.
     #[must_use]
     pub fn in_dir(dir: &Path) -> Self {
@@ -197,7 +203,7 @@ fn watch(registry: &Shared, name: String, term: Arc<Terminal>) {
                 let orphans = {
                     let mut reg = lock(&registry);
                     reg.refresh().ok();
-                    reg.orphans(&name)
+                    reg.orphans(&reg.named(&name))
                 };
                 for child in orphans {
                     let registry = Arc::clone(&registry);
@@ -223,6 +229,16 @@ async fn kill(registry: &Shared, name: &str) -> Result<TerminalInfo, RpcError> {
 async fn sample(registry: Shared, every: Duration) {
     loop {
         tokio::time::sleep(every).await;
+        for name in lock(&registry).stale_spares() {
+            let registry = Arc::clone(&registry);
+            tokio::spawn(async move {
+                kill(&registry, &name).await.ok();
+                let files = lock(&registry).rm(&name).map(|(_, files)| files);
+                if let Ok(files) = files {
+                    blocking(files).await.ok();
+                }
+            });
+        }
         if let Ok(Ok(procs)) = blocking(|| proctree::system().list()).await {
             lock(&registry).sample(&procs, shed_core::clock::now());
         }
@@ -308,7 +324,9 @@ fn stop_signals() -> io::Result<impl Future<Output = ()>> {
 
 async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
     let stop = stop_signals()?;
-    let registry = Arc::new(Mutex::new(Registry::load(&paths.state, &paths.socket)?));
+    let mut loaded = Registry::load(&paths.state, &paths.socket)?;
+    loaded.providers = paths.providers();
+    let registry = Arc::new(Mutex::new(loaded));
     for (name, term) in lock(&registry).running() {
         watch(&registry, name, term);
     }
@@ -590,15 +608,21 @@ async fn dispatch(
         }
         Method::MachineStats => return machine_stats(registry, params(request)?).await,
         Method::Discover => return Ok(proto::openrpc()),
+        Method::Agents | Method::AgentsMatch => return agents(registry, method, request).await,
         _ => {}
     }
     let mut reg = lock(registry);
     reg.refresh()?;
     match method {
         Method::Run => {
-            let info = reg.run(params(request)?)?;
-            if let (Some(term), _) = reg.to_wait(&info.name)? {
-                watch(registry, info.name.clone(), term);
+            let p: proto::RunParams = params(request)?;
+            let spare = p.warm.then(|| p.clone());
+            let info = reg.run(p)?;
+            let spare = spare.and_then(|p| reg.warm_up(p));
+            for name in [Some(info.name.clone()), spare].into_iter().flatten() {
+                if let Some(term) = reg.fresh(&name) {
+                    watch(registry, name, term);
+                }
             }
             json(&info)
         }
@@ -639,6 +663,25 @@ async fn dispatch(
         Method::State => json(&reg.state(params(request)?)?),
         _ => Err(RpcError::new(ErrorCode::Internal, "handled above")),
     }
+}
+
+async fn agents(registry: &Shared, method: Method, request: &Request) -> Result<Value, RpcError> {
+    let (state, dir) = {
+        let reg = lock(registry);
+        (reg.path.clone(), reg.providers.clone())
+    };
+    if method == Method::Agents {
+        let known = blocking(move || providers::known(&state, &dir)).await?;
+        return json(&known.map_err(io_error)?);
+    }
+    let proto::MatchParams { id, text } = params(request)?;
+    let rules = blocking(move || providers::find(&dir, &id)).await?;
+    let limit = rules.limit_hit(&text);
+    json(&proto::Matched {
+        limit: limit.as_ref().map(|l| l.0.to_owned()),
+        resets: limit.and_then(|l| l.1),
+        auth: rules.auth_failure(&text).map(str::to_owned),
+    })
 }
 
 async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcError> {

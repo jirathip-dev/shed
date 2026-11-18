@@ -57,7 +57,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -188,6 +188,14 @@
           "schema": {
             "type": "boolean",
             "description": "ACP: never hibernate the agent when idle."
+          }
+        },
+        {
+          "name": "warm",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "ACP: take this recipe's ready spare session if there is one, and keep a spare ready for the next run."
           }
         },
         {
@@ -629,6 +637,17 @@
           }
         },
         {
+          "name": "from",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the state came from: `reported`, `rule:<id>` (a screen rule) or `silence` (`idle_after`)."
+          }
+        },
+        {
           "name": "id",
           "required": false,
           "schema": {
@@ -957,6 +976,14 @@
               "prompt": {
                 "type": "string",
                 "description": "The prompt text."
+              },
+              "agent": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "description": "The bridge's to the server: the agent's own pids as the turn began; never in the event stream."
               }
             },
             "required": [
@@ -1008,6 +1035,16 @@
                   "null"
                 ],
                 "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The paths ACP's `locations` name in this update."
+              },
+              "raw_input": {
+                "description": "ACP's `rawInput` in this update, left out over 4 KiB."
               }
             },
             "required": [
@@ -1062,6 +1099,11 @@
                 "type": "string",
                 "const": "approval_request"
               },
+              "id": {
+                "type": "string",
+                "description": "The request's id, which `shed approve --request` names.",
+                "default": ""
+              },
               "tool": {
                 "type": "string",
                 "description": "The tool call's title."
@@ -1072,6 +1114,9 @@
                   "$ref": "#/components/schemas/ApprovalOption"
                 },
                 "description": "The choices."
+              },
+              "call": {
+                "description": "ACP's `toolCall` as the agent sent it, without `content`."
               }
             },
             "required": [
@@ -1607,6 +1652,50 @@
       }
     },
     {
+      "name": "agents",
+      "description": "Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it).",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/AgentInfo"
+          }
+        }
+      }
+    },
+    {
+      "name": "agents.match",
+      "description": "Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The ACP agent id."
+          }
+        },
+        {
+          "name": "text",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The text, e.g. a pane's screen."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Matched"
+        }
+      }
+    },
+    {
       "name": "rpc.discover",
       "description": "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.",
       "paramStructure": "by-name",
@@ -1853,6 +1942,13 @@
             ],
             "description": "The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own."
           },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the state came from: `reported`, `rule:<id>` (a screen rule) or `silence` (`idle_after`)."
+          },
           "id": {
             "type": [
               "string",
@@ -1918,6 +2014,24 @@
             "format": "uint64",
             "minimum": 0,
             "description": "CPU use since the previous sample, in percent of one core."
+          },
+          "agent_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "ACP: the agent's own processes' memory, in MiB: the bridge, and the adapter and agent as the turn began."
+          },
+          "work_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "ACP: the memory of everything else in the tree, what the agent started, in MiB."
           }
         },
         "required": [
@@ -1979,6 +2093,49 @@
               }
             ],
             "description": "The agent's last `usage_update`."
+          },
+          "turn_ended": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When the last turn ended, unix seconds."
+          },
+          "cache_lifetime": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The prompt cache's likely lifetime on this login in seconds, from the provider record's `cache`."
+          },
+          "cache_likely": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "While idle, `warm` or `cold`: what the prompt cache likely is, by the idle time against `cache_lifetime`."
+          },
+          "ready_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Milliseconds from `run` to the session being ready."
+          },
+          "first_token_ms": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Milliseconds from the first prompt to the first chunk of its reply."
           }
         },
         "required": [
@@ -2003,6 +2160,28 @@
           },
           "cost": {
             "description": "The session's total cost so far (`amount`, `currency`), when the agent reports it."
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tokens"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last turn's tokens, when the agent's prompt responses carry them."
+          },
+          "total": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tokens"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The session's tokens over its turns so far, when the agent's prompt responses carry them."
           }
         },
         "required": [
@@ -2010,6 +2189,42 @@
           "size"
         ],
         "description": "An ACP session's context window use and cost, as the agent last reported it."
+      },
+      "Tokens": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens neither read from nor written to the prompt cache."
+          },
+          "cache_read": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens read from the prompt cache."
+          },
+          "cache_write": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens written to the prompt cache."
+          },
+          "output": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Output tokens."
+          }
+        },
+        "required": [
+          "input",
+          "cache_read",
+          "cache_write",
+          "output"
+        ],
+        "description": "Tokens a turn or a session spent, as the agent's prompt responses report them."
       },
       "ReadResult": {
         "type": "object",
@@ -2130,6 +2345,14 @@
               "prompt": {
                 "type": "string",
                 "description": "The prompt text."
+              },
+              "agent": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "description": "The bridge's to the server: the agent's own pids as the turn began; never in the event stream."
               }
             },
             "required": [
@@ -2181,6 +2404,16 @@
                   "null"
                 ],
                 "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The paths ACP's `locations` name in this update."
+              },
+              "raw_input": {
+                "description": "ACP's `rawInput` in this update, left out over 4 KiB."
               }
             },
             "required": [
@@ -2235,6 +2468,11 @@
                 "type": "string",
                 "const": "approval_request"
               },
+              "id": {
+                "type": "string",
+                "description": "The request's id, which `shed approve --request` names.",
+                "default": ""
+              },
               "tool": {
                 "type": "string",
                 "description": "The tool call's title."
@@ -2245,6 +2483,9 @@
                   "$ref": "#/components/schemas/ApprovalOption"
                 },
                 "description": "The choices."
+              },
+              "call": {
+                "description": "ACP's `toolCall` as the agent sent it, without `content`."
               }
             },
             "required": [
@@ -2529,6 +2770,14 @@
               "prompt": {
                 "type": "string",
                 "description": "The prompt text."
+              },
+              "agent": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "description": "The bridge's to the server: the agent's own pids as the turn began; never in the event stream."
               }
             },
             "required": [
@@ -2580,6 +2829,16 @@
                   "null"
                 ],
                 "description": "ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one."
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The paths ACP's `locations` name in this update."
+              },
+              "raw_input": {
+                "description": "ACP's `rawInput` in this update, left out over 4 KiB."
               }
             },
             "required": [
@@ -2634,6 +2893,11 @@
                 "type": "string",
                 "const": "approval_request"
               },
+              "id": {
+                "type": "string",
+                "description": "The request's id, which `shed approve --request` names.",
+                "default": ""
+              },
               "tool": {
                 "type": "string",
                 "description": "The tool call's title."
@@ -2644,6 +2908,9 @@
                   "$ref": "#/components/schemas/ApprovalOption"
                 },
                 "description": "The choices."
+              },
+              "call": {
+                "description": "ACP's `toolCall` as the agent sent it, without `content`."
               }
             },
             "required": [
@@ -3113,6 +3380,436 @@
           "stderr"
         ],
         "description": "`exec` result."
+      },
+      "AgentInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ACP agent id."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the record came from: `built-in` or the user file's path."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Provider"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider record."
+          },
+          "installed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Agent"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The installed adapter."
+          },
+          "medians": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Medians"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The medians of its last sessions' timings, when any session got a first token."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "description": "One `agents` entry: an agent shed has a provider record for, installed, or both."
+      },
+      "Provider": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The ACP agent id (`shed agents add <id>`).",
+            "default": ""
+          },
+          "agent": {
+            "type": "string",
+            "description": "The PTY agent's name, as `shed setup` takes it.",
+            "default": ""
+          },
+          "auth_failures": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Text in a line that says the login expired.",
+            "default": []
+          },
+          "limit": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Text in a line that says a usage limit was hit.",
+            "default": []
+          },
+          "resets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Markers in a limit line that the reset time follows.",
+            "default": []
+          },
+          "hooks": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Hooks"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `shed state` hooks `shed setup` writes.",
+            "default": null
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that logs in.",
+            "default": null
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that shows whether it is logged in.",
+            "default": null
+          },
+          "logout": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that logs out.",
+            "default": null
+          },
+          "config_dir_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that moves its config folder.",
+            "default": null
+          },
+          "settings_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that names its settings.",
+            "default": null
+          },
+          "effort_args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that set the effort, `{effort}` standing for one of `efforts`.",
+            "default": []
+          },
+          "efforts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The effort levels it takes.",
+            "default": []
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "description": "The screens that set its state, for a terminal labelled `agent=<agent>`.",
+            "default": []
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Quota"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where its prompt responses' `_meta` carries the turn's tokens.",
+            "default": null
+          },
+          "cache": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cache"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How long its prompt cache lives on each login.",
+            "default": null
+          }
+        },
+        "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
+      },
+      "Hooks": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Its config file, under the home folder."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Each hook event and the state it reports."
+          }
+        },
+        "required": [
+          "file",
+          "events"
+        ],
+        "description": "A PTY agent's hook table."
+      },
+      "Rule": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Its name; `get` shows `rule:<id>` as the state's `from`."
+          },
+          "state": {
+            "type": "string",
+            "description": "The state it sets."
+          },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it is blocked: `permission`, `question` or `auth`.",
+            "default": null
+          },
+          "priority": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The highest matching rule wins; the agent's own report has priority 0."
+          },
+          "region": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "How many of the screen's last non-blank lines it looks at."
+          },
+          "any": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The texts it matches, any one of them."
+          },
+          "version": {
+            "type": "string",
+            "description": "The agent version its golden screen was captured from."
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "priority",
+          "region",
+          "any",
+          "version"
+        ],
+        "description": "A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is\n`state`. Above priority 0 it outranks the agent's own report; at or below, it applies only without one."
+      },
+      "Quota": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys from `_meta` down to the object of counters."
+          },
+          "input": {
+            "type": "string",
+            "description": "The input tokens' key."
+          },
+          "cache_read": {
+            "type": "string",
+            "description": "The cache reads' key."
+          },
+          "cache_write": {
+            "type": "string",
+            "description": "The cache writes' key."
+          },
+          "output": {
+            "type": "string",
+            "description": "The output tokens' key."
+          }
+        },
+        "required": [
+          "path",
+          "input",
+          "cache_read",
+          "cache_write",
+          "output"
+        ],
+        "description": "The keys of a turn's tokens in a prompt response's `_meta`."
+      },
+      "Cache": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "plan": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds on a subscription plan, the login without an API variable."
+          },
+          "api": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds on an API key."
+          },
+          "api_vars": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables that, set and not empty in the agent's environment, mean an API key."
+          }
+        },
+        "required": [
+          "plan",
+          "api",
+          "api_vars"
+        ],
+        "description": "The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key."
+      },
+      "Agent": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The registry id."
+          },
+          "version": {
+            "type": "string",
+            "description": "The pinned version."
+          },
+          "distribution": {
+            "type": "string",
+            "description": "The distribution it came from: `binary`, `npx` or `uvx`."
+          },
+          "cmd": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The ACP adapter's command line (`env K=V …` first when the registry sets variables)."
+          }
+        },
+        "required": [
+          "id",
+          "version",
+          "distribution",
+          "cmd"
+        ],
+        "description": "One installed ACP agent."
+      },
+      "Medians": {
+        "type": "object",
+        "properties": {
+          "sessions": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many sessions they are over."
+          },
+          "ready_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The median of [`AcpSession::ready_ms`]."
+          },
+          "first_token_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The median of [`AcpSession::first_token_ms`]."
+          }
+        },
+        "required": [
+          "sessions",
+          "ready_ms",
+          "first_token_ms"
+        ],
+        "description": "An agent's medians over its last `$SHED_MEDIAN_OF` (default 20) ACP sessions that got a first token."
+      },
+      "Matched": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first line that says a usage limit was hit (the state `rate-limited`)."
+          },
+          "resets": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reset time that line gives."
+          },
+          "auth": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first line that says the login expired."
+          }
+        },
+        "description": "`agents.match` result: the lines the agent's rules find."
       }
     },
     "errors": {

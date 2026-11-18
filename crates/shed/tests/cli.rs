@@ -672,9 +672,15 @@ fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
     let names: Vec<&str> = top
         .lines()
         .skip(1)
+        .filter(|l| !l.contains(" awake, "))
         .filter_map(|l| l.split(' ').next())
         .collect();
     assert_eq!(names, ["mem", "small"], "{top}");
+    let totals = top.lines().last().unwrap_or_default();
+    assert!(
+        totals.starts_with("2 awake, 0 hibernated; agent 0M, work "),
+        "{top}"
+    );
 }
 
 #[test]
@@ -985,4 +991,36 @@ fn notify_puts_one_note_in_an_idle_parent_and_none_while_it_works() {
     let all = upto("mark3");
     assert_eq!(count(&all, "[shed] a blocked: needs review"), 1, "{all}");
     assert_eq!(count(&all, "[shed] b error"), 1, "{all}");
+}
+
+#[test]
+fn a_trust_prompt_on_screen_outranks_a_reported_working_until_it_leaves() {
+    let dir = temp_dir("rules");
+    let _server = Server::start(&dir);
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../shed-server/tests/screens/claude-trust.txt")
+        .canonicalize()
+        .expect("the golden trust screen");
+    let agent = "printf '\\033]7501;state=working\\007'; cat \"$0\"; read x; printf '\\033[2J\\033[Hgo on\\n'; read y";
+    let golden = golden.to_str().expect("utf-8 path");
+    start(
+        &dir,
+        "lane",
+        &["--label", "agent=claude"],
+        &["sh", "-c", agent, golden],
+    );
+    let until = |state: &str| {
+        shed_in(&dir, &["wait", "lane", "--until", state, "--timeout", "10"])
+            .status
+            .success()
+    };
+    assert!(until("blocked"), "{}", info(&dir, "lane"));
+    let reported = &info(&dir, "lane")["reported"];
+    assert_eq!(reported["state"], "blocked", "{reported}");
+    assert_eq!(reported["kind"], "permission", "{reported}");
+    assert_eq!(reported["from"], "rule:trust", "{reported}");
+    shed_ok(&dir, &["keys", "lane", "enter"]);
+    assert!(until("working"), "{}", info(&dir, "lane"));
+    let reported = &info(&dir, "lane")["reported"];
+    assert_eq!(reported["from"], "reported", "{reported}");
 }
