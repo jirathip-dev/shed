@@ -87,9 +87,8 @@ impl Drop for Busy {
     }
 }
 
-pub(crate) async fn enter(line: &str) -> Option<Busy> {
-    let method = serde_json::from_str::<Value>(line).ok();
-    if method.as_ref().and_then(|v| v.get("method")?.as_str()) == Some(Method::Wait.name()) {
+pub(crate) async fn enter(method: &str) -> Option<Busy> {
+    if method == Method::Wait.name() {
         return None;
     }
     loop {

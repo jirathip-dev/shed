@@ -476,6 +476,7 @@ struct Session {
     watching: Option<String>,
     readonly: BTreeSet<String>,
     links: Arc<links::Links>,
+    busy: Option<handover::Busy>,
 }
 
 fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> Option<&'a str> {
@@ -523,7 +524,6 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
         if line.trim().is_empty() {
             continue;
         }
-        let busy = handover::enter(&line).await;
         let (response, changed) =
             registry::answering(respond(&registry, &mut session, &line)).await;
         let flushed = lock(&registry).saver.flushed_to(changed);
@@ -535,7 +535,7 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
                 return;
             }
         }
-        drop(busy);
+        session.busy = None;
         if let Some(stream) = session.stream.take()
             && let Some(out) = out.take()
         {
@@ -553,6 +553,7 @@ async fn respond(registry: &Shared, session: &mut Session, line: &str) -> Option
         }
         Err((id, e)) => return Some(Response::err(id, e)),
     };
+    session.busy = handover::enter(&request.method).await;
     let result = dispatch(registry, session, &request).await;
     let id = request.id?;
     Some(match result {

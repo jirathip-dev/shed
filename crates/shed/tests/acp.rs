@@ -735,10 +735,10 @@ fn each_session_records_start_to_ready_and_first_token_and_agents_gives_their_me
         ok(&dir, &["kill", name]);
     }
     assert!(
-        first[0] >= 2400,
-        "busy's first text comes after 2.4 s: {first:?}"
+        first[0] >= 2000,
+        "busy's first text comes after its 2.4 s of progress: {first:?}"
     );
-    assert!(first[1] < 2400 && first[2] < 2400, "{first:?}");
+    assert!(first[1] < 2000 && first[2] < 2000, "{first:?}");
     let middle = |v: &[u64]| {
         let mut v = v.to_vec();
         v.sort_unstable();
