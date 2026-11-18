@@ -1,0 +1,10 @@
+Decided: on an oom_kill rise the event names the previous sample's largest child if it is gone now, else a started child left as a zombie, by /proc/<pid>/comm
+Because: "names the process that was killed (and its last-known RSS when there is one)"
+Because: crates/shed-server/src/registry.rs:155
+Decided: the test samples every 4 s on a scope host so the kernel ends the hog before any sample sees it, and requires ended_by kernel there, shed elsewhere
+Because: "The regression test forces the kernel path (no reliance on who wins the race)"
+Rejected: the previous largest even when it still runs — it names a process the kernel did not end
+Rejected: the kernel log or journal for the OOM record — unprivileged users cannot read it on Ubuntu, and memory.events carries no name
+Check: an agent that reaps its child at once (before the next sample) and was never sampled still gives ?; the fake agent leaves the zombie, as many agents do
+Check: CI at e505df5 (test only) failed on stable ubuntu and msrv with process ?; at 8e94f65 both pass, not skipped
+Owner: when the kernel ends a program over a terminal's memory limit, shed's event now says which program it was
