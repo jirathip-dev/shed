@@ -9,10 +9,9 @@ pub fn scoped() -> bool {
     static FOUND: OnceLock<bool> = OnceLock::new();
     *FOUND.get_or_init(|| {
         let check = r#"cat "/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max""#;
-        let args = ["--user", "--scope", "--quiet", "-p", "MemoryMax=1G"];
-        let args = args.into_iter().chain(["sh", "-c", check]);
+        let args = in_scope(&["sh".to_owned(), "-c".to_owned(), check.to_owned()], 1024);
         cfg!(target_os = "linux")
-            && crate::runner::output("systemd-run", args, &[])
+            && crate::runner::output("systemd-run", args.iter().skip(1), &[])
                 .is_ok_and(|o| o.stdout.trim_ascii() == b"1073741824")
     })
 }
@@ -28,10 +27,10 @@ pub fn mechanism() -> &'static str {
 }
 
 pub(crate) fn in_scope(cmd: &[String], mb: u64) -> Vec<String> {
-    let max = [format!("MemoryMax={mb}M"), "--".to_owned()];
-    let systemd = "systemd-run --user --scope --quiet -p"
-        .split(' ')
-        .map(str::to_owned);
+    let max = format!("MemoryMax={mb}M");
+    let systemd = "systemd-run --user --scope --quiet -p OOMPolicy=continue -p MemorySwapMax=0 -p";
+    let systemd = systemd.split(' ').map(str::to_owned);
+    let max = [max, "--".to_owned()];
     systemd.chain(max).chain(cmd.iter().cloned()).collect()
 }
 

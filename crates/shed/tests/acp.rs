@@ -941,7 +941,9 @@ fn a_limited_terminal_runs_in_its_own_scope_its_children_ranked_first_and_none_o
         let (hog, rest): (Vec<_>, Vec<_>) = tree.iter().partition(|p| p.rss_bytes > 40 << 20);
         hog.iter().all(|p| adj(p.pid) == "1000")
             && !hog.is_empty()
-            && rest.iter().all(|p| adj(p.pid) == "0")
+            && rest
+                .iter()
+                .all(|p| adj(p.pid) == adj(std::process::id().cast_signed()))
     });
 
     server.0.kill().expect("kill shed serve");
