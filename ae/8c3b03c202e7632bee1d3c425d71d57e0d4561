@@ -1,0 +1,13 @@
+Decided: the listener crosses the exec as the new image's stdin; the PTY masters ride a connection serve opens to its own listener, taken from the backlog by its first byte.
+Because: crates/shed-server/src/handover.rs:189
+Rejected: the listener in the SCM_RIGHTS queue as the ADR drew it — on macOS it arrived flushed (accept gave ECONNABORTED, accepted sockets read EOF), measured with a Python receiver exec'd by serve.
+Decided: the reaper waits by pid (waitpid), so an inherited terminal keeps its real exit status.
+Because: crates/shed-core/src/terminal.rs:657
+Decided: Refusal is a one-line reason string and Start a bool, to save cap lines.
+Because: "Budget: about +340 src lines (ADR slices 1-2)"
+Check: the AC test crates/shed/tests/handover.rs runs both handovers; the failed-exec unit test uses a path with a NUL byte so std fails before resetting the test process's signals.
+Check: src/ net is +632, over the cap by 175; the raise is owner-decided in q1990.
+Decided: the drain guard reads the method respond already parsed, not a second Value parse per request (bench-acp).
+Because: crates/shed-server/src/lib.rs:556
+Rejected: a read-first PTY loop for the reader — the master is blocking, so detach hung the handover test.
+Owner: serve can now restart into a new build without dropping any terminal; the line cap needs a raise (q1990).
