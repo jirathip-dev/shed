@@ -184,6 +184,11 @@ All notable changes to this project are documented here. The format follows
 - CI publishes signed, notarized builds after green pushes: `build-<sha7>` releases from main and
   `build-staging-<sha7>` prereleases from staging, for macOS (arm64) and Linux (x86_64), with `SHA256SUMS`
   (docs/releases.md).
+- `shed serve` can hand over to a new build in place: the `handover` method checks the binary
+  (`handover.check`), then replaces the server on the same process id, keeping the socket and every
+  running terminal, ACP sessions included, with its screen, children and exit statuses. Clients see their
+  connection close and reconnect; an `events` reader with an older `since` gets `reset`. A refused check or
+  a failed exec leaves the server serving as it was.
 
 ### Changed
 

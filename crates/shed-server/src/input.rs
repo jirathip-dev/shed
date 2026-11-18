@@ -129,7 +129,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_send_waits_for_a_persons_unsent_line_and_times_out_when_they_stay_silent() {
         let dir = crate::temp_dir("draft");
-        let registry = Registry::load(&dir.join("state.json"), &dir.join("shed.sock")).unwrap();
+        let registry =
+            Registry::load(&dir.join("state.json"), &dir.join("shed.sock"), Vec::new()).unwrap();
         let registry = Arc::new(Mutex::new(registry));
         let cmd = ["sh", "-c", "stty -echo; echo ready; exec cat"];
         let run = json!({"name": "t", "cwd": dir, "cmd": cmd});

@@ -22,6 +22,7 @@ use serde::Serialize;
 use serde_json::{Map, Value, json};
 use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
+use shed_server::handover;
 use shed_server::machines::{self, Machine};
 use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
@@ -49,12 +50,7 @@ struct Cli {
 enum Command {
     Hello,
     Schema,
-    Serve {
-        #[arg(long)]
-        detach: bool,
-        #[arg(long, value_name = "S", default_value_t = 2.0)]
-        sample: f64,
-    },
+    Serve(ServeArgs),
     Run(Box<RunArgs>),
     Ls {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
@@ -151,6 +147,18 @@ enum Command {
 }
 
 #[derive(Args)]
+struct ServeArgs {
+    #[arg(long)]
+    detach: bool,
+    #[arg(long, value_name = "S", default_value_t = 2.0)]
+    sample: f64,
+    #[arg(long, hide = true)]
+    inherit: bool,
+    #[arg(long, hide = true)]
+    preflight: bool,
+}
+
+#[derive(Args)]
 struct BridgeArgs {
     #[arg(long)]
     socket: PathBuf,
@@ -244,7 +252,7 @@ impl Server<'_> {
             command,
             Command::Hello
                 | Command::Schema
-                | Command::Serve { .. }
+                | Command::Serve(_)
                 | Command::Connect { .. }
                 | Command::Machine(
                     MachineCommand::Add { .. } | MachineCommand::Ls | MachineCommand::Rm { .. }
@@ -509,7 +517,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
         Command::Schema => out::line(format_args!("{:#}", shed_server::proto::openrpc())),
-        Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
+        Command::Serve(args) => serve(&paths, cli.dir.as_deref(), &args)?,
         Command::Run(args) => run_terminal(&server, json, *args)?,
         Command::Ls { labels, parent } => {
             let labels = labels.into_iter().collect();
@@ -605,15 +613,36 @@ fn ls(server: &Server, json: bool, params: &LsParams) -> anyhow::Result<()> {
     print(json, &list, || table(&list, false))
 }
 
-fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow::Result<()> {
-    if detach {
+fn serve(paths: &Paths, dir: Option<&Path>, args: &ServeArgs) -> anyhow::Result<()> {
+    let sample = args.sample;
+    if args.preflight {
+        out::line(handover::preflight(paths)?);
+        return Ok(());
+    }
+    if args.detach {
         return serve_detached(paths, dir, Some(sample));
     }
     let every = Duration::try_from_secs_f64(sample)
         .ok()
         .filter(|d| !d.is_zero())
         .context("--sample must be a positive number of seconds")?;
-    shed_server::serve(paths, every).context("shed serve")
+    let again = handover::Restart {
+        exe: std::env::current_exe()?,
+        inherit: [serve_args(dir, Some(sample)), vec!["--inherit".into()]].concat(),
+        preflight: [serve_args(dir, None), vec!["--preflight".into()]].concat(),
+    };
+    shed_server::serve(paths, every, args.inherit, again).context("shed serve")
+}
+
+fn serve_args(dir: Option<&Path>, sample: Option<f64>) -> Vec<OsString> {
+    let mut args = vec![OsString::from("serve")];
+    if let Some(dir) = dir {
+        args.extend(["--dir".into(), dir.into()]);
+    }
+    if let Some(sample) = sample {
+        args.extend(["--sample".into(), sample.to_string().into()]);
+    }
+    args
 }
 
 fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()> {
@@ -1158,13 +1187,7 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     if UnixStream::connect(&paths.socket).is_ok() {
         bail!("a shed server already runs on {}", paths.socket.display());
     }
-    let mut args = vec![OsString::from("serve")];
-    if let Some(dir) = dir {
-        args.extend(["--dir".into(), dir.into()]);
-    }
-    if let Some(sample) = sample {
-        args.extend(["--sample".into(), sample.to_string().into()]);
-    }
+    let args = serve_args(dir, sample);
     let mut child = shed_server::runner::detached(&std::env::current_exe()?, args)
         .context("starting shed serve")?;
     let stdout = child.stdout.take().context("shed serve stdout")?;

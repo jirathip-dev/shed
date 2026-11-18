@@ -301,6 +301,24 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 {"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0"},"openrpc":"1.3.2"}}
 ```
 
+### `handover.check`
+
+Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"handover.check","params":{"build":"1a2b3c4","candidate":"/home/user/.cargo/bin/shed.new"}}
+{"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
+```
+
+### `handover`
+
+Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"handover","params":{"build":"1a2b3c4"}}
+{"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
+```
+
 ## Events
 
 An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in
@@ -369,6 +387,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32007 | `NO_LINK` |
 | -32008 | `IO` |
 | -32009 | `DRAFT_HELD` |
+| -32010 | `HANDOVER_REFUSED` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 3-4 / server 56de739 protocol 1-2; update the server and restart shed serve"}}

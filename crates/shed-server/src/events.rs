@@ -89,6 +89,15 @@ impl Events {
         self.last.send_replace(self.seq);
     }
 
+    pub(crate) fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub(crate) fn resume(&mut self, seq: u64) {
+        let mut log = lock(&self.log);
+        (self.seq, log.seq, log.evicted) = (seq, seq, seq);
+    }
+
     pub(crate) fn subscribe(&mut self, p: EventsParams) -> Subscriber {
         Subscriber {
             log: Arc::clone(&self.log),
