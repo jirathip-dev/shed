@@ -210,7 +210,11 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
     match Client::over(ours) {
         Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
             let there = e.message.split(" / server ").nth(1).unwrap_or_default();
-            let there = there.split(':').next().unwrap_or_default().to_owned();
+            let there = there
+                .split(" protocol ")
+                .next()
+                .unwrap_or_default()
+                .to_owned();
             Err(Error::MachineVersion {
                 machine: machine.name.clone(),
                 here: BUILD.to_owned(),

@@ -12,9 +12,8 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::{self, File};
-use std::io::{self, BufWriter, IoSlice, IoSliceMut, Write as _};
-use std::mem::MaybeUninit;
-use std::os::fd::{AsFd, OwnedFd};
+use std::io::{self, BufWriter, Write as _};
+use std::os::fd::{AsFd as _, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -36,11 +35,6 @@ use agent_client_protocol::v1::schema::{
 use agent_client_protocol::v1::{ConnectionTo, Responder};
 use agent_client_protocol::{Agent, ErrorCode, JsonRpcMessage as _, Lines, UntypedMessage};
 use futures::{sink, stream};
-use rustix::io::{FdFlags, fcntl_setfd};
-use rustix::net::{
-    RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, SendAncillaryBuffer,
-    SendAncillaryMessage, SendFlags, recvmsg, sendmsg,
-};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
@@ -101,40 +95,6 @@ pub fn pty_socket(socket: &Path, name: &str) -> PathBuf {
     socket.with_file_name(format!("pty-{name}.sock"))
 }
 
-pub(crate) fn hand_over(to: impl AsFd, master: impl AsFd, said: &[u8]) -> io::Result<()> {
-    let fds = [master.as_fd()];
-    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
-    let mut ancillary = SendAncillaryBuffer::new(&mut space);
-    ancillary.push(SendAncillaryMessage::ScmRights(&fds));
-    sendmsg(
-        to,
-        &[IoSlice::new(said)],
-        &mut ancillary,
-        SendFlags::empty(),
-    )?;
-    Ok(())
-}
-
-pub(crate) fn take_over(from: impl AsFd) -> io::Result<(OwnedFd, Vec<u8>)> {
-    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
-    let mut ancillary = RecvAncillaryBuffer::new(&mut space);
-    let mut said = vec![0; 4096];
-    let got = recvmsg(
-        from,
-        &mut [IoSliceMut::new(&mut said)],
-        &mut ancillary,
-        RecvFlags::empty(),
-    )?;
-    said.truncate(got.bytes);
-    let fd = ancillary.drain().find_map(|m| match m {
-        RecvAncillaryMessage::ScmRights(mut fds) => fds.next(),
-        _ => None,
-    });
-    let fd = fd.ok_or(io::ErrorKind::InvalidData)?;
-    fcntl_setfd(&fd, FdFlags::CLOEXEC)?;
-    Ok((fd, said))
-}
-
 fn lend(master: OwnedFd, at: &Path, reported: Arc<Mutex<Option<Reported>>>) -> io::Result<()> {
     fs::remove_file(at).ok();
     let listener = UnixListener::bind(at)?;
@@ -142,7 +102,7 @@ fn lend(master: OwnedFd, at: &Path, reported: Arc<Mutex<Option<Reported>>>) -> i
     std::thread::spawn(move || {
         for server in listener.incoming().flatten() {
             let said = serde_json::to_vec(&*crate::lock(&reported)).unwrap_or_default();
-            hand_over(&server, &master, &said).ok();
+            crate::handover::hand_over(&server, &[master.as_fd()], &said).ok();
         }
     });
     Ok(())
@@ -1331,7 +1291,8 @@ fn run(
     let (mcp, meta) = launch_options()?;
     let reported = Arc::default();
     let lent = pty_socket(socket, name);
-    if let Ok((master, _)) = take_over(io::stderr()) {
+    let taken = crate::handover::take_over(io::stderr(), 1).map(|(fds, _)| fds.into_iter().next());
+    if let Ok(Some(master)) = taken {
         rustix::stdio::dup2_stderr(io::stdin()).map_err(io::Error::from)?;
         lend(master, &lent, Arc::clone(&reported))?;
     }

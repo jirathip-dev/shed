@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    ExecParams, ExecResult, FileParams, Link, LinkState, MachineStats, Method, Sample, StatsParams,
+    ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Link,
+    LinkState, MachineStats, Method, Sample, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -83,6 +84,30 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
             .unwrap(),
             json!({}),
         ),
+        Method::HandoverCheck => (
+            to_value(HandoverCheckParams {
+                build: "1a2b3c4".into(),
+                candidate: PathBuf::from("/home/user/.cargo/bin/shed.new"),
+            })
+            .unwrap(),
+            handover(),
+        ),
+        Method::Handover => (
+            to_value(HandoverParams {
+                build: "1a2b3c4".into(),
+            })
+            .unwrap(),
+            handover(),
+        ),
         _ => return None,
     })
+}
+
+fn handover() -> Value {
+    to_value(Handover {
+        from: "4254d78".into(),
+        to: "1a2b3c4".into(),
+        terminals: 12,
+    })
+    .unwrap()
 }

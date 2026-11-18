@@ -40,20 +40,21 @@ impl History {
         u64::try_from(self.bytes).unwrap_or(u64::MAX)
     }
 
-    /// A screen of `size` within the caps, fed the tail of the log (blank without one).
+    /// A screen of `size` within the caps, fed the tail of the log (blank without one), then `repaint`,
+    /// or without one a new line off the alternate screen, as a restart leaves it.
     ///
     /// # Errors
     /// [`io::Error`] when the log exists but cannot be read.
-    pub fn restore(&self, size: Size) -> io::Result<Screen> {
+    pub fn restore(&self, size: Size, repaint: Option<&str>) -> io::Result<Screen> {
         let mut screen = Screen::bounded(size, self.lines, self.bytes);
         let file = self.log.as_ref().map(File::open);
         match file {
             Some(Ok(file)) => {
                 screen.feed(&tail(file, self.max())?);
-                screen.feed(b"\x1b[?1049l\r\n");
+                screen.feed(repaint.map_or(b"\x1b[?1049l\r\n".as_slice(), str::as_bytes));
             }
             Some(Err(e)) if e.kind() != io::ErrorKind::NotFound => return Err(e),
-            _ => {}
+            _ => screen.feed(repaint.unwrap_or_default().as_bytes()),
         }
         screen.take_replies();
         screen.take_reports();
@@ -201,9 +202,9 @@ mod tests {
             assert!(log.len <= 128 && log.len == fs::metadata(&log.path).expect("meta").len());
         }
         let size = Size { rows: 2, cols: 20 };
-        let screen = history.restore(size).expect("restore");
+        let screen = history.restore(size, None).expect("restore");
         assert_eq!(screen.history(100), "line97\nline98\nline99");
-        let none = History::default().restore(size).expect("no log");
+        let none = History::default().restore(size, None).expect("no log");
         assert_eq!(none.history(100), "");
         fs::remove_dir_all(dir).expect("clean");
     }

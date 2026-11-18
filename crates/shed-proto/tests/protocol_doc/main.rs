@@ -19,6 +19,7 @@ fn peer(build: &str, protocol: u32) -> Hello {
     Hello {
         build: build.into(),
         protocol,
+        oldest: Some(protocol.saturating_sub(1)),
         ..Hello::ours()
     }
 }
@@ -266,7 +267,15 @@ fn method_names_round_trip() {
 #[test]
 fn version_refusal_reads_as_specified() {
     assert_eq!(
-        RpcError::version(&peer("02fcf97", 2), &peer("56de739", 1)).message,
-        "SHED_VERSION: client 02fcf97 / server 56de739: protocol 2 vs 1; restart shed serve"
+        RpcError::version(&peer("02fcf97", 4), &peer("56de739", 2)).message,
+        "SHED_VERSION: client 02fcf97 protocol 3-4 / server 56de739 protocol 1-2; update the server and restart shed serve"
+    );
+    let old = Hello {
+        oldest: None,
+        ..peer("02fcf97", 0)
+    };
+    assert_eq!(
+        RpcError::version(&old, &peer("56de739", 2)).message,
+        "SHED_VERSION: client 02fcf97 protocol 0-0 / server 56de739 protocol 1-2; update the client"
     );
 }

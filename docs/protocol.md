@@ -2,15 +2,19 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
-Version: `0.0.0`, protocol `1`. Client and server must speak the same protocol.
+Version: `0.0.0`, protocol `2`, oldest served `1`.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
 response per line; a request without an `id` is a notification and gets no response.
 
-Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`; another
-product or protocol is refused with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>;
-restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `protocol` as 0).
+Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`. Each side
+sends its `protocol` and the `oldest` it still speaks: a server the oldest protocol it serves, a client
+the oldest server protocol it accepts. A server on protocol N serves N and N-1 for one release window,
+and answers an N-1 client in N-1's shapes: its `hello` result carries `protocol` N-1 and no `oldest`.
+Another product, or ranges that don't overlap, are refused with `SHED_VERSION: client <sha> protocol
+<a>-<b> / server <sha> protocol <c>-<d>; update <side>` (a peer that sends no `product` shows as
+`unnamed`, no `protocol` as 0, no `oldest` as its `protocol`).
 
 A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the
 exit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;
@@ -29,11 +33,11 @@ tokens, and the `cost` when sent); `parent` names the terminal that started it (
 
 ### `hello`
 
-The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`.
+The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","product":"shed","protocol":1,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","product":"shed","protocol":1,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":1,"product":"shed","protocol":2,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":1,"product":"shed","protocol":2,"version":"0.0.0"}}
 ```
 
 ### `run`
@@ -297,6 +301,24 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 {"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0"},"openrpc":"1.3.2"}}
 ```
 
+### `handover.check`
+
+Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"handover.check","params":{"build":"1a2b3c4","candidate":"/home/user/.cargo/bin/shed.new"}}
+{"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
+```
+
+### `handover`
+
+Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"handover","params":{"build":"1a2b3c4"}}
+{"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
+```
+
 ## Events
 
 An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in
@@ -365,7 +387,8 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32007 | `NO_LINK` |
 | -32008 | `IO` |
 | -32009 | `DRAFT_HELD` |
+| -32010 | `HANDOVER_REFUSED` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 / server 56de739: protocol 2 vs 1; restart shed serve"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 3-4 / server 56de739 protocol 1-2; update the server and restart shed serve"}}
 ```

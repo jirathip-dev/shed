@@ -111,7 +111,7 @@ fn hello_prints_the_version() {
 }
 
 #[test]
-fn hello_reports_a_server_of_another_build() {
+fn hello_accepts_a_server_on_the_previous_protocol_and_reports_its_build() {
     let dir = temp_dir("hello-build");
     let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
     let server = std::thread::spawn(move || {
@@ -121,7 +121,7 @@ fn hello_reports_a_server_of_another_build() {
             .read_line(&mut hello)
             .expect("hello");
         let other = json!({"jsonrpc": "2.0", "id": 1, "result":
-            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL}});
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 1}});
         std::io::Write::write_all(&mut stream, format!("{other}\n").as_bytes()).expect("reply");
     });
     let out = shed_in(&dir, &["hello"]);
@@ -166,7 +166,7 @@ fn git_sha() -> String {
 }
 
 #[test]
-fn a_client_of_a_newer_protocol_exits_at_once_with_the_mismatch_line() {
+fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_ranges() {
     let dir = temp_dir("protocol");
     let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
     let (done, held) = std::sync::mpsc::channel::<()>();
@@ -177,7 +177,7 @@ fn a_client_of_a_newer_protocol_exits_at_once_with_the_mismatch_line() {
             .read_line(&mut hello)
             .expect("hello");
         let older = json!({"jsonrpc": "2.0", "id": 1, "result":
-            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 1}});
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 2}});
         std::io::Write::write_all(&mut stream, format!("{older}\n").as_bytes()).expect("reply");
         held.recv_timeout(Duration::from_secs(10)).ok();
     });
@@ -190,8 +190,9 @@ fn a_client_of_a_newer_protocol_exits_at_once_with_the_mismatch_line() {
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
         format!(
-            "shed: SHED_VERSION: client {BUILD} / server 56de739: protocol {PROTOCOL} vs {}; restart shed serve\n",
-            PROTOCOL - 1
+            "shed: SHED_VERSION: client {BUILD} protocol {}-{PROTOCOL} / server 56de739 protocol {1}-{1}; update the server and restart shed serve\n",
+            PROTOCOL - 1,
+            PROTOCOL - 2
         )
     );
     assert!(took < Duration::from_secs(2), "took {took:?}");

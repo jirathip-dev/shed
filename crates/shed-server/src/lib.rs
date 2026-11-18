@@ -8,6 +8,7 @@ pub mod acp;
 pub mod agents;
 pub mod config;
 mod events;
+pub mod handover;
 pub mod hooks;
 mod input;
 pub mod limit;
@@ -267,14 +268,21 @@ async fn record_stats(registry: &Mutex<Registry>) -> Duration {
     Duration::from_secs(wait.max(1))
 }
 
-/// Loads the state, binds the socket (mode 0600, its directory 0700), prints `shed ready <semver> (<sha>)
-/// <socket>` and serves until killed, sampling each terminal's memory and CPU every `sample_every`.
+/// Loads the state, binds the socket (mode 0600, its directory 0700) or, with `inherit`, takes it and the
+/// terminals from the image it replaced, prints `shed ready <semver> (<sha>) <socket>` and serves
+/// until killed, sampling each terminal's memory and CPU every `sample_every`; `handover` restarts it as `again`.
 ///
 /// # Errors
 /// [`Error::AlreadyRunning`] when another server answers on the socket or holds the state file; [`Error::Io`] or
 /// [`Error::Json`] when the state file or socket cannot be set up.
-pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
-    if UnixStream::connect(&paths.socket).is_ok() {
+pub fn serve(
+    paths: &Paths,
+    sample_every: Duration,
+    inherit: bool,
+    again: handover::Restart,
+) -> Result<(), Error> {
+    let inherited = inherit.then(|| handover::take(io::stdin())).flatten();
+    if inherited.is_none() && UnixStream::connect(&paths.socket).is_ok() {
         return Err(Error::AlreadyRunning(paths.socket.clone()));
     }
     if let Some(dir) = paths.state.parent() {
@@ -296,7 +304,7 @@ pub fn serve(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         .worker_threads(workers)
         .enable_all()
         .build()?;
-    let served = runtime.block_on(listen(paths, sample_every));
+    let served = runtime.block_on(listen(paths, sample_every, inherited, again));
     runtime.shutdown_background();
     served
 }
@@ -327,10 +335,22 @@ fn stop_signals() -> io::Result<impl Future<Output = ()>> {
     })
 }
 
-async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
+async fn listen(
+    paths: &Paths,
+    sample_every: Duration,
+    inherited: Option<handover::Inherited>,
+    again: handover::Restart,
+) -> Result<(), Error> {
     let stop = stop_signals()?;
-    let mut loaded = Registry::load(&paths.state, &paths.socket)?;
+    let (listener, masters, early) = match inherited {
+        Some(i) => (Some(i.listener), i.masters, i.early),
+        None => (None, Vec::new(), Vec::new()),
+    };
+    let mut loaded = Registry::load(&paths.state, &paths.socket, masters)?;
     loaded.providers = paths.providers();
+    let (asked, mut handovers) = tokio::sync::mpsc::unbounded_channel();
+    loaded.control = Some(Arc::new(handover::Control { again, asked }));
+    loaded.set_rules();
     let registry = Arc::new(Mutex::new(loaded));
     for (name, term) in lock(&registry).running() {
         watch(&registry, name, term);
@@ -353,21 +373,34 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         .create(control)?;
     let links = Arc::new(links::Links::new(paths.config.clone(), control.to_owned()));
     links.sync(&registry);
-    match fs::remove_file(&paths.socket) {
-        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e.into()),
-        _ => {}
-    }
-    let listener = tokio::net::UnixListener::bind(&paths.socket)?;
-    fs::set_permissions(&paths.socket, fs::Permissions::from_mode(0o600))?;
+    let listener = match listener {
+        Some(listener) => tokio::net::UnixListener::from_std(listener)?,
+        None => bind(&paths.socket)?,
+    };
+    let early = early.into_iter().map(tokio::net::UnixStream::from_std);
+    let early = early.collect::<io::Result<Vec<_>>>()?;
     writeln!(
         io::stdout(),
         "shed ready {LONG_VERSION} {}",
         paths.socket.display()
     )
     .ok();
-    tokio::select! {
-        () = accept(&listener, &registry, &links) => {}
-        () = stop => {}
+    for early in early {
+        tokio::spawn(connection(Arc::clone(&registry), Arc::clone(&links), early));
+    }
+    let mut stop = std::pin::pin!(stop);
+    loop {
+        tokio::select! {
+            () = accept(&listener, &registry, &links) => {}
+            () = &mut stop => break,
+            Some(()) = handovers.recv() => {
+                let (why, back) = handover::run(&registry, &listener).await;
+                for (name, term) in back {
+                    watch(&registry, name, term);
+                }
+                writeln!(io::stderr(), "shed serve: no handover: {why}").ok();
+            }
+        }
     }
     let saved = lock(&registry).close();
     saved.await;
@@ -377,6 +410,16 @@ async fn listen(paths: &Paths, sample_every: Duration) -> Result<(), Error> {
         .map(|t| blocking(move || t.kill(registry::GRACE)));
     futures::future::join_all(ends).await;
     Ok(())
+}
+
+fn bind(socket: &Path) -> io::Result<tokio::net::UnixListener> {
+    match fs::remove_file(socket) {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    let listener = tokio::net::UnixListener::bind(socket)?;
+    fs::set_permissions(socket, fs::Permissions::from_mode(0o600))?;
+    Ok(listener)
 }
 
 async fn accept(listener: &tokio::net::UnixListener, registry: &Shared, links: &Arc<links::Links>) {
@@ -433,6 +476,7 @@ struct Session {
     watching: Option<String>,
     readonly: BTreeSet<String>,
     links: Arc<links::Links>,
+    busy: Option<handover::Busy>,
 }
 
 fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> Option<&'a str> {
@@ -491,6 +535,7 @@ async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::ne
                 return;
             }
         }
+        session.busy = None;
         if let Some(stream) = session.stream.take()
             && let Some(out) = out.take()
         {
@@ -508,6 +553,7 @@ async fn respond(registry: &Shared, session: &mut Session, line: &str) -> Option
         }
         Err((id, e)) => return Some(Response::err(id, e)),
     };
+    session.busy = handover::enter(&request.method).await;
     let result = dispatch(registry, session, &request).await;
     let id = request.id?;
     Some(match result {
@@ -581,7 +627,7 @@ async fn dispatch(
             return Err(RpcError::version(&p, &Hello::ours()));
         }
         session.hello = true;
-        return json(&Hello::ours());
+        return json(&Hello::answer(&p));
     }
     if !session.hello && method != Method::Discover {
         return Err(RpcError::new(
@@ -613,6 +659,9 @@ async fn dispatch(
         }
         Method::MachineStats => return machine_stats(registry, params(request)?).await,
         Method::Discover => return Ok(proto::openrpc()),
+        Method::HandoverCheck | Method::Handover => {
+            return handover::answer(registry, method, request).await;
+        }
         Method::Agents | Method::AgentsMatch => return agents(registry, method, request).await,
         _ => {}
     }
@@ -931,8 +980,8 @@ impl Client {
     /// Connects to the server on `socket` and checks it speaks this protocol.
     ///
     /// # Errors
-    /// [`Error::Rpc`] with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`
-    /// on a protocol mismatch; [`Error::Io`] when nothing listens.
+    /// [`Error::Rpc`] with `SHED_VERSION: client <sha> protocol <a>-<b> / server <sha> protocol <c>-<d>; update <side>`
+    /// when the protocol ranges do not overlap; [`Error::Io`] when nothing listens.
     pub fn connect(socket: &Path) -> Result<Self, Error> {
         Self::over(UnixStream::connect(socket)?)
     }
@@ -1064,7 +1113,7 @@ mod tests {
 
     async fn peer(name: &str, beat: bool) -> (tokio::task::JoinHandle<()>, OwnedWriteHalf) {
         let dir = temp_dir(name);
-        let reg = Registry::load(&dir.join("state.json"), &dir.join("shed.sock"));
+        let reg = Registry::load(&dir.join("state.json"), &dir.join("shed.sock"), Vec::new());
         let registry = Arc::new(Mutex::new(reg.expect("a registry")));
         let (server, client) = tokio::net::UnixStream::pair().expect("pair");
         let conn = tokio::spawn(connection(registry, Arc::default(), server));

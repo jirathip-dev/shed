@@ -7,7 +7,7 @@
   "methods": [
     {
       "name": "hello",
-      "description": "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`.",
+      "description": "The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -43,8 +43,21 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0,
-            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.",
+            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0. A server answers a client on an older protocol it still serves with that protocol.",
             "default": 0
+          }
+        },
+        {
+          "name": "oldest",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
           }
         }
       ],
@@ -1754,6 +1767,56 @@
         "name": "result",
         "schema": true
       }
+    },
+    {
+      "name": "handover.check",
+      "description": "Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The build the binary must be."
+          }
+        },
+        {
+          "name": "candidate",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The binary's path."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Handover"
+        }
+      }
+    },
+    {
+      "name": "handover",
+      "description": "Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The build the server's own binary must be now."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Handover"
+        }
+      }
     }
   ],
   "components": {
@@ -1779,14 +1842,23 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0,
-            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.",
+            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0. A server answers a client on an older protocol it still serves with that protocol.",
             "default": 0
+          },
+          "oldest": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
           }
         },
         "required": [
           "version"
         ],
-        "description": "`hello` params and result: the sender's product, version, build and protocol."
+        "description": "`hello` params and result: the sender's product, version, build and protocol range."
       },
       "Policy": {
         "oneOf": [
@@ -3943,6 +4015,31 @@
           }
         },
         "description": "`agents.match` result: the lines the agent's rules find."
+      },
+      "Handover": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "The server's build."
+          },
+          "to": {
+            "type": "string",
+            "description": "The binary's build."
+          },
+          "terminals": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "The running terminals that cross."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "terminals"
+        ],
+        "description": "The answer to `handover.check` and `handover`."
       }
     },
     "errors": {
@@ -4005,6 +4102,10 @@
       "DRAFT_HELD": {
         "code": -32009,
         "message": "DRAFT_HELD"
+      },
+      "HANDOVER_REFUSED": {
+        "code": -32010,
+        "message": "HANDOVER_REFUSED"
       }
     }
   }

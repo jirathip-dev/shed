@@ -2,7 +2,7 @@
 //!
 //! The wire format is newline-delimited JSON-RPC 2.0 over a Unix socket: one [`Request`] per line, one
 //! [`Response`] per line. Every connection starts with [`Method::Hello`]; a client and server of
-//! different products or [`PROTOCOL`]s are refused with [`ErrorCode::Version`]. `docs/protocol.md` is generated
+//! different products or of protocol ranges that don't overlap are refused with [`ErrorCode::Version`]. `docs/protocol.md` is generated
 //! from these types (`SHED_BLESS=1 cargo test -p shed-proto --features schema`); CI fails when it drifts.
 #![forbid(unsafe_code)]
 
@@ -27,8 +27,11 @@ pub const BUILD: &str = env!("SHED_BUILD");
 /// `<semver> (<sha>)`, as `shed --version`, `shed hello` and the server's ready line print it.
 pub const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SHED_BUILD"), ")");
 
-/// The wire protocol version; bump it with any change to the messages. Client and server must match.
-pub const PROTOCOL: u32 = 1;
+/// The wire protocol version; bump it with any change to the messages.
+pub const PROTOCOL: u32 = 2;
+
+/// The oldest protocol this build still speaks: a server answers a client on it in its shapes, a client accepts a server on it.
+pub const OLDEST_PROTOCOL: u32 = 1;
 
 /// The JSON-RPC version string every message carries.
 pub const JSONRPC: &str = "2.0";
@@ -122,16 +125,23 @@ impl RpcError {
         }
     }
 
-    /// The protocol refusal: `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`.
+    /// The protocol refusal: `SHED_VERSION: client <sha> protocol <a>-<b> / server <sha> protocol <c>-<d>; update the <side>`.
     #[must_use]
     pub fn version(client: &Hello, server: &Hello) -> Self {
+        let side = if client.protocol < server.oldest() {
+            "the client"
+        } else {
+            "the server and restart shed serve"
+        };
         Self::new(
             ErrorCode::Version,
             format!(
-                "client {} / server {}: protocol {} vs {}; restart shed serve",
+                "client {} protocol {}-{} / server {} protocol {}-{}; update {side}",
                 client.label(),
-                server.label(),
+                client.oldest(),
                 client.protocol,
+                server.label(),
+                server.oldest(),
                 server.protocol
             ),
         )
@@ -177,11 +187,13 @@ pub enum ErrorCode {
     Io,
     /// A person's unsent line held the `send` past `draft_wait`; nothing was written.
     DraftHeld,
+    /// The server will not hand over (`handover.check`, `handover`); the message says why, and nothing changed.
+    HandoverRefused,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -197,6 +209,7 @@ impl ErrorCode {
         Self::NoLink,
         Self::Io,
         Self::DraftHeld,
+        Self::HandoverRefused,
     ];
 
     /// The numeric JSON-RPC code.
@@ -218,6 +231,7 @@ impl ErrorCode {
             Self::NoLink => -32007,
             Self::Io => -32008,
             Self::DraftHeld => -32009,
+            Self::HandoverRefused => -32010,
         }
     }
 
@@ -240,6 +254,7 @@ impl ErrorCode {
             Self::NoLink => "NO_LINK",
             Self::Io => "IO",
             Self::DraftHeld => "DRAFT_HELD",
+            Self::HandoverRefused => "HANDOVER_REFUSED",
         }
     }
 }
@@ -307,11 +322,15 @@ pub enum Method {
     AgentsMatch,
     /// The API as an `OpenRPC` document: `{}` → `openrpc()` (the `schema` feature).
     Discover,
+    /// Would the server hand over to a binary: [`HandoverCheckParams`] → [`Handover`].
+    HandoverCheck,
+    /// Hand over to the server's own binary: [`HandoverParams`] → [`Handover`].
+    Handover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 32] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -342,6 +361,8 @@ impl Method {
         Self::Agents,
         Self::AgentsMatch,
         Self::Discover,
+        Self::HandoverCheck,
+        Self::Handover,
     ];
 
     /// The wire name.
@@ -378,6 +399,8 @@ impl Method {
             Self::Agents => "agents",
             Self::AgentsMatch => "agents.match",
             Self::Discover => "rpc.discover",
+            Self::HandoverCheck => "handover.check",
+            Self::Handover => "handover",
         }
     }
 
@@ -392,7 +415,7 @@ impl Method {
     pub fn summary(self) -> &'static str {
         match self {
             Self::Hello => {
-                "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`."
+                "The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`."
             }
             Self::Run => {
                 "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
@@ -475,11 +498,17 @@ impl Method {
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
             }
+            Self::HandoverCheck => {
+                "Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not."
+            }
+            Self::Handover => {
+                "Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was."
+            }
         }
     }
 }
 
-/// `hello` params and result: the sender's product, version, build and protocol.
+/// `hello` params and result: the sender's product, version, build and protocol range.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Hello {
@@ -491,13 +520,16 @@ pub struct Hello {
     /// The git commit the sender was built from.
     #[serde(default)]
     pub build: String,
-    /// The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.
+    /// The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0. A server answers a client on an older protocol it still serves with that protocol.
     #[serde(default)]
     pub protocol: u32,
+    /// The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest: Option<u32>,
 }
 
 impl Hello {
-    /// This build's hello: `shed`, [`VERSION`], [`BUILD`] and [`PROTOCOL`].
+    /// This build's hello: `shed`, [`VERSION`], [`BUILD`], [`PROTOCOL`] and [`OLDEST_PROTOCOL`].
     #[must_use]
     pub fn ours() -> Self {
         Self {
@@ -505,13 +537,32 @@ impl Hello {
             version: VERSION.to_owned(),
             build: BUILD.to_owned(),
             protocol: PROTOCOL,
+            oldest: Some(OLDEST_PROTOCOL),
         }
     }
 
-    /// Whether a peer that sent this hello speaks our protocol.
+    /// The server's answer to a compatible `client`: ours, in the client's shapes when it speaks an older protocol.
+    #[must_use]
+    pub fn answer(client: &Self) -> Self {
+        if client.protocol < PROTOCOL {
+            Self {
+                protocol: client.protocol,
+                oldest: None,
+                ..Self::ours()
+            }
+        } else {
+            Self::ours()
+        }
+    }
+
+    /// Whether a peer that sent this hello is `shed` with a protocol range that overlaps ours.
     #[must_use]
     pub fn compatible(&self) -> bool {
-        self.product == "shed" && self.protocol == PROTOCOL
+        self.product == "shed" && self.oldest() <= PROTOCOL && OLDEST_PROTOCOL <= self.protocol
+    }
+
+    fn oldest(&self) -> u32 {
+        self.oldest.unwrap_or(self.protocol)
     }
 
     /// The build's sha (`unknown` when it sent none), after the product unless that is `shed`.
@@ -1638,6 +1689,36 @@ pub struct TerminalResizeParams {
     pub rows: u16,
 }
 
+/// `handover.check` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct HandoverCheckParams {
+    /// The build the binary must be.
+    pub build: String,
+    /// The binary's path.
+    pub candidate: PathBuf,
+}
+
+/// `handover` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct HandoverParams {
+    /// The build the server's own binary must be now.
+    pub build: String,
+}
+
+/// The answer to `handover.check` and `handover`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Handover {
+    /// The server's build.
+    pub from: String,
+    /// The binary's build.
+    pub to: String,
+    /// The running terminals that cross.
+    pub terminals: usize,
+}
+
 /// `terminal.readonly` params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -1680,6 +1761,8 @@ impl Method {
             Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
             Self::AgentsMatch => pair::<MatchParams, Matched>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
+            Self::HandoverCheck => pair::<HandoverCheckParams, Handover>(g),
+            Self::Handover => pair::<HandoverParams, Handover>(g),
         }
     }
 
