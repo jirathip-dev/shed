@@ -191,6 +191,8 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         };
         crate::out::line(format_args!("{mark:<5} {what:<8} {v}"));
     }
+    let memory = shed_server::limit::mechanism();
+    crate::out::line(format_args!("ok    memory   {memory}"));
     let home = shed_server::config::var("HOME").unwrap_or_default();
     let dir = paths.providers();
     let bad = shed_server::providers::load(&dir).1;

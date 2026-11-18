@@ -57,7 +57,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -196,6 +196,19 @@
           "schema": {
             "type": "boolean",
             "description": "ACP: take this recipe's ready spare session if there is one, and keep a spare ready for the next run."
+          }
+        },
+        {
+          "name": "mem_max_mb",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The most memory the terminal's process tree may hold, in MB; default the server's `$SHED_MEM_MAX`, else none."
           }
         },
         {
@@ -965,6 +978,43 @@
               "event"
             ],
             "description": "The tree's memory or CPU moved by more than 10 % since the last such event."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "mem-limit"
+              },
+              "limit_mb": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "The limit, in MB."
+              },
+              "process": {
+                "type": "string",
+                "description": "The process over it: the largest the agent started, or the agent's own when it started none."
+              },
+              "rss_mb": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Its memory, in MB."
+              },
+              "ended_by": {
+                "type": "string",
+                "description": "`kernel` (the terminal's scope) or `shed` (the sampler) ended it; `none`: the agent's own, only reported."
+              }
+            },
+            "required": [
+              "event",
+              "limit_mb",
+              "process",
+              "rss_mb",
+              "ended_by"
+            ],
+            "description": "The process tree passed its memory limit."
           },
           {
             "type": "object",
@@ -1894,6 +1944,15 @@
               }
             ],
             "description": "The terminal that started it."
+          },
+          "mem_max_mb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The most memory its process tree may hold, in MB, if limited."
           }
         },
         "required": [
@@ -2340,6 +2399,43 @@
             "properties": {
               "event": {
                 "type": "string",
+                "const": "mem-limit"
+              },
+              "limit_mb": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "The limit, in MB."
+              },
+              "process": {
+                "type": "string",
+                "description": "The process over it: the largest the agent started, or the agent's own when it started none."
+              },
+              "rss_mb": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Its memory, in MB."
+              },
+              "ended_by": {
+                "type": "string",
+                "description": "`kernel` (the terminal's scope) or `shed` (the sampler) ended it; `none`: the agent's own, only reported."
+              }
+            },
+            "required": [
+              "event",
+              "limit_mb",
+              "process",
+              "rss_mb",
+              "ended_by"
+            ],
+            "description": "The process tree passed its memory limit."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
                 "const": "turn"
               },
               "prompt": {
@@ -2765,6 +2861,43 @@
             "properties": {
               "event": {
                 "type": "string",
+                "const": "mem-limit"
+              },
+              "limit_mb": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "The limit, in MB."
+              },
+              "process": {
+                "type": "string",
+                "description": "The process over it: the largest the agent started, or the agent's own when it started none."
+              },
+              "rss_mb": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Its memory, in MB."
+              },
+              "ended_by": {
+                "type": "string",
+                "description": "`kernel` (the terminal's scope) or `shed` (the sampler) ended it; `none`: the agent's own, only reported."
+              }
+            },
+            "required": [
+              "event",
+              "limit_mb",
+              "process",
+              "rss_mb",
+              "ended_by"
+            ],
+            "description": "The process tree passed its memory limit."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
                 "const": "turn"
               },
               "prompt": {
@@ -2990,7 +3123,7 @@
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
           }
         ],
-        "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its\nevents marked `\"replay\": true` so a client does not count them as new. An idle agent hibernates (state\n`hibernated`, its processes stopped); the next send wakes it, its history replayed the same way."
+        "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its\nevents marked `\"replay\": true` so a client does not count them as new. An idle agent hibernates (state\n`hibernated`, its processes stopped); the next send wakes it, its history replayed the same way."
       },
       "ScreenUpdate": {
         "type": "object",

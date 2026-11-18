@@ -871,6 +871,82 @@ fn a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on() {
     ok(&dir, &["kill", "g"]);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_limited_terminal_runs_in_its_own_scope_its_children_ranked_first_and_none_outlives_it() {
+    if !shed_server::limit::scoped() {
+        eprintln!("skipped: no user systemd with the memory controller here");
+        return;
+    }
+    let dir = temp_dir("acp-mem-scope");
+    let mut server = Server::sampling(&dir, "0.2");
+    let read = |path: &str| std::fs::read_to_string(path).unwrap_or_default();
+    let scope = |pid: &Value| {
+        let cgroup = read(&format!("/proc/{pid}/cgroup"));
+        let path = cgroup.lines().find_map(|l| l.strip_prefix("0::"));
+        format!("/sys/fs/cgroup{}", path.unwrap_or_default())
+    };
+    ok(
+        &dir,
+        &[
+            "run",
+            "--name",
+            "s",
+            "--mem-max",
+            "200M",
+            "--",
+            "sleep",
+            "100",
+        ],
+    );
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "s"])).expect("JSON");
+    common::eventually("the scope", || scope(&info["pid"]).ends_with(".scope"));
+    let sleeper = scope(&info["pid"]);
+    assert_eq!(read(&format!("{sleeper}/memory.max")).trim(), "209715200");
+
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    let run = [
+        "run",
+        "--name",
+        "g",
+        "--label",
+        "run=g",
+        "--mem-max",
+        "200M",
+    ];
+    ok(
+        &dir,
+        &[&run[..], &["--acp", "fake", "--", "python3", agent]].concat(),
+    );
+    ok(&dir, &["wait", "g", "--output", "ACP session ready"]);
+    ok(&dir, &["send", "g", "hog 50"]);
+    let g: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    let bridge = g["pid"]
+        .as_i64()
+        .and_then(|p| i32::try_from(p).ok())
+        .expect("a pid");
+    let adj = |pid: i32| {
+        read(&format!("/proc/{pid}/oom_score_adj"))
+            .trim()
+            .to_owned()
+    };
+    common::eventually("the child ranked first", || {
+        let procs = proctree::system().list().unwrap_or_default();
+        let tree = proctree::tree(&procs, bridge, &std::collections::BTreeSet::new());
+        let (hog, rest): (Vec<_>, Vec<_>) = tree.iter().partition(|p| p.rss_bytes > 40 << 20);
+        hog.iter().all(|p| adj(p.pid) == "1000")
+            && !hog.is_empty()
+            && rest.iter().all(|p| adj(p.pid) == "0")
+    });
+
+    server.0.kill().expect("kill shed serve");
+    server.0.wait().expect("reap shed serve");
+    let _again = Server::sampling(&dir, "0.2");
+    common::eventually("the sleeper's scope gone", || !Path::new(&sleeper).exists());
+    ok(&dir, &["kill", "g"]);
+}
+
 #[test]
 fn top_and_ls_show_a_hibernated_agent_as_hibernated() {
     let dir = temp_dir("acp-top-hibernated");

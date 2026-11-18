@@ -56,6 +56,12 @@ pub(crate) fn events() -> Vec<Event> {
         EventKind::Started,
         EventKind::State(Box::new(done())),
         EventKind::Resources(RESOURCES),
+        EventKind::MemLimit {
+            limit_mb: 4096,
+            process: "cc1plus".into(),
+            rss_mb: 4301,
+            ended_by: "shed".into(),
+        },
         EventKind::Exited { code: Some(0) },
         EventKind::Killed,
         EventKind::Turn {

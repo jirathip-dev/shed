@@ -380,6 +380,8 @@ struct RunArgs {
     parent: ParentArgs,
     #[arg(long, value_name = "RxC", value_parser = size)]
     size: Option<(u16, u16)>,
+    #[arg(long, value_name = "SIZE", value_parser = mem)]
+    mem_max: Option<u64>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
 }
@@ -457,6 +459,10 @@ fn children(s: &str) -> Result<Children, String> {
 
 fn size(s: &str) -> Result<(u16, u16), String> {
     shed_server::config::size(s).ok_or_else(|| format!("{s:?} is not RxC, e.g. 50x200"))
+}
+
+fn mem(s: &str) -> Result<u64, String> {
+    shed_server::config::mem_mb(s).ok_or_else(|| format!("{s:?} is not a size, e.g. 200M or 4G"))
 }
 
 fn label(s: &str) -> Result<(String, String), String> {
@@ -649,6 +655,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
             notify: args.parent.notify,
         }),
         machine: server.machine(),
+        mem_max_mb: args.mem_max,
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
     };
@@ -1192,7 +1199,7 @@ fn table(list: &[TerminalInfo], top: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
     let mb = |v: Option<u64>| dash(v.map(|v| format!("{v}M")));
     let head = if top {
-        "NAME STATE EXIT PID AGENT WORK CPU TOKENS CACHE CACHE-LIKELY LABELS CMD"
+        "NAME STATE EXIT PID AGENT WORK CPU TOKENS CACHE CACHE-LIKELY LIMIT LABELS CMD"
     } else {
         "NAME STATE EXIT PID RSS CPU LABELS CMD"
     };
@@ -1223,6 +1230,7 @@ fn table(list: &[TerminalInfo], top: bool) -> String {
             row.push(dash(
                 t.session.as_ref().and_then(|s| s.cache_likely.clone()),
             ));
+            row.push(mb(t.mem_max_mb));
         }
         row.push(if labels.is_empty() {
             "-".to_owned()

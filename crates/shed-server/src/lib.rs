@@ -10,6 +10,7 @@ pub mod config;
 mod events;
 pub mod hooks;
 mod input;
+pub mod limit;
 mod links;
 pub mod machines;
 pub mod providers;
@@ -240,7 +241,11 @@ async fn sample(registry: Shared, every: Duration) {
             });
         }
         if let Ok(Ok(procs)) = blocking(|| proctree::system().list()).await {
-            lock(&registry).sample(&procs, shed_core::clock::now());
+            for pid in lock(&registry).sample(&procs, shed_core::clock::now()) {
+                let end =
+                    move || proctree::kill_tree(&proctree::system(), pid, registry::GRACE, || {});
+                tokio::spawn(blocking(end));
+            }
         }
     }
 }
