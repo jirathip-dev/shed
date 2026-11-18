@@ -1,0 +1,12 @@
+   Compiling serde_with v3.24.0
+   Compiling agent-client-protocol-schema v1.15.1
+   Compiling agent-client-protocol v5.0.0
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.05s
+     Running unittests src/lib.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-135/debug/deps/shed_server-4e419a7602adf503)
+
+running 1 test
+test registry::tests::the_sampler_ends_a_child_over_the_limit_for_two_samples_and_leaves_the_rest ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 48 filtered out; finished in 0.09s
+

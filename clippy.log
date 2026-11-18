@@ -1,0 +1,4 @@
+   Compiling shed-proto v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed-proto)
+    Checking shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed-server)
+    Checking shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.60s

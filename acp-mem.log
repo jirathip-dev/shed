@@ -1,0 +1,13 @@
+   Compiling shed-proto v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed-proto)
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed-server)
+   Compiling shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-135/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.94s
+     Running tests/acp.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-135/debug/deps/acp-e11316acf15745b2)
+
+running 3 tests
+test top_splits_the_memory_of_a_child_the_agent_started_into_work_and_lists_it_by_name ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... ok
+test a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 32 filtered out; finished in 5.89s
+
