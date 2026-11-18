@@ -1,0 +1,15 @@
+Decided: one guard per limited terminal in the sampler; on a scope host the kernel enforces and the guard only ranks children first and reports oom_kill
+Because: "each terminal's program starts in its own systemd scope with `MemoryMax` where the host has a user systemd with the memory controller"
+Because: crates/shed-server/src/registry.rs:144
+Decided: inside a scope the agent's children get oom_score_adj 1000 each sample, the agent keeps its own, so the kernel picks a child first
+Because: "or set the agent's OOM score so its children go first, and cover it with a test"
+Because: crates/shed-server/src/limit.rs:48
+Decided: the sampler path acts on the second sample over in a row, ends the largest process the agent started, and reports an agent over the limit alone once as ended_by none
+Because: "Over the limit for two samples in a row, shed ends the largest process the agent started"
+Because: crates/shed-server/src/registry.rs:160
+Decided: the event is named mem-limit as the spec writes it, not snake case like the other events
+Because: crates/shed-proto/src/lib.rs:897
+Rejected: the agent outside the scope — a terminal's program forks its own children, so shed cannot put only them in a scope
+Check: the Linux scope test skips where no user systemd has the memory controller; it has not run on the macOS lane host
+Check: src/ net +176; scripts/line-cap.sh prints 11145 / cap 11645 after #155 merged in
+Owner: a terminal can get a memory limit; over it, the biggest program its agent started is ended and the agent carries on
