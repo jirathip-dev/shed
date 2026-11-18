@@ -10,6 +10,7 @@ struct Job {
     path: PathBuf,
     text: String,
     start: String,
+    kick: String,
     stop: String,
     log: PathBuf,
     loaded: &'static str,
@@ -47,8 +48,10 @@ fn job() -> anyhow::Result<Job> {
 </plist>
 "#
         );
+        let start = format!("launchctl bootstrap gui/$(id -u) {}", file.display());
         return Ok(Job {
-            start: format!("launchctl bootstrap gui/$(id -u) {}", file.display()),
+            kick: format!("launchctl kickstart gui/$(id -u)/{LABEL} 2>/dev/null || {start}"),
+            start,
             stop: format!("launchctl bootout gui/$(id -u)/{LABEL}"),
             path: file,
             text,
@@ -59,12 +62,14 @@ fn job() -> anyhow::Result<Job> {
     let config = var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
     let text = format!(
         "[Unit]\nDescription=shed: keeps coding-agent terminals alive\n\n[Service]\nExecStart={e} serve\n\
-         Environment=PATH={path}\nRestart=always\n\n[Install]\nWantedBy=default.target\n"
+         Environment=PATH={path}\nRestart=always\nOOMPolicy=continue\n\n[Install]\nWantedBy=default.target\n"
     );
     Ok(Job {
         path: config.join("systemd/user/shed.service"),
         text,
         start: "systemctl --user daemon-reload && systemctl --user enable --now shed.service"
+            .into(),
+        kick: "systemctl --user reset-failed shed.service 2>/dev/null; systemctl --user start shed.service"
             .into(),
         stop: "systemctl --user disable --now shed.service".into(),
         log: "journalctl --user -u shed.service".into(),
@@ -86,16 +91,28 @@ pub fn install(force: bool) -> anyhow::Result<()> {
         }
     }
     let restart = format!("{} 2>/dev/null; {}", job.stop, job.start);
-    let ran = shed_server::runner::output("sh", ["-c", restart.as_str()], &[])?;
+    sh("restarting", &restart)?;
+    crate::out::line(format_args!("restarted {LABEL}:\n  {restart}"));
+    Ok(())
+}
+
+fn sh(what: &str, line: &str) -> anyhow::Result<()> {
+    let ran = shed_server::runner::output("sh", ["-c", line], &[])?;
     if !ran.status.success() {
         bail!(
-            "restarting {LABEL} failed ({}): {}; run:\n  {restart}",
+            "{what} {LABEL} failed ({}): {}; run:\n  {line}",
             ran.status,
             String::from_utf8_lossy(&ran.stderr).trim()
         );
     }
-    crate::out::line(format_args!("restarted {LABEL}:\n  {restart}"));
     Ok(())
+}
+
+pub fn start_job() -> anyhow::Result<bool> {
+    match job() {
+        Ok(job) if job.path.exists() => sh("starting", &job.kick).map(|()| true),
+        _ => Ok(false),
+    }
 }
 
 pub fn uninstall() -> anyhow::Result<()> {
@@ -116,6 +133,10 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
     let loaded = shed_server::runner::output("sh", ["-c", job.loaded], &[])
         .is_ok_and(|o| o.status.success());
     let server = Client::connect(&paths.socket);
+    let outside = format!(
+        "a server outside {LABEL} answers on {socket}; fix: stop that server, then {}",
+        job.kick
+    );
     let checks = [
         (
             "job",
@@ -129,6 +150,8 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
             "loaded",
             if loaded {
                 Ok(LABEL.into())
+            } else if server.is_ok() {
+                Err(outside)
             } else {
                 Err(format!("not loaded; {fix}"))
             },
@@ -168,13 +191,20 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         };
         crate::out::line(format_args!("{mark:<5} {what:<8} {v}"));
     }
+    let memory = shed_server::limit::mechanism();
+    crate::out::line(format_args!("ok    memory   {memory}"));
     let home = shed_server::config::var("HOME").unwrap_or_default();
-    let hooks = shed_server::hooks::setup(Path::new(&home), &[], false, true);
+    let dir = paths.providers();
+    let bad = shed_server::providers::load(&dir).1;
+    for e in &bad {
+        crate::out::line(format_args!("FAIL  provider {e}; skipped"));
+    }
+    let hooks = shed_server::hooks::setup(Path::new(&home), &dir, &[], false, true);
     if let Err(e) = &hooks {
         crate::out::line(format_args!("FAIL  hooks    {e}"));
     }
     for f in hooks.as_deref().unwrap_or_default() {
-        let (agent, file) = (f.agent, f.file.display());
+        let (agent, file) = (&f.agent, f.file.display());
         let fix = f
             .after
             .as_ref()
@@ -182,5 +212,5 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         let mark = if fix.is_empty() { "ok" } else { "--" };
         crate::out::line(format_args!("{mark:<5} hooks    {agent}: {file}{fix}"));
     }
-    Ok(hooks.is_ok() && checks.iter().all(|(_, r)| r.is_ok()))
+    Ok(bad.is_empty() && hooks.is_ok() && checks.iter().all(|(_, r)| r.is_ok()))
 }

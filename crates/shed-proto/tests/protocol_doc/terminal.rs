@@ -25,6 +25,7 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         acp: None,
         session: None,
         parent: Some(lead()),
+        mem_max_mb: None,
     }
 }
 
@@ -39,6 +40,8 @@ fn lead() -> Parent {
 pub(crate) const RESOURCES: Resources = Resources {
     rss_mb: 52,
     cpu_pct: 3,
+    agent_mb: None,
+    work_mb: None,
 };
 
 pub(crate) fn done() -> Reported {
@@ -90,7 +93,9 @@ pub(crate) fn run_params() -> Value {
         mcp_servers: Vec::new(),
         meta: None,
         no_hibernate: false,
+        warm: false,
         machine: None,
+        mem_max_mb: Some(4096),
         parent: Some(lead()),
         rows: None,
         cols: None,

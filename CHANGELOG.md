@@ -140,6 +140,47 @@ All notable changes to this project are documented here. The format follows
 - `shed-core` terminals (M1a): programs on real PTYs, a VT screen model with bounded scrollback,
   named keys, and process-tree kill (SIGTERM, a grace period, SIGKILL) with per-tree RSS/CPU.
 - The workspace skeleton (M0): `shed hello`, `--help`, `--version`, and every CI gate.
+- ACP usage carries the turn's and the session's input, cache-read, cache-write and output tokens (`usage.turn`
+  and `usage.total` in `get` and the `usage` event) when the agent's prompt responses report them, as
+  `claude-acp`'s `_meta.quota` does; `shed top` shows the last turn's cache-read share as `CACHE`.
+- A provider record's `[cache]` gives the prompt cache's lifetime on a plan and on an API key and the variables
+  that mean an API key; an ACP lane hibernates after 600 s or that lifetime, whichever is shorter (unless
+  `$SHED_ACP_HIBERNATE_AFTER` is set), `get` shows `session.cache_likely` (`warm` or `cold`) while idle and
+  `shed top` shows it as `CACHE-LIKELY`; `shed model` after a turn says the switch drops the prompt cache.
+- Agent facts are data: each agent's limit and login-expired lines, hook table, login, status and logout
+  commands, config-folder and settings variables and effort flags are one TOML provider record, built in
+  from `crates/shed-server/src/providers/<name>.toml` and overridden key by key, or added, by `<name>.toml`
+  in `providers/` beside the config file, without a rebuild. `shed doctor` names a bad user file, which is
+  skipped. `shed agents --json` and the new `agents` method list each record (with its `source`) beside the
+  installed adapter (now under `installed`); `agents.match {id, text}` applies an agent's limit and auth
+  rules to a caller's text. See docs/acp.md.
+- cooee and drover: read program facts from `shed agents --json` in place of their own copies.
+- Screen rules for PTY agents: a terminal labelled `agent=<agent>` checks its provider record's `[[rules]]`
+  (a state, a priority, the last N screen lines and texts to match) on screen changes, at most every 250 ms;
+  a rule above the agent's own report outranks it while its screen shows. Claude Code's folder-trust prompt
+  reads `blocked` (`permission`). `get` says where a state came from: `reported.from` is `reported`,
+  `rule:<id>` or `silence`. See docs/hooks.md.
+- `shed top` and `shed ls` show an ACP terminal's agent state (`working`, `done`, `hibernated`, …) as STATE.
+  `top` splits an ACP terminal's memory into AGENT (the bridge, adapter and agent as the turn began) and WORK
+  (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
+  [--full]` lists that terminal's processes over 50 MB: pid, memory, CPU, age and the command's name (the
+  whole command line with `--full`).
+- `shed run --mem-max <size>` (or `$SHED_MEM_MAX` on `shed serve`, off by default) limits a terminal's process
+  tree. On Linux with a user systemd that has the memory controller the program runs in its own scope with
+  `MemoryMax`; elsewhere, two samples over ends the largest process the agent started, never the agent. Each
+  is a `mem-limit` event and a note to the parent; `get`, `ls --json` and `top` show the limit, and
+  `shed doctor` says which mechanism the host uses.
+- `shed run --acp … --warm` keeps one ready spare session per recipe (agent, command, folder, policy, MCP
+  servers, meta, size): the next `--warm` run of that recipe takes it, renamed to its name and labels, with
+  `session.ready_ms` 0, and a new spare starts. Spares are listed as `.warm-N`; `$SHED_WARM_MAX` (default 2)
+  caps them and `$SHED_WARM_IDLE` (default 600 s) kills one nobody took.
+- `shed ls --json` and `get` show each ACP session's start-to-ready time (`session.ready_ms`) and its first
+  prompt's time to the first reply chunk (`session.first_token_ms`); `shed agents --json` gives each agent's
+  `medians` of both over its last `$SHED_MEDIAN_OF` (default 20) sessions.
+- ACP permission requests by id: `approval_request` carries its `id` (the agent's JSON-RPC request id) and ACP's
+  `toolCall` as `call` (without `content`); `shed approve <t> <option> --request <id>` (the bridge's
+  `{"approve": …, "request": …}` line) answers that request, and without it the oldest as before. `tool_call`
+  carries ACP's `locations` (paths) and `raw_input` (left out over 4 KiB). All additive.
 
 ### Changed
 
@@ -178,3 +219,10 @@ All notable changes to this project are documented here. The format follows
   terminals its state file no longer names.
 - `shed machine add|rm` writes the config through a temp file of its own, so writers running at once no longer
   fail on a shared one.
+- `shed kill` of a terminal running an interactive shell no longer waits out the 2 s grace: a kill sends SIGHUP
+  100 ms after SIGTERM (each with SIGCONT), so a shell ends at once and `shed serve` stops quickly. A program
+  that handles SIGTERM still runs its handler first; one that ignores both is still killed after the grace.
+- An out-of-memory kill of one terminal's process no longer stops the systemd unit and every terminal:
+  the unit `shed install` writes has `OOMPolicy=continue` (`shed install --force` updates an older one).
+  `--autostart` starts the installed job instead of a server outside it, and `shed doctor` flags a server
+  that answers while the job is not loaded.

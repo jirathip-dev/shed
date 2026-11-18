@@ -60,3 +60,31 @@ read its 8 MiB tail into memory. That buffering was the 90 MB RSS spike, which t
 
 Reads, `screen.watch` and attach output match the base on the golden files: the existing golden tests
 pass unchanged (`cargo test --workspace`).
+
+## Idle terminals: threads and memory (#131)
+
+What `shed serve` holds for terminals that print nothing.
+
+**Method.** `scripts/bench-idle.sh <shed> <N>` starts a fresh `shed serve`, runs N `sleep 600` terminals
+one by one, checks that `ls` lists all N, waits 2 s and reads serve's thread
+count (`ps -M` on macOS, `nlwp` on Linux) and RSS. It fails unless all N are listed and serve has at most
+3 threads per terminal plus 40. CI's `idle-terminals` job runs it for 200 terminals
+with a soft open-file limit of 256 (`ulimit -Sn 256`, a login's default on macOS) on Linux
+and macOS.
+
+**Machine.** As above, at load 20 to 47; a soft open-file limit of 65536 and of 256 gave the same counts.
+
+**Results.** Base c4e8194, head this PR, release builds.
+
+| idle terminals | base threads | head threads | base RSS | head RSS |
+|---|---|---|---|---|
+| 22 | 116 | 73 | 8.7 MB | 8.0 MB |
+| 200 | 1007 | 608 | 37.5 MB | 31.9 MB |
+
+**What changed.** The base ran five threads per terminal: the PTY reader, the feeder, the log writer, a
+reaper blocked in `wait` and an input writer blocked on its queue. On the head the reaper and the input
+writer are tasks on one runtime thread that all terminals share: the reaper checks its child on each
+`SIGCHLD`, and the input writer makes the PTY master non-blocking for each send, writes it as the master
+becomes writable, one send at a time as before, and makes it blocking again. A read in that window waits
+in `poll`. A master left non-blocking made the reader poll between reads and drained 15 to 31% slower. That leaves
+three threads per terminal, plus serve's own and the shared runtime's.

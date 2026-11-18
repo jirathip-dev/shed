@@ -45,7 +45,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_proto::{
-    AcpSession, ApprovalOption, EmitParams, EventKind, Method, Reported, StateParams, TerminalInfo,
+    AcpSession, ApprovalOption, EmitParams, EventKind, Method, Provider, Reported, StateParams,
+    TerminalInfo, Tokens,
 };
 use tokio::io::{
     AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _, BufReader,
@@ -70,12 +71,22 @@ pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited
 pub enum Input {
     /// Start a turn (`session/prompt`).
     Prompt(String),
-    /// Answer the oldest permission request with this option id or kind.
-    Approve(String),
     /// Cancel the turn (`session/cancel`).
     Cancel,
     /// Switch to this model (`session/set_config_option`, the `model` option).
     Model(String),
+    /// Report under this terminal name from now on: a spare session taken by `run --warm`.
+    Name(String),
+    /// Answer permission request `request` (else the oldest) with this option id or kind.
+    #[serde(untagged)]
+    Approve {
+        /// The option id or kind.
+        #[serde(rename = "approve")]
+        option: String,
+        /// The `approval_request`'s id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request: Option<String>,
+    },
 }
 
 /// The bytes that deliver `input` to a bridge through its terminal: `RS`, the JSON, a newline.
@@ -164,7 +175,7 @@ pub fn render(transcript: &str) -> String {
         .filter_map(|l| serde_json::from_str::<EventKind>(l).ok())
     {
         match kind {
-            EventKind::Turn { prompt } => lines.push(format!("> {prompt}")),
+            EventKind::Turn { prompt, .. } => lines.push(format!("> {prompt}")),
             EventKind::ToolCall {
                 id, title, status, ..
             } => {
@@ -238,7 +249,7 @@ impl Preview {
             };
             match block {
                 Err(line) => put("", "", "", line),
-                Ok(EventKind::Turn { prompt }) => put("1", "› ", "  ", prompt),
+                Ok(EventKind::Turn { prompt, .. }) => put("1", "› ", "  ", prompt),
                 Ok(EventKind::Reply { text, .. }) => markdown(text, &mut put),
                 Ok(EventKind::ToolCall {
                     title,
@@ -257,7 +268,7 @@ impl Preview {
                         put("", mark, "    ", e["content"].as_str().unwrap_or(""));
                     }
                 }
-                Ok(EventKind::ApprovalRequest { tool, options }) => {
+                Ok(EventKind::ApprovalRequest { tool, options, .. }) => {
                     let options = options.iter().map(|o| format!("{} ({})", o.id, o.name));
                     let options = options.collect::<Vec<_>>().join(" | ");
                     let tool = tool.lines().next().unwrap_or("");
@@ -422,6 +433,7 @@ enum Out {
     Emit(EventKind, bool, bool),
     State(Reported),
     Say(String),
+    Name(String),
 }
 
 fn wire<T: Serialize>(value: &T) -> String {
@@ -449,10 +461,10 @@ struct Session {
     policy: Policy,
     prompts: BTreeSet<u64>,
     next: u64,
-    asks: VecDeque<(Asked, Vec<ApprovalOption>)>,
+    asks: VecDeque<(String, Asked, Vec<ApprovalOption>)>,
     titles: BTreeMap<String, (String, Option<String>)>,
     reply: String,
-    auth: &'static [&'static str],
+    rules: Provider,
     heard: Instant,
     stirred: Arc<AtomicBool>,
     idle: Duration,
@@ -461,6 +473,7 @@ struct Session {
     last: (String, Option<String>),
     model: Option<String>,
     shown: AcpSession,
+    tokens: Option<(Tokens, Tokens)>,
     mcp: Vec<McpServer>,
     meta: Option<Meta>,
     pid: Option<i32>,
@@ -469,7 +482,6 @@ struct Session {
     open: Vec<String>,
     ended: Option<String>,
     child: Option<String>,
-    limit: Option<&'static crate::providers::Limit>,
 }
 
 impl Session {
@@ -500,15 +512,14 @@ impl Session {
     }
 
     fn auth(&self, text: &str) -> Option<String> {
-        let bad = |l: &&str| self.auth.iter().any(|p| l.contains(p));
-        text.lines().find(bad).map(|l| format!("auth: {l}"))
+        self.rules.auth_failure(text).map(|l| format!("auth: {l}"))
     }
 
     fn fail(&mut self, why: String) -> AcpResult<()> {
         let cancelled = self.input(Input::Cancel);
         self.prompts.clear();
-        if let Some(reset) = self.limit.and_then(|l| l.hit(&why)) {
-            self.state("rate-limited", reset.resets);
+        if let Some((_, resets)) = self.rules.limit_hit(&why) {
+            self.state("rate-limited", resets);
             return cancelled;
         }
         let auth = self.auth(&why);
@@ -575,6 +586,7 @@ impl Session {
                 self.own.clone_from(&self.seen);
                 self.emit(EventKind::Turn {
                     prompt: text.clone(),
+                    agent: self.own.iter().copied().collect(),
                 });
                 self.state("working", None);
                 let blocks = vec![ContentBlock::Text(TextContent::new(text))];
@@ -588,9 +600,17 @@ impl Session {
                     })?;
                 self.prompts.insert(n);
             }
-            Input::Approve(choice) => {
-                let Some((asked, options)) = self.asks.pop_front() else {
-                    return self.say("shed: no permission request is waiting".to_owned());
+            Input::Approve {
+                option: choice,
+                request,
+            } => {
+                let at = match &request {
+                    Some(r) => self.asks.iter().position(|a| a.0 == *r),
+                    None => (!self.asks.is_empty()).then_some(0),
+                };
+                let Some((id, asked, options)) = at.and_then(|at| self.asks.remove(at)) else {
+                    let which = request.map_or_else(String::new, |r| format!(" {r:?}"));
+                    return self.say(format!("shed: no permission request{which} is waiting"));
                 };
                 let Some(option) = options
                     .iter()
@@ -600,7 +620,7 @@ impl Session {
                 else {
                     let ids: Vec<&str> = options.iter().map(|o| o.id.as_str()).collect();
                     let ids = ids.join(", ");
-                    self.asks.push_front((asked, options));
+                    self.asks.insert(at.unwrap_or(0), (id, asked, options));
                     return self.say(format!("shed: no option {choice:?}; one of {ids}"));
                 };
                 Self::answer(asked, Some(option.clone()))?;
@@ -612,10 +632,11 @@ impl Session {
                     let cancel = CancelNotification::new(self.id.clone());
                     self.cx.send_notification(cancel)?;
                 }
-                while let Some((asked, _)) = self.asks.pop_front() {
+                while let Some((_, asked, _)) = self.asks.pop_front() {
                     Self::answer(asked, None)?;
                 }
             }
+            Input::Name(name) => return self.send(Out::Name(name)),
             Input::Model(model) => {
                 let Some(option) = self.model.clone() else {
                     return self.say("shed: the agent offers no models".to_owned());
@@ -646,11 +667,16 @@ impl Session {
                 Ok(r) => {
                     let (text, stop_reason) =
                         (std::mem::take(&mut self.reply), wire(&r.stop_reason));
-                    let limited = self.limit.and_then(|l| l.hit(&text));
+                    let limited = self.rules.limit_hit(&text).map(|(_, at)| at);
                     let stop = stop_reason.clone();
+                    if let Some(turn) = r.meta.as_ref().and_then(|m| self.rules.tokens(m)) {
+                        let total = self.tokens.map_or(turn, |(_, t)| t.plus(turn));
+                        self.tokens = Some((turn, total));
+                        self.show_usage();
+                    }
                     self.emit(EventKind::Reply { text, stop_reason });
-                    if let Some(reset) = limited {
-                        self.state("rate-limited", reset.resets);
+                    if let Some(resets) = limited {
+                        self.state("rate-limited", resets);
                     } else {
                         (self.ended, self.child) = (Some(stop), self.spawned());
                         self.settle();
@@ -682,7 +708,8 @@ impl Session {
             SessionUpdate::UserMessageChunk(c) if self.replay => {
                 if let Some(prompt) = text(c.content) {
                     self.end_replayed_turn();
-                    self.emit(EventKind::Turn { prompt });
+                    let agent = Vec::new();
+                    self.emit(EventKind::Turn { prompt, agent });
                 }
             }
             SessionUpdate::ToolCall(call) => {
@@ -703,11 +730,18 @@ impl Session {
                         self.open.push(id.clone());
                     }
                 }
+                let locations = call.fields.locations.unwrap_or_default();
+                let raw_input = call
+                    .fields
+                    .raw_input
+                    .filter(|v| v.to_string().len() <= 4096);
                 self.emit(EventKind::ToolCall {
                     id,
                     title,
                     status,
                     kind,
+                    locations: locations.into_iter().map(|l| l.path).collect(),
+                    raw_input,
                 });
                 if given {
                     self.settle();
@@ -727,9 +761,7 @@ impl Session {
                 self.shown.usage = serde_json::to_value(u)
                     .and_then(serde_json::from_value)
                     .ok();
-                if let Some(usage) = self.shown.usage.clone() {
-                    self.emit(EventKind::Usage(usage));
-                }
+                self.show_usage();
             }
             SessionUpdate::AvailableCommandsUpdate(u) => {
                 let commands: Vec<_> = (u.available_commands.into_iter())
@@ -748,6 +780,14 @@ impl Session {
             _ => {}
         }
         Ok(())
+    }
+
+    fn show_usage(&mut self) {
+        if let Some(usage) = &mut self.shown.usage {
+            (usage.turn, usage.total) = (self.tokens.map(|t| t.0), self.tokens.map(|t| t.1));
+            let usage = usage.clone();
+            self.emit(EventKind::Usage(usage));
+        }
     }
 
     fn end_replayed_turn(&mut self) {
@@ -781,6 +821,11 @@ impl Session {
     }
 
     fn permission(&mut self, p: RequestPermissionRequest, asked: Asked) -> AcpResult<()> {
+        let id = asked.raw_id().to_string();
+        let mut sent = serde_json::to_value(&p.tool_call).ok();
+        if let Some(Value::Object(fields)) = &mut sent {
+            fields.remove("content");
+        }
         let call = p.tool_call;
         let tool = (call.fields.title)
             .or_else(|| (self.titles.get(&call.tool_call_id.to_string())).map(|t| t.0.clone()))
@@ -793,12 +838,14 @@ impl Session {
             })
             .collect();
         self.emit(EventKind::ApprovalRequest {
+            id: id.clone(),
             tool: tool.clone(),
             options: options.clone(),
+            call: sent,
         });
         let kinds = match self.policy {
             Policy::Ask => {
-                self.asks.push_back((asked, options));
+                self.asks.push_back((id, asked, options));
                 self.state("waiting-approval", Some(tool));
                 return Ok(());
             }
@@ -823,9 +870,9 @@ fn turn_idle_timeout() -> Duration {
     Duration::from_secs(secs)
 }
 
-fn hibernate_after() -> Option<Duration> {
-    let secs =
-        crate::config::var("SHED_ACP_HIBERNATE_AFTER").map_or(600, |s| s.parse().unwrap_or(600));
+fn hibernate_after(set: Option<String>, cache_lifetime: Option<u64>) -> Option<Duration> {
+    let fits = cache_lifetime.map_or(600, |c| c.min(600));
+    let secs = set.map_or(fits, |s| s.parse().unwrap_or(600));
     (secs > 0).then(|| Duration::from_secs(secs))
 }
 
@@ -885,6 +932,8 @@ async fn drive(
             new.config_options
         }
     };
+    let api = |v: &str| crate::config::var(v).is_some_and(|v| !v.is_empty());
+    s.shown.cache_lifetime = s.rules.cache_lifetime(api);
     (s.shown.id, s.shown.mcp_servers) = (s.id.to_string(), redacted(&s.mcp));
     s.models(&options.unwrap_or_default())?;
     (s.ended, s.child) = (None, None);
@@ -897,7 +946,8 @@ async fn drive(
         }
         s.input(input)?;
     }
-    let sleep_after = hibernate_after().filter(|_| agent.load_session);
+    let set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+    let sleep_after = hibernate_after(set, s.shown.cache_lifetime).filter(|_| agent.load_session);
     let (mut typing, mut polled) = (true, shed_core::clock::tokio_now());
     loop {
         tokio::select! {
@@ -960,9 +1010,13 @@ impl Writer {
                 let call = match out {
                     Out::Emit(kind, replay, keep) => {
                         if keep {
-                            let line = serde_json::to_string(&kind).unwrap_or_default();
+                            let mut kept = kind.clone();
+                            if let EventKind::Turn { agent, .. } = &mut kept {
+                                agent.clear();
+                            }
+                            let line = serde_json::to_string(&kept).unwrap_or_default();
                             writeln!(self.transcript, "{line}").ok();
-                            redraw |= self.preview.push(kind.clone());
+                            redraw |= self.preview.push(kept);
                         }
                         let params = EmitParams { name, kind, replay };
                         crate::notification(Method::Emit, &params)
@@ -971,6 +1025,10 @@ impl Writer {
                         *crate::lock(&self.reported) = Some(report.clone());
                         let params = StateParams { name, report };
                         crate::notification(Method::State, &params)
+                    }
+                    Out::Name(name) => {
+                        self.name = name;
+                        Ok(Vec::new())
                     }
                     Out::Say(line) => {
                         self.preview.blocks.push(Err(line));
@@ -1050,11 +1108,13 @@ async fn read_input(inputs: UnboundedSender<Input>) {
 /// Runs the ACP adapter `cmd` in `cwd` for terminal `$SHED` of the server on `socket` (state file
 /// `state`): `initialize`, then `session/load` of `$SHED_ACP_RESUME` (its history replayed) or
 /// `session/new`, both with the MCP servers in `$SHED_ACP_MCP` and the `_meta` in `$SHED_ACP_META`,
-/// then prompts, updates and permission requests until the agent exits. Returns the agent's exit code.
+/// then prompts, updates and permission requests until the agent exits, reading its limit and expired-login
+/// lines by `rules`. Returns the agent's exit code.
 ///
-/// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, `0` never) it stops the agent's process
-/// tree and reports `hibernated`, keeping the session (MCP servers included) in memory; the next input
-/// starts the agent again, loads the session and then delivers it.
+/// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, or the record's shorter prompt cache
+/// lifetime on this login; `0` never) it stops the agent's process tree and reports `hibernated`, keeping
+/// the session (MCP servers included) in memory; the next input starts the agent again, loads the session
+/// and then delivers it.
 ///
 /// A failure to start is reported as the terminal's state `error`, with the reason as its note.
 ///
@@ -1068,10 +1128,10 @@ pub fn bridge(
     socket: &Path,
     state: &Path,
     policy: Policy,
-    agent_id: &str,
+    rules: Provider,
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
-    let result = run(cmd, cwd, socket, state, policy, agent_id, &name);
+    let result = run(cmd, cwd, socket, state, policy, rules, &name);
     if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
         let report = Reported {
             state: "error".to_owned(),
@@ -1265,7 +1325,7 @@ fn run(
     socket: &Path,
     state: &Path,
     policy: Policy,
-    agent_id: &str,
+    rules: Provider,
     name: &str,
 ) -> Result<i32, Error> {
     let (mcp, meta) = launch_options()?;
@@ -1307,7 +1367,7 @@ fn run(
             asks: VecDeque::new(),
             titles: BTreeMap::new(),
             reply: String::new(),
-            auth: crate::providers::auth_failures(agent_id),
+            rules: rules.clone(),
             heard: shed_core::clock::tokio_now(),
             stirred,
             idle: turn_idle_timeout(),
@@ -1316,6 +1376,7 @@ fn run(
             last: ("idle".to_owned(), None),
             model: None,
             shown: AcpSession::default(),
+            tokens: None,
             mcp: mcp.clone(),
             meta: meta.clone(),
             pid,
@@ -1324,7 +1385,6 @@ fn run(
             open: Vec::new(),
             ended: None,
             child: None,
-            limit: crate::providers::limit(agent_id),
         },
     };
     let mut resume = crate::config::var("SHED_ACP_RESUME");
@@ -1340,7 +1400,7 @@ fn run(
             let (mut child, stdin, stdout, stderr) = start(cmd, cwd)?;
             let pid = child.id().and_then(|p| i32::try_from(p).ok());
             let (rx, loaded, first, prev) = (&mut inputs, resume.take(), wake.take(), kept.take());
-            let slept = connect(
+            let slept = Box::pin(connect(
                 stdin,
                 stdout,
                 stderr,
@@ -1348,7 +1408,7 @@ fn run(
                     let s = session(cx, back, stirred, pid, prev);
                     drive(s, from_agent, rx, cwd, loaded, first).await
                 },
-            )
+            ))
             .await?;
             let Some(mut s) = slept else {
                 return Ok(child.wait().await?.code().unwrap_or(1));
@@ -1373,6 +1433,7 @@ mod tests {
     use serde_json::{Value, json};
 
     use super::*;
+    use crate::providers::tests::fake;
 
     #[test]
     fn the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line() {
@@ -1381,6 +1442,8 @@ mod tests {
             title: "line one\nline two".into(),
             status: status.into(),
             kind: kind.map(Into::into),
+            locations: Vec::new(),
+            raw_input: None,
         };
         let mut preview = Preview::default();
         assert!(preview.push(call("a", "pending", Some("execute"))));
@@ -1492,7 +1555,7 @@ mod tests {
             asks: VecDeque::new(),
             titles: BTreeMap::new(),
             reply: String::new(),
-            auth: &[],
+            rules: Provider::default(),
             heard: shed_core::clock::tokio_now(),
             stirred,
             idle,
@@ -1501,6 +1564,7 @@ mod tests {
             last: ("idle".to_owned(), None),
             model: None,
             shown: AcpSession::default(),
+            tokens: None,
             mcp: Vec::new(),
             meta: None,
             pid: None,
@@ -1509,7 +1573,6 @@ mod tests {
             open: Vec::new(),
             ended: None,
             child: None,
-            limit: None,
         }
     }
 
@@ -1672,7 +1735,11 @@ mod tests {
 
     type States = Vec<(String, Option<String>)>;
 
-    async fn lane(steps: Vec<Step>, pid: Option<i32>, agent: &str) -> (States, Option<Duration>) {
+    async fn lane(
+        steps: Vec<Step>,
+        pid: Option<i32>,
+        rules: Provider,
+    ) -> (States, Option<Duration>) {
         let (bridge, fake) = tokio::io::duplex(1 << 16);
         let (_, err_ours) = tokio::io::duplex(1 << 16);
         tokio::spawn(scripted(fake, steps, pid.unwrap_or(0)));
@@ -1687,7 +1754,7 @@ mod tests {
             err_ours,
             async |cx, back, from_agent, stirred| {
                 let mut s = session(cx, back, out, stirred, Duration::from_secs(5));
-                (s.pid, s.limit) = (pid, crate::providers::limit(agent));
+                (s.pid, s.rules) = (pid, rules);
                 drive(s, from_agent, &mut inputs, Path::new("/"), None, None).await
             },
         );
@@ -1719,7 +1786,7 @@ mod tests {
             Step::Wait(700),
             Step::Update(call("completed")),
         ];
-        let (states, slept) = lane(steps, None, "fake-acp").await;
+        let (states, slept) = lane(steps, None, fake("fake-acp")).await;
         let running = st("running", Some("cargo test"));
         let done = st("done", Some("end_turn"));
         assert_eq!(states, [st("working", None), running, done]);
@@ -1742,7 +1809,7 @@ mod tests {
             Step::Wait(700),
             Step::Kill,
         ];
-        let (states, slept) = lane(steps, pid, "fake-acp").await;
+        let (states, slept) = lane(steps, pid, fake("fake-acp")).await;
         agent.wait().await.unwrap();
         let [working, running, done] = states.as_slice() else {
             panic!("states {states:?}");
@@ -1764,23 +1831,43 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern() {
         let line = "fake: limit hit, back at 3pm.";
-        let (states, slept) = lane(vec![Step::EndTurn(line)], None, "fake-acp").await;
+        let (states, slept) = lane(vec![Step::EndTurn(line)], None, fake("fake-acp")).await;
         assert_eq!(
             states,
             [st("working", None), st("rate-limited", Some("3pm"))]
         );
         assert_eq!(slept, None, "a rate-limited lane never hibernates");
-        let (states, slept) = lane(vec![Step::EndTurn(line)], None, "unknown-acp").await;
+        let (states, slept) = lane(vec![Step::EndTurn(line)], None, fake("unknown-acp")).await;
         assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
         assert!(slept.is_some());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild() {
+        let dir = crate::temp_dir("acp-provider");
+        let line = "Out of tokens, back at 6pm.";
+        let rules = || crate::providers::find(&dir, "claude-acp");
+        let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
+        assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
+        let file = "limit = [\"Out of tokens\"]\nresets = [\"back at \"]\n";
+        std::fs::write(dir.join("claude.toml"), file).unwrap();
+        let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
+        assert_eq!(
+            states,
+            [st("working", None), st("rate-limited", Some("6pm"))]
+        );
     }
 
     #[tokio::test(start_paused = true)]
     async fn a_permission_request_waits_for_approval_and_never_times_out() {
         let call = json!({"sessionUpdate": "tool_call", "toolCallId": "t", "title": "rm notes",
             "status": "pending"});
-        let (states, slept) =
-            lane(vec![Step::Update(call), Step::Ask("rm notes")], None, "x").await;
+        let (states, slept) = lane(
+            vec![Step::Update(call), Step::Ask("rm notes")],
+            None,
+            fake("x"),
+        )
+        .await;
         let waiting = st("waiting-approval", Some("rm notes"));
         assert_eq!(
             states,
@@ -1794,9 +1881,32 @@ mod tests {
     }
 
     #[test]
+    fn the_hibernate_delay_fits_a_shorter_cache_and_the_variable_overrides_it() {
+        let secs = |set: Option<&str>, cache| {
+            hibernate_after(set.map(str::to_owned), cache).map(|d| d.as_secs())
+        };
+        assert_eq!(secs(None, None), Some(600));
+        assert_eq!(secs(None, Some(3600)), Some(600));
+        assert_eq!(secs(None, Some(300)), Some(300));
+        assert_eq!(secs(Some("2"), Some(300)), Some(2));
+        assert_eq!(secs(Some("900"), Some(300)), Some(900));
+        assert_eq!(secs(Some("junk"), Some(300)), Some(600));
+        assert_eq!(secs(Some("0"), Some(300)), None);
+    }
+
+    #[test]
     fn frames_are_one_line_of_json() {
         let framed = frame(&Input::Prompt("a\nb".to_owned()));
         assert_eq!(framed, "\x1e{\"prompt\":\"a\\nb\"}\n");
         assert_eq!(frame(&Input::Cancel), "\x1e\"cancel\"\n");
+        let approve = |request: Option<&str>| Input::Approve {
+            option: "allow".to_owned(),
+            request: request.map(str::to_owned),
+        };
+        let line = "{\"approve\":\"allow\",\"request\":\"7\"}";
+        assert_eq!(frame(&approve(Some("7"))), format!("\x1e{line}\n"));
+        let read = |l: &str| serde_json::from_str::<Input>(l).unwrap();
+        assert_eq!(read(line), approve(Some("7")));
+        assert_eq!(read("{\"approve\":\"allow\"}"), approve(None));
     }
 }

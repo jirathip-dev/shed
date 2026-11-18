@@ -14,9 +14,9 @@ use serde::{Deserialize, Serialize};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 use shed_core::{History, Report, STATES, Size, Terminal};
 use shed_proto::{
-    EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams, MachineStats,
-    ModelParams, Policy, ReadParams, ReadResult, Reported, ResizeParams, Resources, RpcError,
-    RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
+    AcpSession, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams,
+    MachineStats, ModelParams, Parent, Policy, ReadParams, ReadResult, Reported, ResizeParams,
+    Resources, RpcError, RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
 };
 
 use tokio::net::unix::OwnedWriteHalf;
@@ -67,6 +67,10 @@ struct Saved {
     info: TerminalInfo,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     exited_at: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    recipe: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    was: Option<String>,
 }
 
 struct Entry {
@@ -77,8 +81,32 @@ struct Entry {
     killing: bool,
     resources: Option<Resources>,
     emitted: Option<Resources>,
+    agent: Option<BTreeSet<i32>>,
     sampled: (Instant, Duration),
     notes: Vec<String>,
+    started: Option<Instant>,
+    prompted: Option<Instant>,
+    recipe: Option<String>,
+    was: Option<String>,
+    guard: Guard,
+}
+
+#[derive(Default)]
+struct Guard {
+    over: u8,
+    last: Option<i32>,
+    kills: u64,
+    largest: Option<(u64, String)>,
+}
+
+fn process_name(pid: i32) -> String {
+    let cmd = proctree::command(pid).map(|c| c.0).unwrap_or_default();
+    let first = cmd.split_whitespace().next().unwrap_or("?");
+    first.rsplit('/').next().unwrap_or(first).to_owned()
+}
+
+fn largest<'a>(ps: &[&'a ProcessInfo]) -> Option<&'a ProcessInfo> {
+    ps.iter().copied().max_by_key(|p| p.rss_bytes)
 }
 
 impl Entry {
@@ -91,16 +119,86 @@ impl Entry {
             killing: false,
             resources: None,
             emitted: None,
+            agent: None,
             sampled: (shed_core::clock::now(), Duration::ZERO),
             notes: Vec::new(),
+            started: None,
+            prompted: None,
+            recipe: None,
+            was: None,
+            guard: Guard::default(),
         }
     }
 
+    fn guard(
+        &mut self,
+        tree: &[ProcessInfo],
+        limit_mb: u64,
+    ) -> Option<(String, EventKind, Option<i32>)> {
+        let (pid, agent, acp) = (self.info.pid, &self.agent, self.info.acp.is_some());
+        let own = |p: &&ProcessInfo| {
+            Some(p.pid) == pid || (acp && agent.as_ref().is_none_or(|a| a.contains(&p.pid)))
+        };
+        let (mine, started): (Vec<_>, Vec<_>) = tree.iter().partition(own);
+        let g = &mut self.guard;
+        let (process, rss, by, end) = if crate::limit::scoped() {
+            for p in &started {
+                crate::limit::kill_first(p.pid);
+            }
+            let kills = pid.and_then(crate::limit::oom_kills).unwrap_or(g.kills);
+            let now = largest(&started).map(|p| (p.rss_bytes, process_name(p.pid)));
+            let seen = std::mem::replace(&mut g.largest, now);
+            if kills <= std::mem::replace(&mut g.kills, kills) {
+                return None;
+            }
+            let (rss, name) = seen.unwrap_or((0, "?".to_owned()));
+            (name, rss, "kernel", None)
+        } else {
+            let total: u64 = tree.iter().map(|p| p.rss_bytes).sum();
+            let over = total > limit_mb.saturating_mul(1 << 20);
+            g.over = if over { g.over.saturating_add(1) } else { 0 };
+            if g.over < 2 {
+                return None;
+            }
+            g.over = 0;
+            let worker = largest(&started).map(|p| (p, "shed"));
+            let (p, by) = worker.or_else(|| Some((largest(&mine)?, "none")))?;
+            if g.last.replace(p.pid) == Some(p.pid) {
+                return None;
+            }
+            let end = (by == "shed").then_some(p.pid);
+            (process_name(p.pid), p.rss_bytes, by, end)
+        };
+        let rss_mb = rss >> 20;
+        let line = format!("mem-limit {limit_mb}M: {process} {rss_mb}M, ended by {by}");
+        let ended_by = by.to_owned();
+        let kind = EventKind::MemLimit {
+            limit_mb,
+            process,
+            rss_mb,
+            ended_by,
+        };
+        Some((line, kind, end))
+    }
+
+    fn ready(&self, recipe: &str) -> bool {
+        self.recipe.as_deref() == Some(recipe) && self.info.session.is_some()
+    }
+
     fn view(&self) -> TerminalInfo {
-        TerminalInfo {
+        let mut info = TerminalInfo {
             resources: self.resources,
             ..self.info.clone()
+        };
+        let idle = ["done", "idle", "hibernated"];
+        let reported = info.reported.as_ref().map(|r| r.state.as_str());
+        if let Some(s) =
+            (info.session.as_mut()).filter(|_| reported.is_some_and(|r| idle.contains(&r)))
+        {
+            let warm = s.cache_warm(shed_core::clock::unix_now());
+            s.cache_likely = warm.map(|w| if w { "warm" } else { "cold" }.to_owned());
         }
+        info
     }
 
     fn saved(&self) -> Saved {
@@ -111,6 +209,8 @@ impl Entry {
         Saved {
             info,
             exited_at: self.exited_at,
+            recipe: self.recipe.clone(),
+            was: self.was.clone(),
         }
     }
 }
@@ -194,7 +294,8 @@ pub(crate) async fn keep_saved(registry: Arc<Mutex<Registry>>) {
 
 pub(crate) struct Registry {
     entries: BTreeMap<String, Entry>,
-    path: PathBuf,
+    pub(crate) path: PathBuf,
+    pub(crate) providers: PathBuf,
     socket: PathBuf,
     pub(crate) saver: Saver,
     pub(crate) events: Events,
@@ -234,6 +335,7 @@ fn to_reported(r: Report) -> Reported {
         state: r.state,
         note: r.note,
         state_source: r.source,
+        from: r.from,
         id: r.id,
         kind: r.kind,
         progress: r.progress,
@@ -349,6 +451,18 @@ fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalI
     }
 }
 
+fn recipe(p: &RunParams) -> String {
+    let (name, labels, parent, warm) = (None, BTreeMap::new(), None, false);
+    let recipe = RunParams {
+        name,
+        labels,
+        parent,
+        warm,
+        ..p.clone()
+    };
+    serde_json::to_string(&recipe).unwrap_or_default()
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -379,6 +493,8 @@ impl Registry {
         for Saved {
             mut info,
             exited_at,
+            recipe,
+            was,
         } in file.terminals
         {
             let mut term = adopted.remove(&info.name).map(Arc::new);
@@ -413,6 +529,8 @@ impl Registry {
                 name,
                 Entry {
                     exited_at,
+                    recipe,
+                    was,
                     ..Entry::new(info, term)
                 },
             );
@@ -440,6 +558,7 @@ impl Registry {
         let registry = Self {
             entries,
             path: path.to_owned(),
+            providers: path.with_file_name("providers"),
             socket: socket.to_owned(),
             saver,
             events,
@@ -596,7 +715,8 @@ impl Registry {
         running.map(|t| t.name.clone()).collect()
     }
 
-    pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) {
+    pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) -> Vec<i32> {
+        let (mut ended, mut notes) = (Vec::new(), Vec::new());
         for entry in self.entries.values_mut() {
             let Some(pid) = entry.info.pid else { continue };
             let tree = proctree::tree(procs, pid, &std::collections::BTreeSet::new());
@@ -604,6 +724,12 @@ impl Registry {
                 continue;
             }
             let usage = proctree::usage(&tree);
+            let own = |p: &&ProcessInfo| {
+                Some(p.pid) == entry.info.pid
+                    || entry.agent.as_ref().is_none_or(|a| a.contains(&p.pid))
+            };
+            let agent: u64 = tree.iter().filter(own).map(|p| p.rss_bytes).sum();
+            let acp = entry.info.acp.is_some();
             let (then, cpu) = entry.sampled;
             let wall = now.saturating_duration_since(then).as_micros().max(1);
             let busy = usage.cpu.saturating_sub(cpu).as_micros();
@@ -612,6 +738,8 @@ impl Registry {
             let now = Resources {
                 rss_mb: usage.rss_bytes / (1 << 20),
                 cpu_pct,
+                agent_mb: acp.then_some(agent / (1 << 20)),
+                work_mb: acp.then_some(usage.rss_bytes.saturating_sub(agent) / (1 << 20)),
             };
             entry.resources = Some(now);
             if entry
@@ -621,7 +749,17 @@ impl Registry {
                 entry.emitted = Some(now);
                 self.events.emit(&entry.info, EventKind::Resources(now));
             }
+            let limit = entry.info.mem_max_mb;
+            if let Some((line, kind, end)) = limit.and_then(|mb| entry.guard(&tree, mb)) {
+                notes.extend(note(&entry.info, &line));
+                self.events.emit(&entry.info, kind);
+                ended.extend(end);
+            }
         }
+        if !notes.is_empty() {
+            self.deliver(notes);
+        }
+        ended
     }
 
     fn bridge(
@@ -666,6 +804,8 @@ impl Registry {
             policy.to_owned(),
             "--agent".to_owned(),
             id.to_owned(),
+            "--providers".to_owned(),
+            path(&self.providers),
             "--".to_owned(),
         ];
         Ok([bridge.to_vec(), cmd].concat())
@@ -742,6 +882,10 @@ impl Registry {
 
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
+        if p.warm && (p.acp.is_none() || p.resume.is_some()) {
+            return Err(bad("warm needs acp and takes no resume"));
+        }
+        let recipe = p.warm.then(|| recipe(&p));
         if let Some(id) = &p.acp {
             p.cmd = self.bridge(id, p.policy, std::mem::take(&mut p.cmd))?;
         }
@@ -751,13 +895,16 @@ impl Registry {
         if !p.cwd.is_absolute() {
             return Err(bad("cwd must be absolute"));
         }
-        if p.rows == Some(0) || p.cols == Some(0) {
-            return Err(bad("rows and cols must be at least 1"));
+        if p.rows == Some(0) || p.cols == Some(0) || p.mem_max_mb == Some(0) {
+            return Err(bad("rows, cols and mem_max_mb must be at least 1"));
         }
         if p.labels.keys().any(|k| k.is_empty() || k.contains('=')) {
             return Err(bad("label keys must be non-empty and have no '='"));
         }
         crate::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
+        if let Some(parent) = &mut p.parent {
+            parent.name = self.named(&parent.name);
+        }
         if let Some(parent) = p.parent.as_ref().map(|p| &p.name) {
             let gone = |_| {
                 RpcError::new(
@@ -778,6 +925,10 @@ impl Registry {
                 .find(|n| !self.entries.contains_key(n))
                 .unwrap_or_default(),
         };
+        if let Some(spare) = recipe.and_then(|r| self.spares().find(|e| e.ready(&r))) {
+            let spare = spare.info.name.clone();
+            return self.take(&spare, name, p.labels, p.parent);
+        }
         let history = history(&self.path, &name);
         if let Some(log) = &history.log {
             fs::remove_file(log).ok();
@@ -789,9 +940,12 @@ impl Registry {
         let meta = p.meta.is_some().then_some(("SHED_ACP_META", meta.as_str()));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
         let acp: Vec<_> = [resume, mcp, meta, awake].into_iter().flatten().collect();
+        let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
+        let scoped = mem_max_mb.filter(|_| crate::limit::scoped());
+        let cmd = scoped.map(|mb| crate::limit::in_scope(&p.cmd, mb));
         let term = spawn(
             size(p.rows, p.cols),
-            &p.cmd,
+            cmd.as_ref().unwrap_or(&p.cmd),
             &p.cwd,
             &name,
             p.idle_after,
@@ -799,6 +953,9 @@ impl Registry {
             p.acp.is_some().then_some(acp.as_slice()),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
+        if let Some(agent) = p.labels.get("agent").filter(|_| p.acp.is_none()) {
+            term.set_rules(self.rules(agent));
+        }
         let info = TerminalInfo {
             name: name.clone(),
             labels: p.labels,
@@ -815,11 +972,123 @@ impl Registry {
             acp: p.acp,
             session: None,
             parent: p.parent,
+            mem_max_mb,
         };
         self.events.emit(&info, EventKind::Started);
-        let entry = Entry::new(info.clone(), Some(Arc::new(term)));
+        let entry = Entry {
+            started: Some(shed_core::clock::now()),
+            ..Entry::new(info.clone(), Some(Arc::new(term)))
+        };
         self.entries.insert(name, entry);
         Ok(self.saved(info))
+    }
+
+    fn take(
+        &mut self,
+        spare: &str,
+        name: String,
+        labels: BTreeMap<String, String>,
+        parent: Option<Parent>,
+    ) -> Result<TerminalInfo, RpcError> {
+        let mut entry = self.entries.remove(spare).ok_or_else(|| not_found(spare))?;
+        for (from, to) in self.files(spare).into_iter().zip(self.files(&name)) {
+            if let (Some(from), Some(to)) = (from, to) {
+                fs::rename(from, to).ok();
+            }
+        }
+        (entry.info.name, entry.info.labels, entry.info.parent) = (name.clone(), labels, parent);
+        (entry.recipe, entry.was) = (None, Some(spare.to_owned()));
+        if let Some(session) = &mut entry.info.session {
+            session.ready_ms = Some(0);
+        }
+        if let Some(term) = entry.term.clone() {
+            let text = crate::acp::frame(&crate::acp::Input::Name(name.clone()));
+            std::thread::spawn(move || term.write(text.as_bytes()).ok());
+        }
+        self.events.emit(&entry.info, EventKind::Started);
+        let info = entry.info.clone();
+        self.entries.insert(name, entry);
+        Ok(self.saved(info))
+    }
+
+    fn spares(&self) -> impl Iterator<Item = &Entry> {
+        let running = |e: &&Entry| e.info.state == State::Running && !e.killing;
+        self.entries
+            .values()
+            .filter(|e| e.recipe.is_some())
+            .filter(running)
+    }
+
+    pub(crate) fn warm_up(&mut self, p: RunParams) -> Option<String> {
+        let recipe = recipe(&p);
+        let same = self.spares().any(|e| e.recipe.as_ref() == Some(&recipe));
+        if same || self.spares().count() >= crate::config::warm_max() {
+            return None;
+        }
+        let free = |n: &String| !self.entries.contains_key(n) && self.named(n) == *n;
+        let mut names = (1..=2 * self.entries.len() + 1).map(|n| format!(".warm-{n}"));
+        let name = names.find(free)?;
+        let labels = BTreeMap::new();
+        let (parent, warm) = (None, false);
+        let p = RunParams {
+            name: Some(name.clone()),
+            labels,
+            parent,
+            warm,
+            ..p
+        };
+        self.run(p).ok()?;
+        self.entries.get_mut(&name)?.recipe = Some(recipe);
+        Some(name)
+    }
+
+    pub(crate) fn stale_spares(&self) -> Vec<String> {
+        let (now, idle) = (shed_core::clock::now(), crate::config::warm_idle());
+        let stale = |e: &&Entry| {
+            e.started
+                .is_none_or(|t| now.saturating_duration_since(t) >= idle)
+        };
+        self.spares()
+            .filter(stale)
+            .map(|e| e.info.name.clone())
+            .collect()
+    }
+
+    pub(crate) fn named(&self, name: &str) -> String {
+        let mut entries = self.entries.values();
+        let taker = (!self.entries.contains_key(name))
+            .then(|| entries.find(|e| e.was.as_deref() == Some(name)))
+            .flatten();
+        taker.map_or_else(|| name.to_owned(), |e| e.info.name.clone())
+    }
+
+    pub(crate) fn fresh(&self, name: &str) -> Option<Arc<Terminal>> {
+        let entry = self.entries.get(name).filter(|e| e.was.is_none())?;
+        entry
+            .term
+            .clone()
+            .filter(|_| entry.info.state == State::Running)
+    }
+
+    fn files(&self, name: &str) -> [Option<PathBuf>; 3] {
+        let transcript = Some(crate::acp::transcript(&self.path, name));
+        let lent = Some(crate::acp::pty_socket(&self.socket, name));
+        [history(&self.path, name).log, transcript, lent]
+    }
+
+    fn rules(&self, agent: &str) -> Vec<shed_core::Rule> {
+        let records = crate::providers::load(&self.providers).0;
+        let found = records.into_iter().find(|(p, _)| p.agent == agent);
+        let rules = found.map(|(p, _)| p.rules).unwrap_or_default();
+        let rule = |r: crate::proto::Rule| shed_core::Rule {
+            id: r.id,
+            state: r.state,
+            kind: r.kind,
+            priority: r.priority,
+            region: r.region,
+            any: r.any,
+        };
+        rules.into_iter().map(rule).collect()
     }
 
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
@@ -952,7 +1221,8 @@ impl Registry {
         Ok((self.get(name)?, Stream::Output(redraw.into_bytes(), output)))
     }
 
-    pub(crate) fn state(&mut self, p: StateParams) -> Result<TerminalInfo, RpcError> {
+    pub(crate) fn state(&mut self, mut p: StateParams) -> Result<TerminalInfo, RpcError> {
+        p.name = self.named(&p.name);
         let lane = crate::acp::LANE_STATES.contains(&p.report.state.as_str());
         let acp = self.entry(&p.name)?.info.acp.is_some() && lane;
         if !acp && !STATES.contains(&p.report.state.as_str()) {
@@ -970,28 +1240,72 @@ impl Registry {
         self.get(&p.name)
     }
 
-    pub(crate) fn emit(&mut self, p: EmitParams) -> Result<(), RpcError> {
+    pub(crate) fn emit(&mut self, mut p: EmitParams) -> Result<(), RpcError> {
         if !p.kind.is_acp() {
             return Err(RpcError::new(
                 ErrorCode::InvalidParams,
                 "emit takes only ACP events",
             ));
         }
+        p.name = self.named(&p.name);
         self.live(&p.name)?;
-        let entry = self.entries.get_mut(&p.name);
-        let info = &mut entry.ok_or_else(|| not_found(&p.name))?.info;
+        let entry = self
+            .entries
+            .get_mut(&p.name)
+            .ok_or_else(|| not_found(&p.name))?;
+        if let EventKind::Turn { agent, .. } = &mut p.kind {
+            let agent = std::mem::take(agent);
+            if !p.replay {
+                entry.agent = Some(agent.into_iter().collect());
+            }
+        }
+        let now = shed_core::clock::now();
+        let ms = |since: Instant| {
+            let took = now.saturating_duration_since(since).as_millis();
+            u64::try_from(took).unwrap_or(u64::MAX)
+        };
+        let info = &mut entry.info;
+        let old = info.session.clone().unwrap_or_default();
+        let mut timed = None;
         let session = match &p.kind {
-            EventKind::Session(s) => info
-                .session
-                .replace((**s).clone())
-                .is_none_or(|old| old != **s),
+            EventKind::Session(s) => {
+                let ready = (!p.replay).then_some(entry.started).flatten();
+                let new = AcpSession {
+                    turn_ended: old.turn_ended,
+                    ready_ms: old.ready_ms.or_else(|| ready.map(ms)),
+                    first_token_ms: old.first_token_ms,
+                    ..(**s).clone()
+                };
+                info.session
+                    .replace(new.clone())
+                    .is_none_or(|old| old != new)
+            }
+            EventKind::Reply { .. } if !p.replay => {
+                info.session.get_or_insert_default().turn_ended =
+                    Some(shed_core::clock::unix_now());
+                true
+            }
             EventKind::Usage(u) => {
                 info.session.get_or_insert_default().usage = Some(u.clone());
                 false
             }
+            EventKind::Turn { .. } if !p.replay => {
+                entry.prompted = entry.prompted.or(Some(now));
+                false
+            }
+            EventKind::Text { .. } if !p.replay && old.first_token_ms.is_none() => {
+                let first = entry.prompted.map(ms);
+                let session = info.session.get_or_insert_default();
+                session.first_token_ms = first;
+                timed = (info.acp.clone()).zip(old.ready_ms.zip(first));
+                first.is_some()
+            }
             _ => false,
         };
         self.events.emit_as(info, p.kind, p.replay);
+        if let Some((agent, (ready, first))) = timed {
+            crate::providers::record_timing(&self.path, &agent, ready, first).ok();
+        }
         if session {
             self.save();
         }
@@ -1049,9 +1363,7 @@ impl Registry {
             return Err(RpcError::new(ErrorCode::StillRunning, name));
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
-        let transcript = Some(crate::acp::transcript(&self.path, name));
-        let lent = Some(crate::acp::pty_socket(&self.socket, name));
-        let files = [history(&self.path, name).log, transcript, lent];
+        let files = self.files(name);
         Ok((self.saved(entry.info), move || {
             for file in files.into_iter().flatten() {
                 fs::remove_file(file).ok();
@@ -1111,6 +1423,55 @@ mod tests {
         );
         let osc = registry.get("osc").unwrap().reported.unwrap();
         assert_eq!(osc.state_source.as_deref(), Some("jan-osc9999"));
+    }
+
+    #[tokio::test]
+    async fn each_shipped_rule_matches_its_golden_screen_and_unlabelled_terminals_never_check() {
+        let path = dir("rules").join("state.json");
+        let mut reg = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let screens = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
+        let records = crate::providers::load(&reg.providers).0;
+        let rules = records
+            .iter()
+            .flat_map(|(p, _)| p.rules.iter().map(|r| (&p.agent, r)));
+        let mut shipped = 0;
+        for (n, (agent, rule)) in rules.enumerate() {
+            assert!(!rule.version.is_empty(), "{}", rule.id);
+            let golden = screens.join(format!("{agent}-{}.txt", rule.id));
+            assert!(golden.exists(), "{}", golden.display());
+            let mut run = |name: &str, labels: serde_json::Value| {
+                let golden = golden.to_str().unwrap();
+                let p = serde_json::json!({
+                    "name": name, "cwd": "/", "labels": labels,
+                    "cmd": ["sh", "-c", "cat \"$0\"; exec sleep 60", golden],
+                });
+                reg.run(serde_json::from_value(p).unwrap()).unwrap();
+                Arc::clone(reg.live(name).unwrap())
+            };
+            let lane = run(&format!("lane{n}"), serde_json::json!({ "agent": agent }));
+            let plain = run(&format!("plain{n}"), serde_json::json!({}));
+            let deadline = shed_core::clock::now() + Duration::from_secs(10);
+            let from = Some(format!("rule:{}", rule.id));
+            let matched =
+                lane.wait_until(|t| t.report().and_then(|r| r.from) == from, Some(deadline));
+            assert_eq!(
+                matched.await.unwrap(),
+                shed_core::Wake::Matched,
+                "{}",
+                golden.display()
+            );
+            assert_eq!(lane.report().map(|r| r.state), Some(rule.state.clone()));
+            let shown = plain.wait_until(|t| t.screen().contains(&rule.any[0]), Some(deadline));
+            assert_eq!(shown.await.unwrap(), shed_core::Wake::Matched);
+            assert_eq!(plain.report(), None);
+            assert!(lane.rule_checks() > 0);
+            assert_eq!(plain.rule_checks(), 0);
+            for t in [lane, plain] {
+                t.kill(Duration::ZERO).unwrap();
+            }
+            shipped += 1;
+        }
+        assert!(shipped > 0);
     }
 
     #[test]
@@ -1238,6 +1599,97 @@ mod tests {
         );
         let live = registry.get("acp69").unwrap().session.unwrap();
         assert_eq!(live.commands.len(), 100);
+    }
+
+    #[test]
+    fn the_sampler_ends_a_child_over_the_limit_for_two_samples_and_leaves_the_rest() {
+        if crate::limit::scoped() {
+            writeln!(io::stderr(), "skipped: this host limits terminals by scope").ok();
+            return;
+        }
+        let path = dir("mem-guard").join("state.json");
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let run = |name: &str, limit: Option<u64>| {
+            let run = serde_json::json!({"name": name, "cwd": "/", "cmd": ["sleep", "100"],
+                "mem_max_mb": limit});
+            serde_json::from_value(run).unwrap()
+        };
+        let mut terms = Vec::new();
+        for (name, limit) in [("free", None), ("capped", Some(100))] {
+            registry.run(run(name, limit)).unwrap();
+            terms.push(Arc::clone(registry.live(name).unwrap()));
+        }
+        let pid = |n: usize| terms[n].pid();
+        let proc = |id: i32, parent: i32, mb: u64| ProcessInfo {
+            pid: id,
+            ppid: parent,
+            pgid: parent,
+            rss_bytes: mb << 20,
+            cpu: Duration::ZERO,
+            zombie: false,
+        };
+        let (child, free_child) = (1_999_999_001, 1_999_999_002);
+        let at = |agent_mb: u64, child_mb: u64| {
+            let mut procs = vec![
+                proc(pid(0), 1, 1),
+                proc(free_child, pid(0), 5000),
+                proc(pid(1), 1, agent_mb),
+                proc(child, pid(1), child_mb),
+            ];
+            procs.retain(|p| p.rss_bytes > 0);
+            procs
+        };
+        let mut sub = registry.events.subscribe(EventsParams {
+            labels: BTreeMap::new(),
+            since: Some(0),
+        });
+        let mut sample = |procs: Vec<ProcessInfo>| registry.sample(&procs, shed_core::clock::now());
+        assert_eq!(sample(at(10, 80)), Vec::<i32>::new(), "under the limit");
+        assert_eq!(sample(at(10, 80)), Vec::<i32>::new(), "under the limit");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "one sample over");
+        assert_eq!(sample(at(10, 80)), Vec::<i32>::new(), "back under");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "one sample over");
+        assert_eq!(sample(at(10, 150)), [child], "two in a row");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "once per process");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "once per process");
+        assert_eq!(sample(at(150, 0)), Vec::<i32>::new(), "the agent itself");
+        assert_eq!(
+            sample(at(150, 0)),
+            Vec::<i32>::new(),
+            "the agent is never ended"
+        );
+        let limits: Vec<_> = (sub.events().into_iter())
+            .filter_map(|e| match e.kind {
+                EventKind::MemLimit {
+                    rss_mb, ended_by, ..
+                } => Some((e.name, rss_mb, ended_by)),
+                _ => None,
+            })
+            .collect();
+        let capped = |mb: u64, by: &str| ("capped".to_owned(), mb, by.to_owned());
+        assert_eq!(limits, [capped(150, "shed"), capped(150, "none")]);
+        for term in terms {
+            term.kill(GRACE).unwrap();
+        }
+    }
+
+    #[test]
+    fn sample_time_report() {
+        let path = dir("sample-time").join("state.json");
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let terms: Vec<_> = (0..30)
+            .map(|n| sleeper(&mut registry, &format!("s{n}")))
+            .collect();
+        let procs = proctree::system().list().unwrap();
+        let started = shed_core::clock::now();
+        for _ in 0..200 {
+            registry.sample(&procs, shed_core::clock::now());
+        }
+        let each = started.elapsed() / 200;
+        writeln!(io::stderr(), "sample of 30 terminals: {each:?}").ok();
+        for term in terms {
+            term.kill(GRACE).unwrap();
+        }
     }
 
     #[test]

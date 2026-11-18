@@ -301,13 +301,17 @@ pub enum Method {
     FileWrite,
     /// Keep the connection alive: `{}` → `{}`, usually as a notification.
     Heartbeat,
+    /// The agents shed knows: `{}` → `[AgentInfo]`.
+    Agents,
+    /// Apply an agent's limit and auth rules to text: [`MatchParams`] → [`Matched`].
+    AgentsMatch,
     /// The API as an `OpenRPC` document: `{}` → `openrpc()` (the `schema` feature).
     Discover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 30] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -335,6 +339,8 @@ impl Method {
         Self::FileRead,
         Self::FileWrite,
         Self::Heartbeat,
+        Self::Agents,
+        Self::AgentsMatch,
         Self::Discover,
     ];
 
@@ -369,6 +375,8 @@ impl Method {
             Self::FileRead => "file.read",
             Self::FileWrite => "file.write",
             Self::Heartbeat => "heartbeat",
+            Self::Agents => "agents",
+            Self::AgentsMatch => "agents.match",
             Self::Discover => "rpc.discover",
         }
     }
@@ -387,7 +395,7 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
             }
             Self::Ls => {
                 "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal."
@@ -457,6 +465,12 @@ impl Method {
             }
             Self::Heartbeat => {
                 "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection."
+            }
+            Self::Agents => {
+                "Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it)."
+            }
+            Self::AgentsMatch => {
+                "Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing."
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
@@ -570,6 +584,12 @@ pub struct RunParams {
     /// ACP: never hibernate the agent when idle.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_hibernate: bool,
+    /// ACP: take this recipe's ready spare session if there is one, and keep a spare ready for the next run.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub warm: bool,
+    /// The most memory the terminal's process tree may hold, in MB; default the server's `$SHED_MEM_MAX`, else none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_max_mb: Option<u64>,
     /// Start it on this machine, over its held link (`machine.links`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
@@ -730,6 +750,9 @@ pub struct Reported {
     /// The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_source: Option<String>,
+    /// Where the state came from: `reported`, `rule:<id>` (a screen rule) or `silence` (`idle_after`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
     /// OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
@@ -821,7 +844,8 @@ pub struct EventsParams {
 
 /// An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in
 /// `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),
-/// `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
+/// `killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`
+/// (the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).
 ///
 /// An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`
 /// (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with
@@ -869,10 +893,25 @@ pub enum EventKind {
     Killed,
     /// The tree's memory or CPU moved by more than 10 % since the last such event.
     Resources(Resources),
+    /// The process tree passed its memory limit.
+    #[serde(rename = "mem-limit")]
+    MemLimit {
+        /// The limit, in MB.
+        limit_mb: u64,
+        /// The process over it: the largest the agent started, or the agent's own when it started none.
+        process: String,
+        /// Its memory, in MB.
+        rss_mb: u64,
+        /// `kernel` (the terminal's scope) or `shed` (the sampler) ended it; `none`: the agent's own, only reported.
+        ended_by: String,
+    },
     /// ACP: a prompt started a turn.
     Turn {
         /// The prompt text.
         prompt: String,
+        /// The bridge's to the server: the agent's own pids as the turn began; never in the event stream.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agent: Vec<i32>,
     },
     /// ACP: a chunk of the agent's reply.
     Text {
@@ -890,6 +929,12 @@ pub enum EventKind {
         /// ACP's tool kind (`read`, `edit`, `execute`, …), when the agent sends one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
+        /// The paths ACP's `locations` name in this update.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<PathBuf>,
+        /// ACP's `rawInput` in this update, left out over 4 KiB.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_input: Option<Value>,
     },
     /// ACP: the agent's plan, as it sent it.
     Plan {
@@ -903,10 +948,16 @@ pub enum EventKind {
     },
     /// ACP: the agent asks to run a tool; `shed approve` answers with one option.
     ApprovalRequest {
+        /// The request's id, which `shed approve --request` names.
+        #[serde(default)]
+        id: String,
         /// The tool call's title.
         tool: String,
         /// The choices.
         options: Vec<ApprovalOption>,
+        /// ACP's `toolCall` as the agent sent it, without `content`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        call: Option<Value>,
     },
     /// ACP: a permission request was answered (by `shed approve` or the `--policy`).
     Approved {
@@ -937,6 +988,7 @@ impl EventKind {
                 | Self::Exited { .. }
                 | Self::Killed
                 | Self::Resources(_)
+                | Self::MemLimit { .. }
         )
     }
 }
@@ -974,6 +1026,29 @@ pub struct AcpSession {
     /// The agent's last `usage_update`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<AcpUsage>,
+    /// When the last turn ended, unix seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_ended: Option<u64>,
+    /// The prompt cache's likely lifetime on this login in seconds, from the provider record's `cache`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_lifetime: Option<u64>,
+    /// While idle, `warm` or `cold`: what the prompt cache likely is, by the idle time against `cache_lifetime`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_likely: Option<String>,
+    /// Milliseconds from `run` to the session being ready.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ready_ms: Option<u64>,
+    /// Milliseconds from the first prompt to the first chunk of its reply.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
+}
+
+impl AcpSession {
+    /// Whether the prompt cache is likely still warm at `now` (unix seconds), or `None` with no turn or lifetime.
+    #[must_use]
+    pub fn cache_warm(&self, now: u64) -> Option<bool> {
+        Some(now.saturating_sub(self.turn_ended?) < self.cache_lifetime?)
+    }
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.
@@ -987,6 +1062,46 @@ pub struct AcpUsage {
     /// The session's total cost so far (`amount`, `currency`), when the agent reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost: Option<Value>,
+    /// The last turn's tokens, when the agent's prompt responses carry them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<Tokens>,
+    /// The session's tokens over its turns so far, when the agent's prompt responses carry them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<Tokens>,
+}
+
+/// Tokens a turn or a session spent, as the agent's prompt responses report them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Tokens {
+    /// Input tokens neither read from nor written to the prompt cache.
+    pub input: u64,
+    /// Input tokens read from the prompt cache.
+    pub cache_read: u64,
+    /// Input tokens written to the prompt cache.
+    pub cache_write: u64,
+    /// Output tokens.
+    pub output: u64,
+}
+
+impl Tokens {
+    /// Both counts added up.
+    #[must_use]
+    pub fn plus(self, o: Self) -> Self {
+        Self {
+            input: self.input.saturating_add(o.input),
+            cache_read: self.cache_read.saturating_add(o.cache_read),
+            cache_write: self.cache_write.saturating_add(o.cache_write),
+            output: self.output.saturating_add(o.output),
+        }
+    }
+
+    /// Cache reads as a percentage of all input tokens, or `None` with no input.
+    #[must_use]
+    pub fn cache_share(&self) -> Option<u64> {
+        let all = (self.input.saturating_add(self.cache_read)).saturating_add(self.cache_write);
+        self.cache_read.saturating_mul(100).checked_div(all)
+    }
 }
 
 /// `emit` params.
@@ -1119,6 +1234,221 @@ pub struct Link {
     pub error: Option<String>,
 }
 
+/// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
+/// the same name in `<config>/providers/` (`docs/acp.md`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Provider {
+    /// The ACP agent id (`shed agents add <id>`).
+    pub id: String,
+    /// The PTY agent's name, as `shed setup` takes it.
+    pub agent: String,
+    /// Text in a line that says the login expired.
+    pub auth_failures: Vec<String>,
+    /// Text in a line that says a usage limit was hit.
+    pub limit: Vec<String>,
+    /// Markers in a limit line that the reset time follows.
+    pub resets: Vec<String>,
+    /// The `shed state` hooks `shed setup` writes.
+    pub hooks: Option<Hooks>,
+    /// The command that logs in.
+    pub login: Option<String>,
+    /// The command that shows whether it is logged in.
+    pub status: Option<String>,
+    /// The command that logs out.
+    pub logout: Option<String>,
+    /// The variable that moves its config folder.
+    pub config_dir_var: Option<String>,
+    /// The variable that names its settings.
+    pub settings_var: Option<String>,
+    /// The arguments that set the effort, `{effort}` standing for one of `efforts`.
+    pub effort_args: Vec<String>,
+    /// The effort levels it takes.
+    pub efforts: Vec<String>,
+    /// The screens that set its state, for a terminal labelled `agent=<agent>`.
+    pub rules: Vec<Rule>,
+    /// Where its prompt responses' `_meta` carries the turn's tokens.
+    pub quota: Option<Quota>,
+    /// How long its prompt cache lives on each login.
+    pub cache: Option<Cache>,
+}
+
+/// The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Cache {
+    /// Seconds on a subscription plan, the login without an API variable.
+    pub plan: u64,
+    /// Seconds on an API key.
+    pub api: u64,
+    /// Variables that, set and not empty in the agent's environment, mean an API key.
+    pub api_vars: Vec<String>,
+}
+
+/// A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is
+/// `state`. Above priority 0 it outranks the agent's own report; at or below, it applies only without one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Rule {
+    /// Its name; `get` shows `rule:<id>` as the state's `from`.
+    pub id: String,
+    /// The state it sets.
+    pub state: String,
+    /// Why it is blocked: `permission`, `question` or `auth`.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The highest matching rule wins; the agent's own report has priority 0.
+    pub priority: i32,
+    /// How many of the screen's last non-blank lines it looks at.
+    pub region: usize,
+    /// The texts it matches, any one of them.
+    pub any: Vec<String>,
+    /// The agent version its golden screen was captured from.
+    pub version: String,
+}
+
+/// The keys of a turn's tokens in a prompt response's `_meta`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Quota {
+    /// The keys from `_meta` down to the object of counters.
+    pub path: Vec<String>,
+    /// The input tokens' key.
+    pub input: String,
+    /// The cache reads' key.
+    pub cache_read: String,
+    /// The cache writes' key.
+    pub cache_write: String,
+    /// The output tokens' key.
+    pub output: String,
+}
+
+impl Provider {
+    /// The first line of `text` that says a usage limit was hit, and the reset time after a marker in it.
+    #[must_use]
+    pub fn limit_hit<'t>(&self, text: &'t str) -> Option<(&'t str, Option<String>)> {
+        let line = text
+            .lines()
+            .find(|l| self.limit.iter().any(|s| l.contains(s)))?;
+        let at = self.resets.iter().find_map(|r| line.split_once(r));
+        Some((
+            line,
+            at.map(|(_, at)| at.trim().trim_end_matches('.').to_owned()),
+        ))
+    }
+
+    /// The turn's tokens in a prompt response's `meta`, or `None` when they are absent or not counts.
+    #[must_use]
+    pub fn tokens(&self, meta: &serde_json::Map<String, Value>) -> Option<Tokens> {
+        let quota = self.quota.as_ref()?;
+        let (first, rest) = quota.path.split_first()?;
+        let counts = rest.iter().try_fold(meta.get(first)?, |v, k| v.get(k))?;
+        let count = |key: &String| counts.get(key).and_then(Value::as_u64);
+        Some(Tokens {
+            input: count(&quota.input)?,
+            cache_read: count(&quota.cache_read)?,
+            cache_write: count(&quota.cache_write)?,
+            output: count(&quota.output)?,
+        })
+    }
+
+    /// The prompt cache's likely lifetime in seconds, by whether `set` says one of the API variables is set.
+    #[must_use]
+    pub fn cache_lifetime(&self, set: impl Fn(&str) -> bool) -> Option<u64> {
+        let cache = self.cache.as_ref()?;
+        let api = cache.api_vars.iter().any(|v| set(v));
+        Some(if api { cache.api } else { cache.plan })
+    }
+
+    /// The first line of `text` that says the login expired.
+    #[must_use]
+    pub fn auth_failure<'t>(&self, text: &'t str) -> Option<&'t str> {
+        text.lines()
+            .find(|l| self.auth_failures.iter().any(|s| l.contains(s)))
+    }
+}
+
+/// A PTY agent's hook table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    /// Its config file, under the home folder.
+    pub file: String,
+    /// Each hook event and the state it reports.
+    pub events: Vec<[String; 2]>,
+}
+
+/// One installed ACP agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Agent {
+    /// The registry id.
+    pub id: String,
+    /// The pinned version.
+    pub version: String,
+    /// The distribution it came from: `binary`, `npx` or `uvx`.
+    pub distribution: String,
+    /// The ACP adapter's command line (`env K=V …` first when the registry sets variables).
+    pub cmd: Vec<String>,
+}
+
+/// One `agents` entry: an agent shed has a provider record for, installed, or both.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AgentInfo {
+    /// The ACP agent id.
+    pub id: String,
+    /// Where the record came from: `built-in` or the user file's path.
+    pub source: Option<String>,
+    /// The provider record.
+    pub provider: Option<Provider>,
+    /// The installed adapter.
+    pub installed: Option<Agent>,
+    /// The medians of its last sessions' timings, when any session got a first token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub medians: Option<Medians>,
+}
+
+/// An agent's medians over its last `$SHED_MEDIAN_OF` (default 20) ACP sessions that got a first token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Medians {
+    /// How many sessions they are over.
+    pub sessions: u64,
+    /// The median of [`AcpSession::ready_ms`].
+    pub ready_ms: u64,
+    /// The median of [`AcpSession::first_token_ms`].
+    pub first_token_ms: u64,
+}
+
+/// `agents.match` params: an agent's id and text to apply its rules to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct MatchParams {
+    /// The ACP agent id.
+    pub id: String,
+    /// The text, e.g. a pane's screen.
+    pub text: String,
+}
+
+/// `agents.match` result: the lines the agent's rules find.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Matched {
+    /// The first line that says a usage limit was hit (the state `rate-limited`).
+    pub limit: Option<String>,
+    /// The reset time that line gives.
+    pub resets: Option<String>,
+    /// The first line that says the login expired.
+    pub auth: Option<String>,
+}
+
 /// `machine.stats` result: a sample taken now, and the kept ones after `since`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -1139,6 +1469,12 @@ pub struct Resources {
     pub rss_mb: u64,
     /// CPU use since the previous sample, in percent of one core.
     pub cpu_pct: u64,
+    /// ACP: the agent's own processes' memory, in MiB: the bridge, and the adapter and agent as the turn began.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_mb: Option<u64>,
+    /// ACP: the memory of everything else in the tree, what the agent started, in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_mb: Option<u64>,
 }
 
 /// Whether a terminal's program runs.
@@ -1204,6 +1540,9 @@ pub struct TerminalInfo {
     /// The terminal that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<Parent>,
+    /// The most memory its process tree may hold, in MB, if limited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_max_mb: Option<u64>,
 }
 
 /// `screen.watch` params.
@@ -1338,6 +1677,8 @@ impl Method {
             Self::FileRead => pair::<FileParams, Vec<u8>>(g),
             Self::FileWrite => pair::<FileParams, Empty>(g),
             Self::Heartbeat => pair::<Empty, Empty>(g),
+            Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
+            Self::AgentsMatch => pair::<MatchParams, Matched>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
         }
     }

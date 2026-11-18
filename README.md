@@ -52,7 +52,7 @@ around lanes:
 |---|---|
 | `shed serve` | The per-user server (launchd/systemd user job). Owns the PTYs, the state and the socket. |
 | `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and (re)start the server under it, so the running server is this binary (uninstall prints how to unload it); check the job, socket, log, and that the server runs this binary's build. |
-| `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. |
+| `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] [--mem-max SIZE] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. `--mem-max` (`200M`, `4G`; default `$SHED_MEM_MAX` of `shed serve`, else none): on Linux with a user systemd that has the memory controller the program gets its own scope with `MemoryMax`; elsewhere the sampler ends the largest process the agent started after two samples over, a guard against sustained use that a fast allocation can pass between samples. Either is a `mem-limit` event; `shed doctor` says which. |
 | `shed ls [--label k=v] [--json]` | List terminals: name, labels, cwd, state, pid tree, RSS/CPU, age. |
 | `shed get <t>` | One terminal as JSON. |
 | `shed read <t> [--lines N] [--screen\|--history]` | The current screen, or scrollback, as plain text. |
@@ -62,7 +62,7 @@ around lanes:
 | `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
-| `shed top` | The terminals by memory use, largest first. |
+| `shed top [<t> [--full]]` | The terminals by memory use, largest first, an ACP agent's split into AGENT and WORK (what it started), then a totals line; with `<t>`, that terminal's processes over 50 MB by name (the command line with `--full`). |
 | `shed watch [--label k=v]` | A live list of the terminals beside a read-only preview of the selected one; Enter attaches, `Ctrl+\` comes back, `/` filters, `q` quits. |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed --on <machine> …` / `shed machine add\|ls\|rm` | The same commands on another host over SSH (key login only). The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `wait`, `approve` and `cancel`, and `--on <machine> run --acp` starts an agent installed there; `machine ls --json` shows each link. |

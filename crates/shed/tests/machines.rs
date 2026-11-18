@@ -549,7 +549,7 @@ fn an_acp_session_is_started_waited_on_replied_approved_and_cancelled_on_a_machi
     let got: Value = serde_json::from_str(&ok(&root, &["get", "box/a"])).expect("JSON");
     assert_eq!(
         got["reported"],
-        json!({"state": "done", "note": "cancelled"})
+        json!({"state": "done", "note": "cancelled", "from": "reported"})
     );
     assert_eq!(
         box_ssh(&root),

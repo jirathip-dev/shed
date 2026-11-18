@@ -3,17 +3,21 @@
 use crate::runner::{Child, ExitStatus};
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
+use std::io::{ErrorKind::BrokenPipe, Read as _};
 use std::os::fd::OwnedFd;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, SyncSender, sync_channel};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use rustix::event::{PollFd, PollFlags, poll};
 use rustix::process::{Pid, Signal, kill_process_group};
 use rustix::termios::{Winsize, tcgetwinsize, tcsetwinsize};
+use tokio::io::AsyncWriteExt as _;
+use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor::MultiThread};
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::{mpsc, watch};
 
 use crate::history::{History, Log};
@@ -24,6 +28,34 @@ use crate::{Error, keys};
 const REAP: Duration = Duration::from_millis(20);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const OUTPUT_BEHIND: usize = 256;
+const RULE_EVERY: Duration = Duration::from_millis(250);
+
+/// A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is
+/// `state`. Above priority 0 it outranks the reported state; at or below, it applies only without one.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rule {
+    /// Its name; the state's `from` is `rule:<id>`.
+    pub id: String,
+    /// The state it sets.
+    pub state: String,
+    /// Why it is blocked.
+    pub kind: Option<String>,
+    /// The highest matching rule wins; the reported state has priority 0.
+    pub priority: i32,
+    /// How many of the screen's last non-blank lines it looks at.
+    pub region: usize,
+    /// The texts it matches, any one of them.
+    pub any: Vec<String>,
+}
+
+#[derive(Default)]
+struct Rules {
+    list: Vec<Rule>,
+    seen: Option<u64>,
+    at: Option<Instant>,
+    hit: Option<Rule>,
+    checks: u64,
+}
 
 /// Why [`Terminal::wait_until`] returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,10 +129,11 @@ fn bump(watch: &watch::Sender<Status>, change: impl FnOnce(&mut Status)) {
 /// unless it was [`release`](Self::release)d.
 pub struct Terminal {
     pty: Weak<File>,
-    input: Sender<Input>,
+    input: mpsc::UnboundedSender<Input>,
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
     watch: Arc<watch::Sender<Status>>,
+    rules: Mutex<Rules>,
     pid: i32,
     released: AtomicBool,
 }
@@ -162,13 +195,7 @@ impl Terminal {
         let child = crate::runner::pty(program, args, cwd, env, pts, stderr)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
-        Ok(Self::start(
-            OwnedFd::from(pty).into(),
-            pid,
-            Some(child),
-            screen,
-            log,
-        ))
+        Self::start(OwnedFd::from(pty).into(), pid, Some(child), screen, log)
     }
 
     /// Takes over a terminal that another process started: `master` is its PTY's master, `pid` its program,
@@ -185,7 +212,7 @@ impl Terminal {
         };
         let screen = history.restore(size)?;
         let log = Log::open(history)?;
-        Ok(Self::start(master.into(), pid, None, screen, log))
+        Self::start(master.into(), pid, None, screen, log)
     }
 
     fn start(
@@ -194,7 +221,9 @@ impl Terminal {
         child: Option<Child>,
         screen: Screen,
         log: Option<Log>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
+        let runtime = runtime()?;
+        let (input, inputs) = mpsc::unbounded_channel();
         let screen = Arc::new(Mutex::new(screen));
         let reader = Arc::new(master);
         let pty = Arc::downgrade(&reader);
@@ -212,16 +241,16 @@ impl Terminal {
         let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
         let adopted = child.is_none();
+        let replies = input.clone();
         std::thread::spawn(move || {
-            let (pty, screen, outputs) =
-                (Arc::clone(&reader), Arc::clone(&sink), Arc::clone(&subs));
+            let (screen, outputs) = (Arc::clone(&sink), Arc::clone(&subs));
             let watch = Arc::clone(&watcher);
             let (logs, logger) = stage(move |rx: Receiver<Vec<u8>>| {
                 let mut log = log;
                 batches(&rx).try_for_each(|bytes| log.as_mut()?.append(&bytes).ok())
             });
             let (chunks, feeder) =
-                stage(move |rx| feed_loop(&rx, &pty, &screen, &outputs, &watch, Some(logs)));
+                stage(move |rx| feed_loop(&rx, &replies, &screen, &outputs, &watch, Some(logs)));
             read_loop(&reader, &chunks);
             drop(chunks);
             feeder.join().ok();
@@ -236,21 +265,19 @@ impl Terminal {
             });
         });
         if let Some(child) = child {
-            let exits = Arc::clone(&watch);
-            std::thread::spawn(move || reap(child, &exits));
+            runtime.spawn(reap(child, Arc::clone(&watch)));
         }
-        let (input, inputs) = std::sync::mpsc::channel();
-        let (writer, watcher) = (Weak::clone(&pty), Arc::clone(&watch));
-        std::thread::spawn(move || write_loop(&writer, &inputs, &watcher));
-        Self {
+        runtime.spawn(write_loop(Weak::clone(&pty), inputs, Arc::clone(&watch)));
+        Ok(Self {
             pty,
             input,
             screen,
             outputs,
             watch,
+            rules: Mutex::default(),
             pid,
             released: AtomicBool::new(false),
-        }
+        })
     }
 
     /// A duplicate of the PTY's master, for a process that is to keep the terminal open.
@@ -304,10 +331,12 @@ impl Terminal {
         lock(&self.screen).history(n)
     }
 
-    /// The state the program last reported (`shed state`, the OSC 7501 escape or another agent's). Without one, `idle`
-    /// once silent for the [`set_idle_after`](Self::set_idle_after) time; `stuck` while a [`write`](Self::write) waits.
+    /// The state the program last reported (`shed state`, the OSC 7501 escape or another agent's), unless a
+    /// [`set_rules`](Self::set_rules) rule outranks it. Without either, `idle` once silent for the
+    /// [`set_idle_after`](Self::set_idle_after) time; `stuck` while a [`write`](Self::write) waits.
     #[must_use]
     pub fn report(&self) -> Option<Report> {
+        let rule = self.screen_rule();
         let status = self.watch.borrow();
         if status.stuck {
             return Some(Report {
@@ -316,13 +345,69 @@ impl Terminal {
                 ..Report::default()
             });
         }
+        let outranks = |r: &Rule| r.priority > 0 || status.report.is_none();
+        if let Some(r) = rule.filter(|r| !status.ended && outranks(r)) {
+            return Some(Report {
+                state: r.state,
+                kind: r.kind,
+                from: Some(format!("rule:{}", r.id)),
+                ..Report::default()
+            });
+        }
         let idle = status.idle_at().is_some_and(|at| crate::clock::now() >= at);
-        status.report.clone().or_else(|| {
+        let from = |from: &str| Some(from.to_owned());
+        let reported = status.report.clone().map(|r| Report {
+            from: from("reported"),
+            ..r
+        });
+        reported.or_else(|| {
             idle.then(|| Report {
                 state: "idle".to_owned(),
+                from: from("silence"),
                 ..Report::default()
             })
         })
+    }
+
+    /// Sets the screen rules [`report`](Self::report) checks, at most every 250 ms and only after the
+    /// screen changed.
+    pub fn set_rules(&self, rules: Vec<Rule>) {
+        *lock(&self.rules) = Rules {
+            list: rules,
+            ..Rules::default()
+        };
+    }
+
+    /// How many times the screen rules have been checked.
+    #[must_use]
+    pub fn rule_checks(&self) -> u64 {
+        lock(&self.rules).checks
+    }
+
+    fn screen_rule(&self) -> Option<Rule> {
+        let mut rules = lock(&self.rules);
+        if rules.list.is_empty() {
+            return None;
+        }
+        let (changes, now) = (self.changes(), crate::clock::now());
+        let due = (rules.at).and_then(|at| at.checked_add(RULE_EVERY));
+        if rules.seen != Some(changes) && due.is_none_or(|at| now >= at) {
+            let text = self.screen();
+            let lines: Vec<&str> = text.lines().collect();
+            let end = lines.iter().rposition(|l| !l.trim().is_empty());
+            let region = |n| lines.iter().take(end.map_or(0, |i| i + 1)).rev().take(n);
+            let shows = |r: &&Rule| region(r.region).any(|l| r.any.iter().any(|s| l.contains(s)));
+            let hit = rules.list.iter().filter(shows).max_by_key(|r| r.priority);
+            rules.hit = hit.cloned();
+            (rules.seen, rules.at, rules.checks) = (Some(changes), Some(now), rules.checks + 1);
+        }
+        rules.hit.clone()
+    }
+
+    fn rule_due(&self) -> Option<Instant> {
+        let rules = lock(&self.rules);
+        let stale = !rules.list.is_empty() && rules.seen != Some(self.changes());
+        rules.at.filter(|_| stale)?.checked_add(RULE_EVERY)
     }
 
     /// The records the program reported with an `id`, least recently updated first.
@@ -343,8 +428,8 @@ impl Terminal {
     }
 
     /// Waits until `done` holds, the program exits or `deadline` passes, checking `done` again on every
-    /// output chunk and report and when the idle fallback comes due (no polling). Needs a tokio runtime
-    /// with time.
+    /// output chunk and report and when the idle fallback or a screen rule check comes due (no polling).
+    /// Needs a tokio runtime with time.
     ///
     /// # Errors
     /// [`Error::Io`] when the exit status cannot be read.
@@ -367,7 +452,8 @@ impl Terminal {
                 return Ok(Wake::Timeout);
             }
             let idle = changed.borrow().idle_at().filter(|at| *at > now);
-            let wake = [deadline, idle].into_iter().flatten().min();
+            let due = self.rule_due().filter(|at| *at > now);
+            let wake = [deadline, idle, due].into_iter().flatten().min();
             let sleep = async {
                 match wake {
                     Some(at) => tokio::time::sleep_until(at.into()).await,
@@ -443,7 +529,7 @@ impl Terminal {
         Ok(())
     }
 
-    /// The program's exit status, if it has exited, as the reaper thread recorded it (never blocks).
+    /// The program's exit status, if it has exited, as the reaper recorded it (never blocks).
     ///
     /// # Errors
     /// [`Error::Io`] when the status could not be read.
@@ -491,28 +577,70 @@ impl Drop for Terminal {
     }
 }
 
-fn reap(mut child: Child, watch: &watch::Sender<Status>) {
-    let exit = child.wait().map_err(|e| e.kind());
-    bump(watch, |s| {
-        s.exit = Some(exit);
+fn runtime() -> Result<Handle, Error> {
+    static RUNTIME: OnceLock<Option<Runtime>> = OnceLock::new();
+    let one = || {
+        Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+    };
+    let own = || {
+        RUNTIME
+            .get_or_init(|| one().ok())
+            .as_ref()
+            .map(Runtime::handle)
+    };
+    let pooled = Handle::try_current()
+        .ok()
+        .filter(|h| h.runtime_flavor() == MultiThread);
+    let runtime = pooled.or_else(|| own().cloned());
+    runtime.ok_or_else(|| Error::Io(std::io::Error::other("no runtime")))
+}
+
+async fn reap(mut child: Child, watch: Arc<watch::Sender<Status>>) {
+    let mut exits = signal(SignalKind::child()).ok();
+    let mut exit = child.try_wait();
+    while let (Ok(None), Some(signals)) = (&exit, &mut exits) {
+        exits = signals.recv().await.and(exits.take());
+        exit = child.try_wait();
+    }
+    let exit = match exit {
+        Ok(None) => tokio::task::spawn_blocking(move || child.wait())
+            .await
+            .unwrap_or_else(|e| Err(e.into())),
+        done => done.and_then(|s| s.ok_or(BrokenPipe.into())),
+    };
+    bump(&watch, |s| {
+        s.exit = Some(exit.map_err(|e| e.kind()));
         s.end(true);
     });
 }
 
-fn write_loop(
-    pty: &Weak<File>,
-    inputs: &std::sync::mpsc::Receiver<Input>,
-    watch: &watch::Sender<Status>,
+async fn write_loop(
+    pty: Weak<File>,
+    mut inputs: mpsc::UnboundedReceiver<Input>,
+    watch: Arc<watch::Sender<Status>>,
 ) {
-    for (bytes, done) in inputs {
-        let wrote = pty
-            .upgrade()
-            .map_or_else(|| Err(BrokenPipe.into()), |pty| (&*pty).write_all(&bytes));
+    while let Some((bytes, done)) = inputs.recv().await {
+        let wrote = match pty.upgrade() {
+            Some(pty) => write_all(&pty, &bytes).await,
+            None => Err(BrokenPipe.into()),
+        };
         done.send(wrote).ok();
         if watch.borrow().stuck {
-            bump(watch, |s| s.stuck = false);
+            bump(&watch, |s| s.stuck = false);
         }
     }
+}
+
+async fn write_all(pty: &File, bytes: &[u8]) -> std::io::Result<()> {
+    let fd = OwnedFd::from(pty.try_clone()?);
+    rustix::io::ioctl_fionbio(&fd, true)?;
+    let tx = tokio::net::unix::pipe::Sender::from_owned_fd_unchecked(fd);
+    let wrote = async { tx?.write_all(bytes).await }.await;
+    rustix::io::ioctl_fionbio(pty, false)?;
+    wrote
 }
 
 const DEPTH: usize = 256;
@@ -547,6 +675,9 @@ fn read_loop(pty: &File, chunks: &SyncSender<Vec<u8>>) {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                poll(&mut [PollFd::new(pty, PollFlags::IN)], None).ok();
+            }
             Err(_) => return,
         }
     }
@@ -554,7 +685,7 @@ fn read_loop(pty: &File, chunks: &SyncSender<Vec<u8>>) {
 
 fn feed_loop(
     chunks: &Receiver<Vec<u8>>,
-    pty: &File,
+    pty: &mpsc::UnboundedSender<Input>,
     screen: &Mutex<Screen>,
     outputs: &Outputs,
     watch: &watch::Sender<Status>,
@@ -580,7 +711,7 @@ fn feed_loop(
         if log.as_ref().is_some_and(|l| l.send(relayed).is_err()) {
             log = None;
         }
-        if !replies.is_empty() && (&*pty).write_all(&replies).is_err() {
+        if !replies.is_empty() && pty.send((replies, sync_channel(1).0)).is_err() {
             return;
         }
     }

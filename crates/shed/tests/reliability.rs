@@ -537,3 +537,61 @@ fn the_next_start_ends_a_tree_a_killed_serve_left_behind() {
     assert_eq!(named.len(), 1, "{text}");
     assert!(named.iter().all(|l| l.contains(&tree.0)), "{text}");
 }
+
+fn run_shell(dir: &Path, name: &str) {
+    let d = dir.to_str().expect("utf-8 dir");
+    ok(
+        dir,
+        &[
+            "run",
+            "--name",
+            name,
+            "--cwd",
+            d,
+            "--",
+            "env",
+            "PS1=ready> ",
+            "sh",
+            "-i",
+        ],
+    );
+    eventually("the prompt", || ok(dir, &["read", name]).contains("ready>"));
+}
+
+#[test]
+fn kill_ends_an_interactive_shell_without_waiting_out_the_grace() {
+    let dir = temp_dir("rel-shell");
+    let _server = Server::start(&dir);
+    run_shell(&dir, "sh");
+    let started = Instant::now();
+    ok(&dir, &["kill", "sh"]);
+    let took = started.elapsed();
+    assert!(took < Duration::from_millis(500), "kill took {took:?}");
+}
+
+#[test]
+fn kill_lets_a_sigterm_handler_run_before_the_hangup() {
+    let dir = temp_dir("rel-tidy");
+    let _server = Server::start(&dir);
+    run_sh(
+        &dir,
+        "tidy",
+        "trap 'exit 7' TERM; echo ready; while :; do sleep 1; done",
+    );
+    eventually("ready", || ok(&dir, &["read", "tidy"]).contains("ready"));
+    assert_eq!(ok(&dir, &["kill", "tidy"]), "tidy exited 7\n");
+}
+
+#[test]
+fn sigterm_to_serve_with_20_shells_ends_in_under_a_second() {
+    let dir = temp_dir("rel-shells");
+    let mut server = Serve::start(&dir, "", Stdio::null());
+    for i in 0..20 {
+        run_shell(&dir, &format!("s{i}"));
+    }
+    let started = Instant::now();
+    server.signal("-TERM");
+    server.0.wait().expect("serve exits");
+    let took = started.elapsed();
+    assert!(took < Duration::from_secs(1), "serve took {took:?}");
+}

@@ -7,7 +7,7 @@ mod service;
 mod watch;
 
 use shed_server::runner::ExitCode;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::io::{self, BufRead as _, Read as _, Write as _};
@@ -19,10 +19,11 @@ use std::time::Duration;
 use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::machines::{self, Machine};
+use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
     Children, Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState,
     LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported,
@@ -105,15 +106,16 @@ enum Command {
         #[arg(long, value_name = "N")]
         since: Option<u64>,
     },
-    Top,
+    Top {
+        name: Option<String>,
+        #[arg(long, requires = "name")]
+        full: bool,
+    },
     Watch {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
         labels: Vec<(String, String)>,
     },
-    Approve {
-        name: String,
-        option: String,
-    },
+    Approve(ApproveArgs),
     Cancel {
         name: String,
     },
@@ -126,18 +128,7 @@ enum Command {
         action: Option<AgentsCommand>,
     },
     #[command(hide = true)]
-    AcpBridge {
-        #[arg(long)]
-        socket: PathBuf,
-        #[arg(long)]
-        state: PathBuf,
-        #[arg(long, value_parser = policy)]
-        policy: Policy,
-        #[arg(long)]
-        agent: String,
-        #[arg(last = true, required = true)]
-        cmd: Vec<String>,
-    },
+    AcpBridge(BridgeArgs),
     Connect {
         #[arg(long)]
         autostart: bool,
@@ -160,6 +151,22 @@ enum Command {
 }
 
 #[derive(Args)]
+struct BridgeArgs {
+    #[arg(long)]
+    socket: PathBuf,
+    #[arg(long)]
+    state: PathBuf,
+    #[arg(long, value_parser = policy)]
+    policy: Policy,
+    #[arg(long)]
+    agent: String,
+    #[arg(long)]
+    providers: PathBuf,
+    #[arg(last = true, required = true)]
+    cmd: Vec<String>,
+}
+
+#[derive(Args)]
 struct SetupArgs {
     agents: Vec<String>,
     #[arg(long)]
@@ -177,7 +184,7 @@ impl Command {
             | Self::Keys { name, .. }
             | Self::Kill { name }
             | Self::Rm { name }
-            | Self::Approve { name, .. }
+            | Self::Approve(ApproveArgs { name, .. })
             | Self::Cancel { name }
             | Self::Model { name, .. }
             | Self::Wait(WaitArgs {
@@ -243,7 +250,7 @@ impl Server<'_> {
                     MachineCommand::Add { .. } | MachineCommand::Ls | MachineCommand::Rm { .. }
                 )
                 | Command::Agents { .. }
-                | Command::AcpBridge { .. }
+                | Command::AcpBridge(_)
                 | Command::Install { .. }
                 | Command::Uninstall
                 | Command::Doctor
@@ -338,6 +345,10 @@ fn links(paths: &Paths) -> BTreeMap<String, Link> {
 }
 
 #[derive(Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent command-line switch"
+)]
 struct RunArgs {
     #[arg(long)]
     name: Option<String>,
@@ -363,12 +374,24 @@ struct RunArgs {
     meta: Option<Map<String, Value>>,
     #[arg(long, requires = "acp")]
     no_hibernate: bool,
+    #[arg(long, requires = "acp", conflicts_with = "resume")]
+    warm: bool,
     #[command(flatten)]
     parent: ParentArgs,
     #[arg(long, value_name = "RxC", value_parser = size)]
     size: Option<(u16, u16)>,
+    #[arg(long, value_name = "SIZE", value_parser = mem)]
+    mem_max: Option<u64>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
+}
+
+#[derive(Args)]
+struct ApproveArgs {
+    name: String,
+    option: String,
+    #[arg(long)]
+    request: Option<String>,
 }
 
 #[derive(Args)]
@@ -436,6 +459,10 @@ fn children(s: &str) -> Result<Children, String> {
 
 fn size(s: &str) -> Result<(u16, u16), String> {
     shed_server::config::size(s).ok_or_else(|| format!("{s:?} is not RxC, e.g. 50x200"))
+}
+
+fn mem(s: &str) -> Result<u64, String> {
+    shed_server::config::mem_mb(s).ok_or_else(|| format!("{s:?} is not a size, e.g. 200M or 4G"))
 }
 
 fn label(s: &str) -> Result<(String, String), String> {
@@ -512,21 +539,21 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             read(&server, json, &params)?;
         }
         Command::Send(args) => send(&server, json, args)?,
-        Command::Approve { name, option } => to_acp(&server, json, name, &Input::Approve(option))?,
+        Command::Approve(args) => approve(&server, json, args)?,
         Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
         Command::Model { name, model } => {
-            let params = ModelParams { name, model };
-            let done: Value = server.connect(None)?.call(Method::Model, &params)?;
+            let mut client = server.connect(None)?;
+            let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
+            let done: Value = client.call(Method::Model, &ModelParams { name, model })?;
+            if info.session.is_some_and(|s| s.turn_ended.is_some()) {
+                out::err(
+                    "shed: the model switch drops the prompt cache; the next turn reads the conversation uncached",
+                );
+            }
             print(json, &done, String::new)?;
         }
         Command::Agents { action } => agents_cmd(&paths, json, action)?,
-        Command::AcpBridge {
-            socket,
-            state,
-            policy,
-            agent,
-            cmd,
-        } => return bridge(&cmd, &socket, &state, policy, &agent),
+        Command::AcpBridge(a) => return bridge(&a),
         Command::Keys { name, keys } => {
             let done: Value = server
                 .connect(None)?
@@ -554,7 +581,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             };
             events(&server, &params)?;
         }
-        Command::Top => top(&server, json)?,
+        Command::Top { name, full } => top(&server, json, name, full)?,
         Command::Watch { labels } => watch::watch(&server, labels.into_iter().collect())?,
         Command::Connect { autostart } => relay(&paths, cli.dir.as_deref(), autostart)?,
         Command::Machine(command) => return machine(&server, json, command),
@@ -564,7 +591,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Uninstall => service::uninstall()?,
         Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
         Command::Doctor => {}
-        Command::Setup(args) => setup(&args)?,
+        Command::Setup(args) => setup(&paths, &args)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -616,6 +643,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         mcp_servers,
         meta: args.meta,
         no_hibernate: args.no_hibernate,
+        warm: args.warm,
         parent: match (args.parent.no_parent, &server.on) {
             (true, _) => None,
             (false, None) => (args.parent.parent).or_else(|| shed_server::config::var("SHED")),
@@ -627,6 +655,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
             notify: args.parent.notify,
         }),
         machine: server.machine(),
+        mem_max_mb: args.mem_max,
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
     };
@@ -643,7 +672,7 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
                 paths.socket.display()
             );
         }
-        serve_detached(paths, dir, None)?;
+        connect(paths, dir, Some(true))?;
     }
     shed_server::relay(&paths.socket).context("shed connect")
 }
@@ -686,17 +715,21 @@ fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
     print(json, &done, String::new)
 }
 
-fn bridge(
-    cmd: &[String],
-    socket: &Path,
-    state: &Path,
-    policy: Policy,
-    agent: &str,
-) -> anyhow::Result<ExitCode> {
+fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
-    let code = acp::bridge(cmd, &here, socket, state, policy, agent)?;
+    let rules = shed_server::providers::find(&a.providers, &a.agent);
+    let code = acp::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
+}
+
+fn approve(server: &Server, json: bool, args: ApproveArgs) -> anyhow::Result<()> {
+    let ApproveArgs {
+        name,
+        option,
+        request,
+    } = args;
+    to_acp(server, json, name, &Input::Approve { option, request })
 }
 
 fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::Result<()> {
@@ -719,9 +752,10 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
     let line = |a: &agents::Agent| format!("{} {} ({})\n", a.id, a.version, a.distribution);
     match action {
         None => {
-            let list = agents::list(&paths.state)?;
+            let list = shed_server::providers::known(&paths.state, &paths.providers())?;
             print(json, &list, || {
                 list.iter()
+                    .filter_map(|a| a.installed.as_ref())
                     .map(|a| format!("{}  {}", line(a).trim_end(), a.cmd.join(" ")) + "\n")
                     .collect()
             })
@@ -749,12 +783,73 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
     }
 }
 
-fn top(server: &Server, json: bool) -> anyhow::Result<()> {
-    let mut list: Vec<TerminalInfo> = server
-        .connect(None)?
-        .call(Method::Ls, &LsParams::default())?;
+fn top(server: &Server, json: bool, name: Option<String>, full: bool) -> anyhow::Result<()> {
+    let mut client = server.connect(None)?;
+    if let Some(name) = name {
+        if server.on.is_some() {
+            bail!("shed top <terminal> reads this machine's process table; run it there");
+        }
+        let info: TerminalInfo = client.call(Method::Get, &Target { name })?;
+        return processes(json, &info, full);
+    }
+    let mut list: Vec<TerminalInfo> = client.call(Method::Ls, &LsParams::default())?;
     list.sort_by_key(|t| std::cmp::Reverse(t.resources.map(|r| r.rss_mb)));
-    print(json, &list, || table(&list, true))
+    print(json, &list, || table(&list, true) + &totals(&list))
+}
+
+fn totals(list: &[TerminalInfo]) -> String {
+    let (mut awake, mut asleep, mut agent, mut work) = (0, 0, 0, 0);
+    for t in list.iter().filter(|t| t.state == State::Running) {
+        if state_word(t) == "hibernated" {
+            asleep += 1;
+        } else {
+            awake += 1;
+        }
+        if let Some(r) = t.resources {
+            agent += r.agent_mb.unwrap_or(0);
+            work += r.work_mb.unwrap_or(r.rss_mb);
+        }
+    }
+    format!("{awake} awake, {asleep} hibernated; agent {agent}M, work {work}M\n")
+}
+
+fn processes(json: bool, info: &TerminalInfo, full: bool) -> anyhow::Result<()> {
+    let pid = info
+        .pid
+        .with_context(|| format!("{} is not running", info.name))?;
+    let procs = proctree::system().list().context("the process table")?;
+    let mut tree = proctree::tree(&procs, pid, &BTreeSet::new());
+    tree.retain(|p| p.rss_bytes > 50 << 20);
+    tree.sort_by_key(|p| std::cmp::Reverse(p.rss_bytes));
+    let rows: Vec<Value> = (tree.iter())
+        .filter_map(|p| {
+            let (cmd, age) = proctree::command(p.pid)?;
+            let name = cmd.split_whitespace().next().unwrap_or_default();
+            let name = name.rsplit('/').next().unwrap_or_default().to_owned();
+            let cpu_pct = p.cpu.as_millis() * 100 / age.as_millis().max(1000);
+            let cmd = if full { cmd } else { name };
+            let (rss_mb, age_s) = (p.rss_bytes >> 20, age.as_secs());
+            Some(json!({"pid": p.pid, "rss_mb": rss_mb, "cpu_pct": cpu_pct, "age_s": age_s, "cmd": cmd}))
+        })
+        .collect();
+    print(json, &rows, || {
+        let head = ["PID", "MEM", "CPU", "AGE", "CMD"]
+            .map(str::to_owned)
+            .to_vec();
+        let cell = |r: &Value, k: &str, unit: &str| format!("{}{unit}", r[k]);
+        let body = rows.iter().map(|r| {
+            let cmd = r["cmd"].as_str().unwrap_or_default().to_owned();
+            let age = format!("{}m", r["age_s"].as_u64().unwrap_or(0) / 60);
+            vec![
+                cell(r, "pid", ""),
+                cell(r, "rss_mb", "M"),
+                cell(r, "cpu_pct", "%"),
+                age,
+                cmd,
+            ]
+        });
+        columns(&[vec![head], body.collect()].concat())
+    })
 }
 
 fn state(
@@ -781,9 +876,10 @@ fn state(
     print(json, &info, String::new)
 }
 
-fn setup(a: &SetupArgs) -> anyhow::Result<()> {
+fn setup(paths: &Paths, a: &SetupArgs) -> anyhow::Result<()> {
     let home = shed_server::config::var("HOME").context("HOME is not set")?;
-    let files = shed_server::hooks::setup(Path::new(&home), &a.agents, a.remove, a.dry_run)?;
+    let (home, dir) = (Path::new(&home), paths.providers());
+    let files = shed_server::hooks::setup(home, &dir, &a.agents, a.remove, a.dry_run)?;
     if files.is_empty() {
         bail!("no installed agent has hooks shed can set up");
     }
@@ -1027,7 +1123,7 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
             ) =>
         {
             if autostart == Some(true) {
-                let started = serve_detached(paths, dir, None);
+                let started = start_server(paths, dir);
                 for _ in 0..50 {
                     if let Ok(client) = Client::connect(&paths.socket) {
                         return Ok(client);
@@ -1049,6 +1145,13 @@ fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow
         }
         client => Ok(client?),
     }
+}
+
+fn start_server(paths: &Paths, dir: Option<&Path>) -> anyhow::Result<()> {
+    if dir.is_some() || !service::start_job()? {
+        return serve_detached(paths, dir, None);
+    }
+    Ok(())
 }
 
 fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> anyhow::Result<()> {
@@ -1084,44 +1187,71 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     Ok(())
 }
 
-fn table(list: &[TerminalInfo], tokens: bool) -> String {
+fn state_word(t: &TerminalInfo) -> &str {
+    match (t.state, &t.reported) {
+        (State::Running, Some(r)) if t.acp.is_some() => &r.state,
+        (State::Running, _) => "running",
+        (State::Exited, _) => "exited",
+    }
+}
+
+fn table(list: &[TerminalInfo], top: bool) -> String {
     let dash = |v: Option<String>| v.unwrap_or_else(|| "-".to_owned());
-    let head = "NAME STATE EXIT PID RSS CPU TOKENS LABELS CMD".split(' ');
-    let mut rows = vec![head.map(str::to_owned).collect::<Vec<_>>()];
+    let mb = |v: Option<u64>| dash(v.map(|v| format!("{v}M")));
+    let head = if top {
+        "NAME STATE EXIT PID AGENT WORK CPU TOKENS CACHE CACHE-LIKELY LIMIT LABELS CMD"
+    } else {
+        "NAME STATE EXIT PID RSS CPU LABELS CMD"
+    };
+    let mut rows = vec![head.split(' ').map(str::to_owned).collect::<Vec<_>>()];
     for t in list {
         let labels: Vec<String> = t.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
         let usage = t.session.as_ref().and_then(|s| s.usage.as_ref());
-        rows.push(vec![
+        let r = t.resources;
+        let mut row = vec![
             t.name.clone(),
-            match t.state {
-                State::Running => "running",
-                State::Exited => "exited",
-            }
-            .to_owned(),
+            state_word(t).to_owned(),
             dash(t.exit.map(|v| v.to_string())),
             dash(t.pid.map(|v| v.to_string())),
-            dash(t.resources.map(|r| format!("{}M", r.rss_mb))),
-            dash(t.resources.map(|r| format!("{}%", r.cpu_pct))),
-            dash(usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000))),
-            if labels.is_empty() {
-                "-".to_owned()
-            } else {
-                labels.join(",")
-            },
-            t.cmd.join(" "),
-        ]);
+        ];
+        if top {
+            row.push(mb(r.and_then(|r| r.agent_mb)));
+            row.push(mb(r.map(|r| r.work_mb.unwrap_or(r.rss_mb))));
+        } else {
+            row.push(mb(r.map(|r| r.rss_mb)));
+        }
+        row.push(dash(r.map(|r| format!("{}%", r.cpu_pct))));
+        if top {
+            row.push(dash(
+                usage.map(|u| format!("{}k/{}k", u.used / 1000, u.size / 1000)),
+            ));
+            let cache = usage.and_then(|u| u.turn?.cache_share());
+            row.push(dash(cache.map(|p| format!("{p}%"))));
+            row.push(dash(
+                t.session.as_ref().and_then(|s| s.cache_likely.clone()),
+            ));
+            row.push(mb(t.mem_max_mb));
+        }
+        row.push(if labels.is_empty() {
+            "-".to_owned()
+        } else {
+            labels.join(",")
+        });
+        row.push(t.cmd.join(" "));
+        rows.push(row);
     }
-    for row in rows.iter_mut().filter(|_| !tokens) {
-        row.remove(6);
-    }
+    columns(&rows)
+}
+
+fn columns(rows: &[Vec<String>]) -> String {
     let mut widths = vec![0; rows.first().map_or(0, Vec::len)];
-    for row in &rows {
+    for row in rows {
         for (w, cell) in widths.iter_mut().zip(row) {
             *w = cell.chars().count().max(*w);
         }
     }
     let mut out = String::new();
-    for row in &rows {
+    for row in rows {
         let cells: Vec<String> = row
             .iter()
             .zip(&widths)

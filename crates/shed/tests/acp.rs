@@ -139,7 +139,8 @@ fn registry_installs_pinned_agents_from_a_fixture() {
         .as_array()
         .expect("a list")
         .iter()
-        .map(|a| (a["id"].as_str().expect("id"), &a["cmd"]))
+        .filter(|a| a["installed"].is_object())
+        .map(|a| (a["id"].as_str().expect("id"), &a["installed"]["cmd"]))
         .collect();
     assert_eq!(
         cmds,
@@ -297,7 +298,7 @@ fn cancel_ends_a_turn_mid_way() {
         let info: Value = serde_json::from_str(&ok(&dir, &["get", "c"])).expect("JSON");
         assert_eq!(
             info["reported"],
-            json!({"state": "done", "note": "cancelled"})
+            json!({"state": "done", "note": "cancelled", "from": "reported"})
         );
     }
     assert_eq!(
@@ -353,6 +354,63 @@ fn the_deny_policy_rejects_permission_requests() {
 }
 
 #[test]
+fn two_requests_in_flight_are_each_answered_by_id_and_tool_calls_carry_locations_and_raw_input() {
+    let dir = temp_dir("acp-two");
+    let _server = Server::start(&dir);
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    let args = [
+        "run", "--name", "w", "--label", "run=two", "--acp", "fake", "--",
+    ];
+    ok(&dir, &[&args[..], &["python3", agent]].concat());
+    ok(
+        &dir,
+        &[
+            "wait",
+            "w",
+            "--output",
+            "ACP session ready",
+            "--timeout",
+            "10",
+        ],
+    );
+    ok(&dir, &["send", "w", "pair"]);
+    let asked = std::cell::Cell::new(0);
+    let events = events_until(&dir, "two", |e| {
+        asked.set(asked.get() + usize::from(e["event"] == "approval_request"));
+        asked.get() == 2
+    });
+    let events: Vec<Value> = events
+        .iter()
+        .map(|l| serde_json::from_str(l).expect("JSON"))
+        .collect();
+    let of = |kind: &str| -> Vec<&Value> { events.iter().filter(|e| e["event"] == kind).collect() };
+    let calls = of("tool_call");
+    assert_eq!(calls[0]["locations"], json!(["/work/call-a.rs"]));
+    assert_eq!(calls[0].get("raw_input"), None, "over 4 KiB: {}", calls[0]);
+    assert_eq!(calls[1]["locations"], json!(["/work/call-b.rs"]));
+    assert_eq!(calls[1]["raw_input"], json!({"command": "ls -la"}));
+    let asks = of("approval_request");
+    let ids: Vec<&Value> = asks.iter().map(|a| &a["id"]).collect();
+    assert_eq!(ids, [&json!("101"), &json!("102")]);
+    let call = &asks[1]["call"];
+    assert_eq!(call["toolCallId"], "call-b");
+    assert_eq!(call["rawInput"], json!({"command": "ls -la"}));
+    assert_eq!(
+        call["locations"],
+        json!([{"path": "/work/call-b.rs", "line": 3}])
+    );
+    assert_eq!(call.get("content"), None, "{call}");
+    ok(&dir, &["approve", "w", "reject-once", "--request", "102"]);
+    ok(&dir, &["approve", "w", "allow-once", "--request", "101"]);
+    ok(&dir, &["wait", "w", "--until", "done", "--timeout", "10"]);
+    assert_eq!(
+        ok(&dir, &["read", "w"]),
+        "> pair\n[tool] Edit a.rs (completed)\n[tool] Run ls (failed)\ncall-a allow-once, call-b reject-once\n"
+    );
+}
+
+#[test]
 fn an_agent_that_fails_the_handshake_reports_error() {
     let dir = temp_dir("acp-error");
     let _server = Server::start(&dir);
@@ -364,7 +422,7 @@ fn an_agent_that_fails_the_handshake_reports_error() {
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "e"])).expect("JSON");
     assert_eq!(
         info["reported"],
-        json!({"state": "error", "note": "acp: the agent closed its stdout"}),
+        json!({"state": "error", "note": "acp: the agent closed its stdout", "from": "reported"}),
         "{out:?}"
     );
     let missing = shed(&dir, &["run", "--acp", "nope"]);
@@ -411,7 +469,7 @@ fn an_expired_login_ends_the_turn_as_an_auth_error() {
     assert!(took < std::time::Duration::from_secs(1), "took {took:?}");
     assert_eq!(
         reported(&dir, "x"),
-        json!({"state": "error", "note": format!("auth: {line}")})
+        json!({"state": "error", "note": format!("auth: {line}"), "from": "reported"})
     );
     let events = events_until(&dir, "x", |e| e["event"] == "reply");
     let reply: Value = serde_json::from_str(events.last().expect("a reply")).expect("JSON");
@@ -446,13 +504,13 @@ fn the_watchdog_ends_a_silent_turn_but_not_a_busy_one() {
     assert_eq!(ok(&dir, &until), "w done\n");
     assert_eq!(
         reported(&dir, "w"),
-        json!({"state": "done", "note": "end_turn"})
+        json!({"state": "done", "note": "end_turn", "from": "reported"})
     );
     ok(&dir, &["send", "w", "silent"]);
     assert_eq!(ok(&dir, &until), "w error\n");
     assert_eq!(
         reported(&dir, "w"),
-        json!({"state": "error", "note": "no response"})
+        json!({"state": "error", "note": "no response", "from": "reported"})
     );
     assert_eq!(
         ok(&dir, &["read", "w"]),
@@ -558,25 +616,38 @@ fn resume_is_refused_without_load_session() {
     ok(&dir, &["wait", "n", "--until", "error", "--timeout", "10"]);
     assert_eq!(
         reported(&dir, "n"),
-        json!({"state": "error", "note": "acp: the agent cannot resume a session (no loadSession)"})
+        json!({"state": "error", "note": "acp: the agent cannot resume a session (no loadSession)", "from": "reported"})
     );
 }
 
 #[test]
-fn a_usage_update_shows_in_get_top_and_as_an_event() {
+fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
     let dir = temp_dir("acp-usage");
     let _server = Server::start(&dir);
+    let providers = Paths::in_dir(&dir).providers();
+    std::fs::create_dir_all(&providers).expect("providers dir");
+    let claude = include_str!("../../shed-server/src/providers/claude.toml");
+    let quota = claude
+        .split_once("[quota]")
+        .expect("claude-acp has a quota table")
+        .1;
+    let record = format!(
+        "id = \"fake\"\n[quota]{}",
+        quota.split("\n[").next().unwrap_or("")
+    );
+    std::fs::write(providers.join("fake.toml"), record).expect("write the record");
     start_fake(&dir, "g", "fake");
     ok(&dir, &["send", "g", "hi"]);
     ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
     assert_eq!(info["session"].get("usage"), None, "{info}");
-    let tokens = || {
+    let column = |n: usize| {
         let top = ok(&dir, &["top"]);
-        let cells = |l: &str| l.split_whitespace().nth(6).map(str::to_owned);
+        let cells = |l: &str| l.split_whitespace().nth(n).map(str::to_owned);
         let row = top.lines().find(|l| l.starts_with("g "));
         (top.lines().next().and_then(cells), row.and_then(cells))
     };
+    let tokens = || column(7);
     assert_eq!(tokens(), (Some("TOKENS".into()), Some("-".into())));
     ok(&dir, &["send", "g", "usage"]);
     ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
@@ -598,7 +669,306 @@ fn a_usage_update_shows_in_get_top_and_as_an_event() {
         info["session"]["model"] == "smart" && info["session"]["usage"] == usage
     });
     assert_eq!(tokens(), (Some("TOKENS".into()), Some("53k/200k".into())));
+    assert_eq!(column(8), (Some("CACHE".into()), Some("-".into())));
     assert!(!ok(&dir, &["ls"]).contains("TOKENS"));
+    assert!(!ok(&dir, &["ls"]).contains("CACHE"));
+
+    let turn = json!({"input": 100, "cache_read": 900, "cache_write": 1000, "output": 50});
+    let total = json!({"input": 200, "cache_read": 1800, "cache_write": 2000, "output": 100});
+    for _ in 0..2 {
+        ok(&dir, &["send", "g", "quota"]);
+        ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    }
+    let events = events_until(&dir, "g", |e| e["event"] == "usage" && e["total"] == total);
+    let event: Value = serde_json::from_str(events.last().expect("a usage event")).expect("JSON");
+    assert_eq!((&event["turn"], &event["used"]), (&turn, &json!(53_000)));
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert_eq!(info["session"]["usage"]["turn"], turn);
+    assert_eq!(info["session"]["usage"]["total"], total);
+    assert_eq!(column(8), (Some("CACHE".into()), Some("45%".into())));
+}
+
+fn medians(dir: &Path, of: &str) -> Value {
+    let out = Command::new(SHED)
+        .arg("--dir")
+        .arg(dir)
+        .args(["--json", "agents"])
+        .env("SHED_MEDIAN_OF", of)
+        .output()
+        .expect("shed runs");
+    assert!(out.status.success(), "{out:?}");
+    let list: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let fake = list
+        .as_array()
+        .and_then(|l| l.iter().find(|a| a["id"] == "fake"));
+    fake.expect("the fake agent")["medians"].clone()
+}
+
+#[test]
+fn each_session_records_start_to_ready_and_first_token_and_agents_gives_their_medians() {
+    let dir = temp_dir("acp-timings");
+    let _server = Server::start(&dir);
+    let providers = Paths::in_dir(&dir).providers();
+    std::fs::create_dir_all(&providers).expect("providers dir");
+    std::fs::write(providers.join("fake.toml"), "id = \"fake\"\n").expect("write the record");
+    let mut ready = Vec::new();
+    let mut first = Vec::new();
+    for (name, prompt) in [("a", "busy"), ("b", "hi"), ("c", "hi")] {
+        start_fake(&dir, name, "fake");
+        let ls: Value = serde_json::from_str(&ok(&dir, &["ls", "--json"])).expect("JSON");
+        let row = |ls: &Value| {
+            ls.as_array()
+                .and_then(|l| l.iter().find(|t| t["name"] == name))
+                .cloned()
+        };
+        let session = row(&ls).expect("listed")["session"].clone();
+        assert!(session["ready_ms"].as_u64().is_some(), "{session}");
+        assert_eq!(session.get("first_token_ms"), None, "{session}");
+        ok(&dir, &["send", name, prompt]);
+        until(&dir, name, "done");
+        ok(&dir, &["send", name, "hi"]);
+        until(&dir, name, "done");
+        let ls: Value = serde_json::from_str(&ok(&dir, &["ls", "--json"])).expect("JSON");
+        let session = row(&ls).expect("listed")["session"].clone();
+        ready.push(session["ready_ms"].as_u64().expect("ready_ms"));
+        first.push(session["first_token_ms"].as_u64().expect("first_token_ms"));
+        ok(&dir, &["kill", name]);
+    }
+    assert!(
+        first[0] >= 2400,
+        "busy's first text comes after 2.4 s: {first:?}"
+    );
+    assert!(first[1] < 2400 && first[2] < 2400, "{first:?}");
+    let middle = |v: &[u64]| {
+        let mut v = v.to_vec();
+        v.sort_unstable();
+        v[1]
+    };
+    assert_eq!(
+        medians(&dir, "20"),
+        json!({"sessions": 3, "ready_ms": middle(&ready), "first_token_ms": middle(&first)})
+    );
+    assert_eq!(
+        medians(&dir, "2"),
+        json!({"sessions": 2, "ready_ms": ready[1].midpoint(ready[2]),
+            "first_token_ms": first[1].midpoint(first[2])})
+    );
+}
+
+fn row(dir: &Path, args: &[&str], name: &str) -> Vec<String> {
+    let out = ok(dir, args);
+    let head = out.lines().next().unwrap_or_default().split_whitespace();
+    let line = out.lines().find(|l| l.starts_with(&format!("{name} ")));
+    let cells = line.unwrap_or_default().split_whitespace();
+    head.zip(cells).map(|(h, c)| format!("{h}={c}")).collect()
+}
+
+#[test]
+fn top_splits_the_memory_of_a_child_the_agent_started_into_work_and_lists_it_by_name() {
+    let dir = temp_dir("acp-top-split");
+    let _server = Server::sampling(&dir, "0.2");
+    start_fake(&dir, "g", "fake");
+    ok(&dir, &["send", "g", "hi"]);
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    for args in [&["top"][..], &["ls"]] {
+        assert!(
+            row(&dir, args, "g").contains(&"STATE=done".to_owned()),
+            "{args:?}"
+        );
+    }
+    ok(&dir, &["send", "g", "hog"]);
+    let mb = |info: &Value, k: &str| info["resources"][k].as_u64().unwrap_or(0);
+    common::eventually("the child's memory under work", || {
+        let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+        mb(&info, "work_mb") >= 200
+    });
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert!(mb(&info, "agent_mb") < 100, "{info}");
+    let top = row(&dir, &["top"], "g");
+    let cell = |k: &str| {
+        top.iter()
+            .find_map(|c| c.strip_prefix(k))
+            .unwrap_or_default()
+    };
+    let agent: u64 = cell("AGENT=").trim_end_matches('M').parse().expect("AGENT");
+    let work: u64 = cell("WORK=").trim_end_matches('M').parse().expect("WORK");
+    assert!(agent < 100 && work >= 200, "{top:?}");
+    let totals = ok(&dir, &["top"]);
+    let totals = totals.lines().last().unwrap_or_default();
+    assert!(
+        totals.starts_with("1 awake, 0 hibernated; agent "),
+        "{totals}"
+    );
+
+    let short = ok(&dir, &["top", "g"]);
+    assert!(short.starts_with("PID"), "{short}");
+    let name = short
+        .lines()
+        .nth(1)
+        .and_then(|l| l.split_whitespace().last());
+    assert!(
+        name.is_some_and(|n| n.to_lowercase().starts_with("python")),
+        "{short}"
+    );
+    assert!(
+        !short.contains("example.invalid") && !short.contains("-c"),
+        "{short}"
+    );
+    assert!(ok(&dir, &["top", "g", "--full"]).contains("https://user:secret@example.invalid/"));
+    ok(&dir, &["kill", "g"]);
+}
+
+#[test]
+fn a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on() {
+    let dir = temp_dir("acp-mem-max");
+    let _server = Server::sampling(&dir, "0.2");
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    let run = [
+        "run",
+        "--name",
+        "g",
+        "--label",
+        "run=g",
+        "--mem-max",
+        "200M",
+    ];
+    ok(
+        &dir,
+        &[&run[..], &["--acp", "fake", "--", "python3", agent]].concat(),
+    );
+    ok(&dir, &["wait", "g", "--output", "ACP session ready"]);
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert_eq!(info["mem_max_mb"], 200, "{info}");
+    let listed: Value = serde_json::from_str(&ok(&dir, &["ls", "--json"])).expect("JSON");
+    assert_eq!(listed[0]["mem_max_mb"], 200, "{listed}");
+    assert!(row(&dir, &["top"], "g").contains(&"LIMIT=200M".to_owned()));
+    ok(&dir, &["send", "g", "hog 400"]);
+    let limited = events_until(&dir, "g", |e| e["event"] == "mem-limit");
+    let event: Value = serde_json::from_str(limited.last().expect("an event")).expect("JSON");
+    assert_eq!(event["limit_mb"], 200, "{event}");
+    let by = event["ended_by"].as_str().unwrap_or_default();
+    assert!(
+        by == "shed" || (cfg!(target_os = "linux") && by == "kernel"),
+        "{event}"
+    );
+    let process = event["process"].as_str().unwrap_or_default();
+    assert!(process.to_lowercase().contains("python"), "{event}");
+    let pid = info["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
+    let pid = pid.expect("a pid");
+    common::eventually("the child gone", || {
+        let procs = proctree::system().list().unwrap_or_default();
+        let tree = proctree::tree(&procs, pid, &std::collections::BTreeSet::new());
+        tree.iter().all(|p| p.rss_bytes < 300 << 20)
+    });
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    ok(&dir, &["send", "g", "hi"]);
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    assert_eq!(ok(&dir, &["read", "g", "--lines", "1"]), "you said: hi\n");
+    let all = events_until(&dir, "g", |e| e["text"] == "you said: hi");
+    let limits = all.iter().filter(|l| l.contains(r#""event":"mem-limit""#));
+    assert_eq!(limits.count(), 1, "{all:?}");
+    ok(&dir, &["kill", "g"]);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_limited_terminal_runs_in_its_own_scope_its_children_ranked_first_and_none_outlives_it() {
+    if !shed_server::limit::scoped() {
+        eprintln!("skipped: no user systemd with the memory controller here");
+        return;
+    }
+    let dir = temp_dir("acp-mem-scope");
+    let mut server = Server::sampling(&dir, "0.2");
+    let read = |path: &str| std::fs::read_to_string(path).unwrap_or_default();
+    let scope = |pid: &Value| {
+        let cgroup = read(&format!("/proc/{pid}/cgroup"));
+        let path = cgroup.lines().find_map(|l| l.strip_prefix("0::"));
+        format!("/sys/fs/cgroup{}", path.unwrap_or_default())
+    };
+    ok(
+        &dir,
+        &[
+            "run",
+            "--name",
+            "s",
+            "--mem-max",
+            "200M",
+            "--",
+            "sleep",
+            "100",
+        ],
+    );
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "s"])).expect("JSON");
+    common::eventually("the scope", || {
+        std::path::Path::new(&scope(&info["pid"]))
+            .extension()
+            .is_some_and(|e| e == "scope")
+    });
+    let sleeper = scope(&info["pid"]);
+    assert_eq!(read(&format!("{sleeper}/memory.max")).trim(), "209715200");
+
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    let run = [
+        "run",
+        "--name",
+        "g",
+        "--label",
+        "run=g",
+        "--mem-max",
+        "200M",
+    ];
+    ok(
+        &dir,
+        &[&run[..], &["--acp", "fake", "--", "python3", agent]].concat(),
+    );
+    ok(&dir, &["wait", "g", "--output", "ACP session ready"]);
+    ok(&dir, &["send", "g", "hog 50"]);
+    let g: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    let bridge = g["pid"]
+        .as_i64()
+        .and_then(|p| i32::try_from(p).ok())
+        .expect("a pid");
+    let adj = |pid: i32| {
+        read(&format!("/proc/{pid}/oom_score_adj"))
+            .trim()
+            .to_owned()
+    };
+    common::eventually("the child ranked first", || {
+        let procs = proctree::system().list().unwrap_or_default();
+        let tree = proctree::tree(&procs, bridge, &std::collections::BTreeSet::new());
+        let (hog, rest): (Vec<_>, Vec<_>) = tree.iter().partition(|p| p.rss_bytes > 40 << 20);
+        hog.iter().all(|p| adj(p.pid) == "1000")
+            && !hog.is_empty()
+            && rest
+                .iter()
+                .all(|p| adj(p.pid) == adj(std::process::id().cast_signed()))
+    });
+
+    server.0.kill().expect("kill shed serve");
+    server.0.wait().expect("reap shed serve");
+    let _again = Server::sampling(&dir, "0.2");
+    common::eventually("the sleeper's scope gone", || !Path::new(&sleeper).exists());
+    ok(&dir, &["kill", "g"]);
+}
+
+#[test]
+fn top_and_ls_show_a_hibernated_agent_as_hibernated() {
+    let dir = temp_dir("acp-top-hibernated");
+    let _server = sleepy_server(&dir);
+    start_with_history(&dir, "h", &dir.join("history.jsonl"), &[]);
+    first_turn(&dir, "h");
+    until(&dir, "h", "hibernated");
+    for args in [&["top"][..], &["ls"]] {
+        assert!(
+            row(&dir, args, "h").contains(&"STATE=hibernated".to_owned()),
+            "{args:?}"
+        );
+    }
+    let top = ok(&dir, &["top"]);
+    let totals = top.lines().last().unwrap_or_default();
+    assert!(totals.starts_with("0 awake, 1 hibernated; agent "), "{top}");
 }
 
 #[test]
@@ -739,8 +1109,14 @@ fn a_model_switch_is_reported_and_the_next_turn_uses_it() {
     };
     let models = json!([["fast", "Fast"], ["smart", "Smart"]]);
     let first = json!({"id": "sess-1", "model": "fast", "models": models});
-    common::eventually("the session", || session() == first);
-    ok(&dir, &["model", "m", "smart"]);
+    common::eventually("the session", || {
+        let mut s = session();
+        let ready = s.as_object_mut().and_then(|s| s.remove("ready_ms"));
+        ready.is_some_and(|r| r.is_u64()) && s == first
+    });
+    let before_a_turn = shed(&dir, &["model", "m", "smart"]);
+    assert!(before_a_turn.status.success(), "{before_a_turn:?}");
+    assert_eq!(String::from_utf8_lossy(&before_a_turn.stderr), "");
     common::eventually("the switch", || session()["model"] == "smart");
     ok(&dir, &["send", "m", "hi"]);
     ok(&dir, &["wait", "m", "--until", "done", "--timeout", "10"]);
@@ -748,6 +1124,46 @@ fn a_model_switch_is_reported_and_the_next_turn_uses_it() {
         ok(&dir, &["read", "m", "--lines", "1"]),
         "[smart] you said: hi\n"
     );
+    assert!(session()["turn_ended"].is_u64());
+    assert_eq!(session().get("cache_likely"), None, "no provider data");
+}
+
+#[test]
+fn an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it() {
+    let dir = temp_dir("acp-cache");
+    let _server = Server::with_env(&dir, "3600", &[("SHED_TEST_API_KEY", "set")]);
+    let providers = Paths::in_dir(&dir).providers();
+    std::fs::create_dir_all(&providers).expect("providers dir");
+    let record =
+        "id = \"fake\"\n[cache]\nplan = 3600\napi = 3\napi_vars = [\"SHED_TEST_API_KEY\"]\n";
+    std::fs::write(providers.join("fake.toml"), record).expect("write the record");
+    start_with_history(&dir, "w", &dir.join("w.jsonl"), &[]);
+    let session = || {
+        let info: Value = serde_json::from_str(&ok(&dir, &["get", "w"])).expect("JSON");
+        info["session"].clone()
+    };
+    let likely = || {
+        let top = ok(&dir, &["top"]);
+        let cell = |l: &str| l.split_whitespace().nth(9).map(str::to_owned);
+        let head = top.lines().next().and_then(cell);
+        (
+            head,
+            top.lines().find(|l| l.starts_with("w ")).and_then(cell),
+        )
+    };
+    first_turn(&dir, "w");
+    assert_eq!(session()["cache_lifetime"], 3);
+    assert_eq!(session()["cache_likely"], "warm");
+    assert_eq!(likely(), (Some("CACHE-LIKELY".into()), Some("warm".into())));
+    let switch = shed(&dir, &["model", "w", "smart"]);
+    assert!(switch.status.success(), "{switch:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&switch.stderr),
+        "shed: the model switch drops the prompt cache; the next turn reads the conversation uncached\n"
+    );
+    until(&dir, "w", "hibernated");
+    common::eventually("a cold cache", || session()["cache_likely"] == "cold");
+    assert_eq!(likely(), (Some("CACHE-LIKELY".into()), Some("cold".into())));
 }
 
 #[test]
@@ -771,7 +1187,7 @@ fn an_unknown_update_kind_is_skipped() {
     ok(&dir, &["wait", "u", "--until", "done", "--timeout", "10"]);
     assert_eq!(
         reported(&dir, "u"),
-        json!({"state": "done", "note": "end_turn"})
+        json!({"state": "done", "note": "end_turn", "from": "reported"})
     );
 }
 
@@ -886,7 +1302,10 @@ fn sse_servers_pass_only_when_the_agent_advertises_them() {
     start_with_mcp(&dir, "s2", &file, &[], &["--mcp-caps", "http"]);
     ok(&dir, &["wait", "s2", "--until", "error", "--timeout", "10"]);
     let why = "acp: MCP server events: the agent takes no sse servers (mcpCapabilities)";
-    assert_eq!(reported(&dir, "s2"), json!({"state": "error", "note": why}));
+    assert_eq!(
+        reported(&dir, "s2"),
+        json!({"state": "error", "note": why, "from": "reported"})
+    );
 }
 
 #[test]
@@ -978,7 +1397,10 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
     first_turn(&dir, "h");
     until(&dir, "h", "hibernated");
     assert_eq!(processes(&dir, "h"), 1, "the agent is gone");
-    assert_eq!(reported(&dir, "h"), json!({"state": "hibernated"}));
+    assert_eq!(
+        reported(&dir, "h"),
+        json!({"state": "hibernated", "from": "reported"})
+    );
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "h"])).expect("JSON");
     assert_eq!(
         (&info["state"], &info["session"]["id"]),
@@ -1155,6 +1577,109 @@ fn mcp_secrets_stay_in_memory_through_a_hibernation() {
     assert_hidden(&dir, events.join("\n") + &ok(&dir, &["get", "m"]));
 }
 
+fn spares(dir: &Path) -> Vec<(String, Value)> {
+    let ls: Value = serde_json::from_str(&ok(dir, &["ls", "--json"])).expect("JSON");
+    let ls = ls.as_array().expect("a list").iter();
+    let running = ls.filter(|t| t["state"] == "running");
+    let spare = running.filter(|t| t["name"].as_str().is_some_and(|n| n.starts_with(".warm-")));
+    spare
+        .map(|t| {
+            (
+                t["name"].as_str().expect("a name").to_owned(),
+                t["pid"].clone(),
+            )
+        })
+        .collect()
+}
+
+fn start_warm(dir: &Path, name: &str, cwd: &Path, history: &Path) {
+    let agent = fake_agent();
+    let label = format!("run={name}");
+    let cwd = cwd.to_str().expect("utf-8");
+    let run = ["run", "--name", name, "--label", &label, "--cwd", cwd];
+    let cmd = ["--acp", "fake", "--warm", "--", "python3"];
+    let history = history.to_str().expect("utf-8");
+    let fake = [agent.to_str().expect("utf-8"), "--history", history];
+    ok(dir, &[&run[..], &cmd, &fake].concat());
+}
+
+#[test]
+fn a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_as_one_session() {
+    let dir = temp_dir("acp-warm");
+    let history = dir.join("history.jsonl");
+    let env = [
+        ("SHED_ACP_HIBERNATE_AFTER", "2"),
+        ("SHED_WARM_MAX", "1"),
+        ("SHED_WARM_IDLE", "8"),
+    ];
+    let _server = Server::with_env(&dir, "0.3", &env);
+    start_warm(&dir, "a", &dir, &history);
+    let first = spares(&dir);
+    assert_eq!(first.len(), 1, "{first:?}");
+    let (spare, pid) = first[0].clone();
+    assert_eq!(spare, ".warm-1");
+    ok(
+        &dir,
+        &[
+            "wait",
+            &spare,
+            "--output",
+            "ACP session ready",
+            "--timeout",
+            "10",
+        ],
+    );
+    start_warm(&dir, "b", &dir, &history);
+    let b: Value = serde_json::from_str(&ok(&dir, &["get", "b"])).expect("JSON");
+    assert_eq!(b["pid"], pid, "b is the spare");
+    assert_eq!(
+        (&b["labels"]["run"], &b["session"]["ready_ms"]),
+        (&json!("b"), &json!(0))
+    );
+    let next = spares(&dir);
+    assert_eq!(next.len(), 1, "{next:?}");
+    assert_eq!(next[0].0, ".warm-2");
+    assert_ne!(next[0].1, pid);
+    let elsewhere = dir.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("a second folder");
+    start_warm(&dir, "c", &elsewhere, &history);
+    assert_eq!(spares(&dir), next, "at most SHED_WARM_MAX spares");
+
+    first_turn(&dir, "b");
+    until(&dir, "b", "hibernated");
+    ok(&dir, &["send", "b", "more"]);
+    until(&dir, "b", "done");
+    let b: Value = serde_json::from_str(&ok(&dir, &["get", "b"])).expect("JSON");
+    assert_eq!(b["session"]["id"], "sess-1");
+    assert_eq!(
+        ok(&dir, &["read", "b"]),
+        "> hi\nyou said: hi\n> more\nyou said: more\n"
+    );
+    events_until(&dir, "b", |e| {
+        e["event"] == "reply" && e["text"] == "you said: more"
+    });
+
+    let mut client = Client::connect(&Paths::in_dir(&dir).socket).expect("connect");
+    let all = EventsParams {
+        labels: std::collections::BTreeMap::new(),
+        since: Some(0),
+    };
+    let _: Value = client.call(Method::Events, &all).expect("events");
+    let (reader, _writer) = client.split();
+    let timeout = Some(std::time::Duration::from_secs(15));
+    reader.get_ref().set_read_timeout(timeout).expect("timeout");
+    let killed = reader.lines().map(|l| l.expect("an event line")).find(|l| {
+        let e: Value = serde_json::from_str(l).expect("event JSON");
+        e["event"] == "killed" && e["name"] == ".warm-2"
+    });
+    assert!(killed.is_some(), "the idle spare is killed");
+    assert_eq!(spares(&dir), [], "no spare left");
+    for name in ["a", "b", "c"] {
+        let info: Value = serde_json::from_str(&ok(&dir, &["get", name])).expect("JSON");
+        assert_eq!(info["state"], "running", "{name}");
+    }
+}
+
 fn golden(name: &str, have: &str) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
@@ -1302,7 +1827,10 @@ fn a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches() {
     start_fake(&dir, "r", "fake");
     let before: Value = serde_json::from_str(&ok(&dir, &["get", "r"])).expect("JSON");
     ok(&dir, &["send", "r", "busy"]);
-    until(&dir, "r", "working");
+    ok(
+        &dir,
+        &["wait", "r", "--until", "working", "done", "--timeout", "10"],
+    );
     stop(&mut server);
     std::thread::sleep(std::time::Duration::from_secs(3));
     let _server = Server::start(&dir);

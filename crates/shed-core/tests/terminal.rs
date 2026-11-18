@@ -99,7 +99,7 @@ fn kill_ends_the_whole_tree() {
 #[test]
 fn kill_escalates_to_sigkill_after_the_grace_period() {
     let t = sh(
-        "trap '' TERM; echo ready; while :; do sleep 0.05; done",
+        "trap '' TERM HUP; echo ready; while :; do sleep 0.05; done",
         SIZE,
     );
     eventually("ready", || t.screen() == "ready");

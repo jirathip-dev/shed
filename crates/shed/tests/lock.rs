@@ -117,7 +117,7 @@ fn a_state_save_that_never_finishes_holds_up_no_other_request() {
 }
 
 #[test]
-fn killing_a_program_that_ignores_sigterm_holds_up_no_list() {
+fn killing_a_program_that_ignores_sigterm_and_sighup_holds_up_no_list() {
     let dir = temp_dir("lock-kill");
     let _server = Server::start(&dir);
     let mut c = client(&dir);
@@ -125,7 +125,7 @@ fn killing_a_program_that_ignores_sigterm_holds_up_no_list() {
         &mut c,
         &dir,
         "stubborn",
-        "trap '' TERM; echo ready; exec sleep 100",
+        "trap '' TERM HUP; echo ready; exec sleep 100",
     );
     let kill = in_thread(&dir, |c| {
         timed(c, Method::Kill, &json!({"name": "stubborn"}))
@@ -139,7 +139,7 @@ fn killing_a_program_that_ignores_sigterm_holds_up_no_list() {
     let took = kill.join().expect("kill");
     assert!(
         took >= Duration::from_secs(2),
-        "SIGTERM was not ignored: {took:?}"
+        "SIGTERM and SIGHUP were not ignored: {took:?}"
     );
     assert!(rounds > 5, "only {rounds} rounds during the kill");
     let stubborn = call(&mut c, Method::Get, &json!({"name": "stubborn"}));

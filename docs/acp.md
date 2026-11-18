@@ -27,6 +27,7 @@ shed run --acp claude-acp --label issue=7 --cwd /home/user/project
 shed send t1 "Fix the failing test"
 shed wait t1 --until done waiting-approval rate-limited error
 shed approve t1 allow-once        # an option id, or a kind: allow_once, reject_once, …
+shed approve t1 allow-once --request 7   # the approval_request with id 7 (default: the oldest)
 shed read t1                      # > prompt, [tool] title (status), the final reply
 shed read t1 --events             # the same events drawn: › prompt, ✓ kind title, the reply styled
 shed read t1 --events --json      # each event with its seq; page with --before <seq> --lines <n>
@@ -51,11 +52,22 @@ usage, tool-call progress), any request, and each line it writes to stderr; a pe
 `approve` does not time out. The default is long because a model thinking at high effort can send nothing
 for minutes on a healthy turn, and the watchdog is off while a tool call is `pending` or `in_progress`; an expired login is caught at once by its reply, so the watchdog is only a
 backstop for an agent that really hangs. `shed events`
-streams `turn`, `text` (reply chunks), `tool_call` (each status change), `plan`, `mode`, `approval_request`,
-`approved`, `reply` (the whole reply and its `stop_reason`), `session` (its id, the current `model` and the
+streams `turn`, `text` (reply chunks), `tool_call` (each status change, with ACP's `locations` paths and its
+`raw_input` up to 4 KiB), `plan`, `mode`, `approval_request` (its `id`, the `tool`, the `options` and ACP's
+`toolCall` as `call`, without `content`), `approved`, `reply` (the whole reply and its `stop_reason`), `session` (its id, the current `model` and the
 `models`, also kept as the terminal's `session`) and `usage` (the agent's `usage_update`: tokens `used` of the
 context window's `size` and the session's `cost`, also kept as `session.usage`; `shed top` shows it as
 `TOKENS`, e.g. `53k/200k`) next to the usual `started`, `state` and `exited`; see [protocol.md](protocol.md).
+
+ACP's `usage_update` has no cache counts, so for an agent whose provider record has a `[quota]` table shed
+also reads the turn's tokens from each prompt response's `_meta` (for `claude-acp`, `_meta.quota.token_count`):
+`usage.turn` and `usage.total` (the session's sum since the lane started, kept through a hibernation) each
+hold `input`, `cache_read`, `cache_write` and `output`. A response without them, or with a counter that is
+not a number, leaves both out. `shed top`'s `CACHE` is the last turn's cache reads as a share of all its input,
+`cache_read / (input + cache_read + cache_write)`, and `-` without a count. A low share on a turn that
+follows others means the prompt cache was lost: a model switch, a changed system prompt or tools, or a gap
+past the cache's lifetime (minutes) before a hibernated lane woke. The first turn of a session is always low,
+since it writes the cache. Codex reports cache reads but no cache writes, and has no `[quota]` record yet.
 
 `--resume <id>` (the `run` method's `resume`) needs an agent that advertises `loadSession`, else the terminal
 ends as `error`. `shed agents sessions <id>` lists the agent's sessions (`session/list`, every page; run in the
@@ -84,26 +96,45 @@ A process counts as the agent's own when it was in the agent's process tree as a
 its MCP servers); any other live descendant once the turn ended makes the lane `running`, the one nearest the
 agent named in the note, checked every 5 s until it exits. A tool call left open when the next turn starts is
 forgotten. `rate-limited` lasts until the next turn starts: shed neither retries, wakes nor continues the
-lane, nor switches its account. An agent's limit pattern is data, one entry per registry id in
-`crates/shed-server/src/providers/<agent>.rs`:
+lane, nor switches its account. An agent's limit pattern is data, in its provider record (below):
 
-```rust
-static LIMIT: Limit = Limit {
-    says: &["hit your limit", "usage limit reached"], // a reply or error line holding one of these
-    resets: &["resets "],                             // the reset time follows one of these on that line
-};
+```toml
+limit = ["hit your limit", "usage limit reached"] # a reply or error line holding one of these
+resets = ["resets "]                              # the reset time follows one of these on that line
 ```
 
 `claude-acp` (`You've hit your limit · resets 3pm` → `3pm`) and `codex-acp` (`You've hit your usage limit. …
 try again at 3:05 PM.` → `3:05 PM`) have entries. An agent without one never shows `rate-limited`; its limit
-text stays its reply (`done`) or error (`error`). Adding one is a data entry and one line in
-`providers/mod.rs`'s list, never a change to `acp.rs`.
+text stays its reply (`done`) or error (`error`).
+
+### Provider records
+
+What shed knows about an agent is one TOML file, never code: `crates/shed-server/src/providers/<name>.toml`
+is built in, and `<name>.toml` in `providers/` beside the config file (`~/.config/shed/providers/`, or
+`~/Library/Application Support/shed/providers/` on macOS) overrides its keys one by one or adds an agent,
+read each time a lane starts, so a changed banner needs no rebuild. Keys: `id` (the ACP agent id), `agent`
+(the PTY name `shed setup` takes), `auth_failures`, `limit`, `resets`, `[hooks]` (`file`, `events` as
+`[event, state]` pairs), `login`, `status` and `logout` (commands), `config_dir_var`, `settings_var`,
+`effort_args` (`{effort}` stands for the level), `efforts`, `[quota]` (`path`, the keys from a prompt response's `_meta` down to the turn's counters, and the `input`, `cache_read`, `cache_write` and `output` keys in it; see above) and `[cache]` (`plan` and `api`, the prompt cache's lifetime in seconds on each login, and `api_vars`, the variables that mean an API key; see [Prompt cache](#prompt-cache)). A user file that is not TOML or not a record
+is skipped, the built-in record staying in force, and `shed doctor` names it (`FAIL provider …`).
+
+`shed agents --json` and the `agents` method list every agent with a record or an installed adapter: `id`,
+`source` (`built-in` or the user file), `provider` (the record), `installed` and `medians`. `agents.match {id, text}`
+applies an agent's limit and auth rules to text of a caller's own (a pane's screen) and returns the `limit`
+line, its `resets` time and the `auth` line, as a lane would read them.
+
+Each ACP terminal's `session` in `ls --json` and `get` has `ready_ms`, the time from `run` to the session being
+ready (the agent started, `initialize` and `session/new` or `session/load` answered), and `first_token_ms`, the
+time from its first prompt to the first chunk of the reply (a tool call before it does not count). Both are
+taken once per terminal, so a wake from hibernation does not change them. When a session has both, shed adds
+them to `timings.jsonl` beside the state file, and `medians` in `agents` is each agent's `sessions`,
+`ready_ms` and `first_token_ms`: the medians over its last `$SHED_MEDIAN_OF` (default 20) such sessions.
 
 ### Hibernation
 
 An idle agent hibernates: once its session has had a turn (or was resumed) and has been `done` (or, resumed,
-has had no turn yet) for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment of `shed serve` (default 600; `0`
-never), the bridge stops the agent's process tree and reports the state `hibernated` (a `state` event). The
+has had no turn yet) for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment of `shed serve` (default 600, or
+the record's prompt cache lifetime on this login when that is shorter; `0` never), the bridge stops the agent's process tree and reports the state `hibernated` (a `state` event). The
 terminal, its session id, model, models and slash commands stay; only the bridge (about 8 MB) is left. The next
 send (a prompt, `model`, …) starts the agent again with the same command, folder and environment, loads the
 session (`session/load`, its replayed events marked `"replay": true` but not added to the transcript again)
@@ -113,6 +144,43 @@ never hibernates. Measured on 2026-11-07: ten idle fake agents took 197,248 KiB 
 hibernated (wake 76 ms); one claude-agent-acp 0.100.0 took 502,700 KiB in 7 processes awake and 8,064 KiB in 1
 hibernated, and woke to its first update in 1,946 ms (`crates/shed/tests/acp_bench.rs`, `hibernate` and
 `hibernate_live`).
+
+### Warm sessions
+
+`shed run --acp … --warm` (the `run` method's `warm`) asks for a ready spare session. The recipe is the run's
+agent, command, folder, policy, MCP servers, meta and size; the name, labels and parent are not part of it.
+If a spare of that recipe is ready (its session answered `session/new`), the run takes it: the terminal is
+renamed to the run's name with its labels and parent, its transcript and output log move with it, its
+`session.ready_ms` is 0 and the bridge reports under the new name from then on. Otherwise the run starts cold.
+Either way the server then starts the next spare, `.warm-N` in `ls`, unless the recipe has one already or
+`$SHED_WARM_MAX` (default 2) spares are running. A spare nobody takes for `$SHED_WARM_IDLE` seconds (default
+600) is killed and removed, as are spares left from before a server restart. `--warm` takes no `--resume`.
+A taken session hibernates and wakes like any other, under the same name and session id.
+
+### Prompt cache
+
+A wake loads the session and the next turn re-sends the conversation; the agent's vendor reads from its prompt
+cache the prefix that is unchanged and still within the cache's lifetime, and charges full input price for the
+rest. Claude Code's docs give that lifetime as 1 hour for the main conversation on a subscription and 5 minutes on
+an API key, usage credits or a cloud provider, and list what drops the cache mid-session: a model switch, an
+effort change, an MCP server added or removed while tool search is off, and a CLI upgrade
+(<https://code.claude.com/docs/en/prompt-caching>). None of this is measured by shed; `CACHE` in `shed top`
+is the number to check it with.
+
+An agent's record says it in `[cache]`: `plan` and `api` seconds, and `api_vars`, the variables that, set and not
+empty in the lane's environment, mean an API key (for `claude-acp` `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`
+and the Bedrock, Vertex and Foundry switches); without one the login counts as a plan. Usage credits on a
+subscription are not told apart and count as a plan. The lane's lifetime is `session.cache_lifetime`, and
+the bridge hibernates after 600 s or that lifetime, whichever is shorter: an API key lane sleeps once its cache
+is likely gone, since a wake after that pays full input price whether or not the process stopped; a plan lane
+keeps 600 s (lowering it waits for cache numbers that show a wake inside the hour reads from cache).
+`$SHED_ACP_HIBERNATE_AFTER`, when set, overrides it as before.
+
+`session.turn_ended` is when the last turn ended (unix seconds). While the lane is `done`, `idle` or
+`hibernated`, `get` shows `session.cache_likely`, `warm` until the idle time reaches the lifetime and `cold`
+after, and `shed top` shows it as `CACHE-LIKELY`; it is a likelihood from the clock, not the vendor's word.
+An agent without `[cache]` shows neither. `shed model` on a session that has had a turn prints one line on
+stderr that the switch drops the prompt cache, and switches.
 
 `shed rm` of an exited ACP terminal closes its session (`session/close`) when the agent advertises
 `sessionCapabilities.close`: the agent's process is gone by then, so shed starts the agent once in the
@@ -157,7 +225,8 @@ bridge speaks ACP through the [`agent-client-protocol`](https://crates.io/crates
 tokio runtime of its own. It runs the adapter with piped stdio, sends `initialize` (no `fs` or `terminal` client
 capabilities) and `session/new` (the terminal's cwd and MCP servers) or `session/load`, and then:
 
-- reads its PTY in raw mode: `send`, `approve` and `cancel` write one framed line (`RS`, JSON, newline); a line
+- reads its PTY in raw mode: `send`, `approve` (`{"approve": "<option>", "request": "<id>"}`, no `request`: the
+  oldest) and `cancel` write one framed line (`RS`, JSON, newline); a line
   typed in `attach` is a prompt; `Esc` or `Ctrl+C` alone cancels;
 - reports its events with the `emit` method and its states with `state`, as notifications over the server
   socket, written in batches by a task of their own;
@@ -189,8 +258,8 @@ its own way (its own login command, config file or API key variable); log in onc
 (for `claude-acp`, e.g. `auth: Failed to authenticate: OAuth session expired and could not be refreshed`),
 and the `reply` event carries that text with `stop_reason` `auth_error`. To recover, check
 `claude auth status` (`"loggedIn": true`), log in again (`claude auth login`, or `/login` in `claude`), then
-`send` the prompt again; the session needs no restart. The known lines are listed per agent next to the
-registry code (`auth_failures` in `crates/shed-server/src/agents.rs`); another agent's expired login ends
+`send` the prompt again; the session needs no restart. The known lines are each agent's `auth_failures` in
+its provider record (above); another agent's expired login ends
 by the idle timeout instead.
 
 **The Claude adapter** (`claude-acp`, `@agentclientprotocol/claude-agent-acp`) runs Claude Code through the
@@ -228,6 +297,20 @@ Node 24.22.2, the `claude` CLI 2.1.311 logged in with `claude.ai` on a Max plan.
   same way). The turn never ended: no `reply` event, so `wait --until done blocked` timed out (exit 124) after
   300 s. Check `claude auth status` (`"loggedIn": true`) before a run. Since #25 this ends the turn as
   `error` (`auth: …`) instead; see [Accounts](#accounts).
+
+## Cache share smoke (2026-11-17)
+
+Run on the mini with this branch's `shed` (`serve --detach` in a scratch `--dir` under `env -i` with `HOME`,
+`PATH`, `USER` and `TERM`, `SHED_ACP_HIBERNATE_AFTER=20`), `claude-acp` 0.107.2 from the registry (binary),
+model `sonnet`, three one-word prompts. `shed get`'s `usage.turn` and `shed top`'s `CACHE`:
+
+| turn | input | cache read | cache write | output | `CACHE` |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2 | 11,372 | 18,290 | 6 | 38% |
+| 2 | 2 | 13,792 | 17,912 | 8 | 43% |
+| 3, the first after `hibernated` and a wake | 2 | 29,679 | 2,657 | 7 | 91% |
+
+Turn 3 woke about 25 s after turn 2, inside the cache's lifetime, so the hibernation kept the cache.
 
 So cooee can talk to Claude through `claude-acp` on the plan login; the `claude -p` stream-json fallback is not
 needed.

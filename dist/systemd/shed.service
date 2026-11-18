@@ -6,6 +6,7 @@ Description=shed: keeps coding-agent terminals alive
 # %h is your home directory; point this at your shed binary.
 ExecStart=%h/.cargo/bin/shed serve
 Restart=on-failure
+OOMPolicy=continue
 
 [Install]
 WantedBy=default.target
