@@ -1,0 +1,13 @@
+Decided: the scope starts with OOMPolicy=continue so a kernel kill ends one process and the agent stays
+Because: "An OOM kill there ends one process of that terminal. shed reports it."
+Because: crates/shed-server/src/limit.rs:31
+Decided: the scope also gets MemorySwapMax=0, else the kernel swaps an over-limit child instead of ending it
+Because: "the program starts in its own scope with `MemoryMax`"
+Decided: the probe runs through the same in_scope args, so a host that rejects the properties falls back to the sampler
+Because: crates/shed-server/src/limit.rs:12
+Decided: the scope test checks the agent keeps the oom_score_adj it inherited, since CI runners start jobs at a non-zero value
+Because: "or set the agent's OOM score so its children go first, and cover it with a test"
+Because: crates/shed/tests/acp.rs:946
+Rejected: an allow for case_sensitive_file_extension_comparisons — Path::extension is the honest comparison and costs no allow
+Check: in the ubuntu CI logs both Linux scope tests report ok, not skipped; the kernel may end a child before any sample names it, which would leave the process name as ?
+Owner: the memory limit now works on Linux without taking the agent down with the program it ended
