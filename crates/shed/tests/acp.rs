@@ -819,6 +819,59 @@ fn top_splits_the_memory_of_a_child_the_agent_started_into_work_and_lists_it_by_
 }
 
 #[test]
+fn a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on() {
+    let dir = temp_dir("acp-mem-max");
+    let _server = Server::sampling(&dir, "0.2");
+    let agent = fake_agent();
+    let agent = agent.to_str().expect("utf-8");
+    let run = [
+        "run",
+        "--name",
+        "g",
+        "--label",
+        "run=g",
+        "--mem-max",
+        "200M",
+    ];
+    ok(
+        &dir,
+        &[&run[..], &["--acp", "fake", "--", "python3", agent]].concat(),
+    );
+    ok(&dir, &["wait", "g", "--output", "ACP session ready"]);
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "g"])).expect("JSON");
+    assert_eq!(info["mem_max_mb"], 200, "{info}");
+    let listed: Value = serde_json::from_str(&ok(&dir, &["ls", "--json"])).expect("JSON");
+    assert_eq!(listed[0]["mem_max_mb"], 200, "{listed}");
+    assert!(row(&dir, &["top"], "g").contains(&"LIMIT=200M".to_owned()));
+    ok(&dir, &["send", "g", "hog 400"]);
+    let limited = events_until(&dir, "g", |e| e["event"] == "mem-limit");
+    let event: Value = serde_json::from_str(limited.last().expect("an event")).expect("JSON");
+    assert_eq!(event["limit_mb"], 200, "{event}");
+    let by = event["ended_by"].as_str().unwrap_or_default();
+    assert!(
+        by == "shed" || (cfg!(target_os = "linux") && by == "kernel"),
+        "{event}"
+    );
+    let process = event["process"].as_str().unwrap_or_default();
+    assert!(process.to_lowercase().contains("python"), "{event}");
+    let pid = info["pid"].as_i64().and_then(|p| i32::try_from(p).ok());
+    let pid = pid.expect("a pid");
+    common::eventually("the child gone", || {
+        let procs = proctree::system().list().unwrap_or_default();
+        let tree = proctree::tree(&procs, pid, &std::collections::BTreeSet::new());
+        tree.iter().all(|p| p.rss_bytes < 300 << 20)
+    });
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    ok(&dir, &["send", "g", "hi"]);
+    ok(&dir, &["wait", "g", "--until", "done", "--timeout", "10"]);
+    assert_eq!(ok(&dir, &["read", "g", "--lines", "1"]), "you said: hi\n");
+    let all = events_until(&dir, "g", |e| e["text"] == "you said: hi");
+    let limits = all.iter().filter(|l| l.contains(r#""event":"mem-limit""#));
+    assert_eq!(limits.count(), 1, "{all:?}");
+    ok(&dir, &["kill", "g"]);
+}
+
+#[test]
 fn top_and_ls_show_a_hibernated_agent_as_hibernated() {
     let dir = temp_dir("acp-top-hibernated");
     let _server = sleepy_server(&dir);
