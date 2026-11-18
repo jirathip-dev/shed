@@ -821,7 +821,8 @@ fn top_splits_the_memory_of_a_child_the_agent_started_into_work_and_lists_it_by_
 #[test]
 fn a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on() {
     let dir = temp_dir("acp-mem-max");
-    let _server = Server::sampling(&dir, "0.2");
+    let scoped = shed_server::limit::scoped();
+    let _server = Server::sampling(&dir, if scoped { "4" } else { "0.2" });
     let agent = fake_agent();
     let agent = agent.to_str().expect("utf-8");
     let run = [
@@ -847,11 +848,8 @@ fn a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on() {
     let limited = events_until(&dir, "g", |e| e["event"] == "mem-limit");
     let event: Value = serde_json::from_str(limited.last().expect("an event")).expect("JSON");
     assert_eq!(event["limit_mb"], 200, "{event}");
-    let by = event["ended_by"].as_str().unwrap_or_default();
-    assert!(
-        by == "shed" || (cfg!(target_os = "linux") && by == "kernel"),
-        "{event}"
-    );
+    let by = if scoped { "kernel" } else { "shed" };
+    assert_eq!(event["ended_by"], by, "{event}");
     let process = event["process"].as_str().unwrap_or_default();
     assert!(process.to_lowercase().contains("python"), "{event}");
     let pid = info["pid"].as_i64().and_then(|p| i32::try_from(p).ok());

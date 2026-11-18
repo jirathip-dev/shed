@@ -44,6 +44,11 @@ pub(crate) fn oom_kills(pid: i32) -> Option<u64> {
     kills.parse().ok()
 }
 
+pub(crate) fn comm(pid: i32) -> Option<String> {
+    let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
+    Some(comm.trim_end().to_owned())
+}
+
 pub(crate) fn kill_first(pid: i32) {
     std::fs::write(format!("/proc/{pid}/oom_score_adj"), "1000").ok();
 }
