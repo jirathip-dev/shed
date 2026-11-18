@@ -181,6 +181,11 @@ All notable changes to this project are documented here. The format follows
   `toolCall` as `call` (without `content`); `shed approve <t> <option> --request <id>` (the bridge's
   `{"approve": …, "request": …}` line) answers that request, and without it the oldest as before. `tool_call`
   carries ACP's `locations` (paths) and `raw_input` (left out over 4 KiB). All additive.
+- `shed serve` can hand over to a new build in place: the `handover` method checks the binary
+  (`handover.check`), then replaces the server on the same process id, keeping the socket and every
+  running terminal, ACP sessions included, with its screen, children and exit statuses. Clients see their
+  connection close and reconnect; an `events` reader with an older `since` gets `reset`. A refused check or
+  a failed exec leaves the server serving as it was.
 
 ### Changed
 

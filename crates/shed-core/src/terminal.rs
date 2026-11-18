@@ -1,10 +1,11 @@
 //! A terminal: one program on a PTY, its screen, and its process tree.
 
-use crate::runner::{Child, ExitStatus};
+use crate::runner::ExitStatus;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{ErrorKind::BrokenPipe, Read as _};
+use std::io::{ErrorKind::BrokenPipe, Read as _, Write as _};
 use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,8 +13,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
-use rustix::event::{PollFd, PollFlags, poll};
-use rustix::process::{Pid, Signal, kill_process_group};
+use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::process::{Pid, Signal, WaitOptions, kill_process_group, waitpid};
 use rustix::termios::{Winsize, tcgetwinsize, tcsetwinsize};
 use tokio::io::AsyncWriteExt as _;
 use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor::MultiThread};
@@ -29,6 +30,8 @@ const REAP: Duration = Duration::from_millis(20);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 const OUTPUT_BEHIND: usize = 256;
 const RULE_EVERY: Duration = Duration::from_millis(250);
+const QUIET: Duration = Duration::from_millis(20);
+const DETACH_WAIT: Duration = Duration::from_millis(100);
 
 /// A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is
 /// `state`. Above priority 0 it outranks the reported state; at or below, it applies only without one.
@@ -136,6 +139,17 @@ pub struct Terminal {
     rules: Mutex<Rules>,
     pid: i32,
     released: AtomicBool,
+    stop: Arc<Mutex<Option<UnixStream>>>,
+    reader: Mutex<Option<std::thread::JoinHandle<()>>>,
+    reaper: Mutex<Option<tokio::task::JoinHandle<()>>>,
+}
+
+/// A terminal [`Terminal::detach`]ed from this process: its program runs on, and its output waits in the PTY.
+pub struct Detached {
+    /// The PTY's master.
+    pub master: OwnedFd,
+    /// [`Screen::repaint`] of its screen when it was detached.
+    pub repaint: String,
 }
 
 type Outputs = Mutex<Option<Vec<mpsc::Sender<Arc<[u8]>>>>>;
@@ -188,37 +202,46 @@ impl Terminal {
         V: AsRef<OsStr>,
     {
         let (program, args) = cmd.split_first().ok_or(Error::EmptyCommand)?;
-        let screen = history.restore(size)?;
+        let screen = history.restore(size, None)?;
         let log = Log::open(history)?;
         let (pty, pts) = pty_process::blocking::open()?;
         pty.resize(pty_process::Size::new(size.rows.max(1), size.cols.max(1)))?;
         let child = crate::runner::pty(program, args, cwd, env, pts, stderr)?;
         let pid = i32::try_from(child.id())
             .map_err(|_| Error::Io(std::io::Error::other("pid out of range")))?;
-        Self::start(OwnedFd::from(pty).into(), pid, Some(child), screen, log)
+        Self::start(OwnedFd::from(pty).into(), pid, true, screen, log)
     }
 
     /// Takes over a terminal that another process started: `master` is its PTY's master, `pid` its program,
     /// which leads its session. The screen starts from `history` as in [`spawn_with`](Self::spawn_with).
-    /// Not being its parent, the terminal learns of the program's end when the PTY closes, as exit 0.
+    /// Not being its parent, the terminal learns of the program's end when the PTY closes, as exit 0. With
+    /// `repaint`, it picks up a [`detach`](Self::detach)ed terminal of this process instead: the log tail,
+    /// then `repaint`, and it waits on `pid` as its child.
     ///
     /// # Errors
     /// [`Error::Io`] when the PTY's size or the log cannot be read.
-    pub fn adopt(master: OwnedFd, pid: i32, history: &History) -> Result<Self, Error> {
+    pub fn adopt(
+        master: OwnedFd,
+        pid: i32,
+        history: &History,
+        repaint: Option<&str>,
+    ) -> Result<Self, Error> {
         let ws = tcgetwinsize(&master).map_err(std::io::Error::from)?;
         let size = Size {
             rows: ws.ws_row,
             cols: ws.ws_col,
         };
-        let screen = history.restore(size)?;
+        let mut screen = history.restore(size, repaint)?;
+        screen.take_replies();
+        screen.take_reports();
         let log = Log::open(history)?;
-        Self::start(master.into(), pid, None, screen, log)
+        Self::start(master.into(), pid, repaint.is_some(), screen, log)
     }
 
     fn start(
         master: File,
         pid: i32,
-        child: Option<Child>,
+        child: bool,
         screen: Screen,
         log: Option<Log>,
     ) -> Result<Self, Error> {
@@ -240,9 +263,12 @@ impl Terminal {
         }));
         let (sink, subs) = (Arc::clone(&screen), Arc::clone(&outputs));
         let watcher = Arc::clone(&watch);
-        let adopted = child.is_none();
+        let adopted = !child;
         let replies = input.clone();
-        std::thread::spawn(move || {
+        let (stop, stopped) = UnixStream::pair()?;
+        let stop = Arc::new(Mutex::new(Some(stop)));
+        let held = Arc::clone(&stop);
+        let reader = std::thread::spawn(move || {
             let (screen, outputs) = (Arc::clone(&sink), Arc::clone(&subs));
             let watch = Arc::clone(&watcher);
             let (logs, logger) = stage(move |rx: Receiver<Vec<u8>>| {
@@ -251,12 +277,16 @@ impl Terminal {
             });
             let (chunks, feeder) =
                 stage(move |rx| feed_loop(&rx, &replies, &screen, &outputs, &watch, Some(logs)));
-            read_loop(&reader, &chunks);
+            let detached = read_loop(&reader, &stopped, &chunks);
             drop(chunks);
+            *lock(&held) = None;
             feeder.join().ok();
             logger.join().ok();
             drop(reader);
             *lock(&subs) = None;
+            if detached {
+                return;
+            }
             bump(&watcher, |s| {
                 if adopted {
                     s.exit.get_or_insert(Ok(ExitStatus::from_raw(0)));
@@ -264,9 +294,8 @@ impl Terminal {
                 s.end(true);
             });
         });
-        if let Some(child) = child {
-            runtime.spawn(reap(child, Arc::clone(&watch)));
-        }
+        let pids = Pid::from_raw(pid).filter(|_| child);
+        let reaping = pids.map(|pid| runtime.spawn(reap(pid, Arc::clone(&watch))));
         runtime.spawn(write_loop(Weak::clone(&pty), inputs, Arc::clone(&watch)));
         Ok(Self {
             pty,
@@ -277,7 +306,34 @@ impl Terminal {
             rules: Mutex::default(),
             pid,
             released: AtomicBool::new(false),
+            stop,
+            reader: Mutex::new(Some(reader)),
+            reaper: Mutex::new(reaping),
         })
+    }
+
+    /// Stops the reader once the PTY is quiet (at most 100 ms), flushes the log and stops the reaper; the
+    /// program runs on, and the terminal's own screen and output streams stop.
+    ///
+    /// # Errors
+    /// [`Error::Io`] when the PTY is closed: the program has ended.
+    pub fn detach(&self) -> Result<Detached, Error> {
+        let master = self.master()?;
+        self.release();
+        let stop = lock(&self.stop).as_ref().map(UnixStream::try_clone);
+        stop.ok_or_else(|| Error::Io(BrokenPipe.into()))??
+            .write_all(b"x")?;
+        if let Some(reader) = lock(&self.reader).take() {
+            reader.join().ok();
+        }
+        if let Some(reaper) = lock(&self.reaper).take() {
+            reaper.abort();
+            while !reaper.is_finished() {
+                crate::clock::sleep(Duration::from_millis(1));
+            }
+        }
+        let repaint = lock(&self.screen).repaint();
+        Ok(Detached { master, repaint })
     }
 
     /// A duplicate of the PTY's master, for a process that is to keep the terminal open.
@@ -598,19 +654,25 @@ fn runtime() -> Result<Handle, Error> {
     runtime.ok_or_else(|| Error::Io(std::io::Error::other("no runtime")))
 }
 
-async fn reap(mut child: Child, watch: Arc<watch::Sender<Status>>) {
+fn wait_pid(pid: Pid, options: WaitOptions) -> std::io::Result<Option<ExitStatus>> {
+    let status = waitpid(Some(pid), options)?;
+    Ok(status.map(|(_, s)| ExitStatus::from_raw(s.as_raw())))
+}
+
+async fn reap(pid: Pid, watch: Arc<watch::Sender<Status>>) {
     let mut exits = signal(SignalKind::child()).ok();
-    let mut exit = child.try_wait();
+    let mut exit = wait_pid(pid, WaitOptions::NOHANG);
     while let (Ok(None), Some(signals)) = (&exit, &mut exits) {
         exits = signals.recv().await.and(exits.take());
-        exit = child.try_wait();
+        exit = wait_pid(pid, WaitOptions::NOHANG);
     }
     let exit = match exit {
-        Ok(None) => tokio::task::spawn_blocking(move || child.wait())
+        Ok(None) => tokio::task::spawn_blocking(move || wait_pid(pid, WaitOptions::empty()))
             .await
             .unwrap_or_else(|e| Err(e.into())),
-        done => done.and_then(|s| s.ok_or(BrokenPipe.into())),
+        done => done,
     };
+    let exit = exit.and_then(|s| s.ok_or(BrokenPipe.into()));
     bump(&watch, |s| {
         s.exit = Some(exit.map_err(|e| e.kind()));
         s.end(true);
@@ -661,24 +723,43 @@ fn batches(rx: &Receiver<Vec<u8>>) -> impl Iterator<Item = Vec<u8>> + '_ {
     })
 }
 
-fn read_loop(pty: &File, chunks: &SyncSender<Vec<u8>>) {
+fn read_loop(pty: &File, stop: &UnixStream, chunks: &SyncSender<Vec<u8>>) -> bool {
     let mut buf = vec![0u8; 1 << 16];
+    let (quiet, mut until) = (Timespec::try_from(QUIET).ok(), None);
     loop {
+        let mut fds = [
+            PollFd::new(pty, PollFlags::IN),
+            PollFd::new(stop, PollFlags::IN),
+        ];
+        let polled = poll(&mut fds, until.and(quiet.as_ref()));
+        let [out, asked] = fds.map(|fd| !fd.revents().is_empty());
+        let now = crate::clock::now();
+        if asked && until.is_none() {
+            (&*stop).read_exact(&mut [0]).ok();
+            until = now.checked_add(DETACH_WAIT);
+        }
+        if until.is_some_and(|at| now >= at || polled.is_ok_and(|n| n == 0)) {
+            return true;
+        }
+        if !out {
+            continue;
+        }
         match (&*pty).read(&mut buf) {
-            Ok(0) => return,
+            Ok(0) => return false,
             Ok(n) => {
                 if chunks
                     .send(buf.get(..n).unwrap_or_default().to_vec())
                     .is_err()
                 {
-                    return;
+                    return false;
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                poll(&mut [PollFd::new(pty, PollFlags::IN)], None).ok();
-            }
-            Err(_) => return,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+                ) => {}
+            Err(_) => return false,
         }
     }
 }

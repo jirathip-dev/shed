@@ -18,7 +18,7 @@ pub use std::process::{Child, ExitCode, ExitStatus};
 /// # Errors
 /// When `program` cannot start.
 pub fn output<A: AsRef<OsStr>>(
-    program: &str,
+    program: impl AsRef<OsStr>,
     args: impl IntoIterator<Item = A>,
     envs: &[(&str, &str)],
 ) -> io::Result<Output> {
@@ -160,6 +160,12 @@ where
         Some(fd) => command.stderr(fd).spawn(pts),
         None => command.spawn(pts),
     }
+}
+
+/// Replaces this process with `program` and `args`, its stdin `stdin`; returns only when it could not.
+#[must_use]
+pub fn replace<A: AsRef<OsStr>>(program: &Path, args: &[A], stdin: OwnedFd) -> io::Error {
+    Command::new(program).args(args).stdin(stdin).exec()
 }
 
 /// This process's id.

@@ -187,11 +187,13 @@ pub enum ErrorCode {
     Io,
     /// A person's unsent line held the `send` past `draft_wait`; nothing was written.
     DraftHeld,
+    /// The server will not hand over (`handover.check`, `handover`); the message says why, and nothing changed.
+    HandoverRefused,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -207,6 +209,7 @@ impl ErrorCode {
         Self::NoLink,
         Self::Io,
         Self::DraftHeld,
+        Self::HandoverRefused,
     ];
 
     /// The numeric JSON-RPC code.
@@ -228,6 +231,7 @@ impl ErrorCode {
             Self::NoLink => -32007,
             Self::Io => -32008,
             Self::DraftHeld => -32009,
+            Self::HandoverRefused => -32010,
         }
     }
 
@@ -250,6 +254,7 @@ impl ErrorCode {
             Self::NoLink => "NO_LINK",
             Self::Io => "IO",
             Self::DraftHeld => "DRAFT_HELD",
+            Self::HandoverRefused => "HANDOVER_REFUSED",
         }
     }
 }
@@ -317,11 +322,15 @@ pub enum Method {
     AgentsMatch,
     /// The API as an `OpenRPC` document: `{}` → `openrpc()` (the `schema` feature).
     Discover,
+    /// Would the server hand over to a binary: [`HandoverCheckParams`] → [`Handover`].
+    HandoverCheck,
+    /// Hand over to the server's own binary: [`HandoverParams`] → [`Handover`].
+    Handover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 32] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -352,6 +361,8 @@ impl Method {
         Self::Agents,
         Self::AgentsMatch,
         Self::Discover,
+        Self::HandoverCheck,
+        Self::Handover,
     ];
 
     /// The wire name.
@@ -388,6 +399,8 @@ impl Method {
             Self::Agents => "agents",
             Self::AgentsMatch => "agents.match",
             Self::Discover => "rpc.discover",
+            Self::HandoverCheck => "handover.check",
+            Self::Handover => "handover",
         }
     }
 
@@ -484,6 +497,12 @@ impl Method {
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
+            }
+            Self::HandoverCheck => {
+                "Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not."
+            }
+            Self::Handover => {
+                "Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was."
             }
         }
     }
@@ -1670,6 +1689,36 @@ pub struct TerminalResizeParams {
     pub rows: u16,
 }
 
+/// `handover.check` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct HandoverCheckParams {
+    /// The build the binary must be.
+    pub build: String,
+    /// The binary's path.
+    pub candidate: PathBuf,
+}
+
+/// `handover` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct HandoverParams {
+    /// The build the server's own binary must be now.
+    pub build: String,
+}
+
+/// The answer to `handover.check` and `handover`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Handover {
+    /// The server's build.
+    pub from: String,
+    /// The binary's build.
+    pub to: String,
+    /// The running terminals that cross.
+    pub terminals: usize,
+}
+
 /// `terminal.readonly` params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -1712,6 +1761,8 @@ impl Method {
             Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
             Self::AgentsMatch => pair::<MatchParams, Matched>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
+            Self::HandoverCheck => pair::<HandoverCheckParams, Handover>(g),
+            Self::Handover => pair::<HandoverParams, Handover>(g),
         }
     }
 
