@@ -900,7 +900,11 @@ fn a_limited_terminal_runs_in_its_own_scope_its_children_ranked_first_and_none_o
         ],
     );
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "s"])).expect("JSON");
-    common::eventually("the scope", || scope(&info["pid"]).ends_with(".scope"));
+    common::eventually("the scope", || {
+        std::path::Path::new(&scope(&info["pid"]))
+            .extension()
+            .is_some_and(|e| e == "scope")
+    });
     let sleeper = scope(&info["pid"]);
     assert_eq!(read(&format!("{sleeper}/memory.max")).trim(), "209715200");
 
