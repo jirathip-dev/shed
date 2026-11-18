@@ -25,6 +25,7 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         acp: None,
         session: None,
         parent: Some(lead()),
+        mem_max_mb: None,
     }
 }
 
@@ -94,6 +95,7 @@ pub(crate) fn run_params() -> Value {
         no_hibernate: false,
         warm: false,
         machine: None,
+        mem_max_mb: Some(4096),
         parent: Some(lead()),
         rows: None,
         cols: None,

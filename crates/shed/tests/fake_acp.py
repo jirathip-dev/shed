@@ -16,6 +16,7 @@ reason on stderr) on the first that does not fit. Prompts:
 - "flood N": N one-character chunks, then the reply. With `--canned` they are one pre-built write (no
   per-update encoding) 0.2 s after the prompt (once shed has saved the turn's `working` state), so a
   bench timing from the first chunk to the reply times shed's throughput rather than this agent.
+- "hog [MB]": starts a child holding MB (default 200) of memory for 60 s, then the reply "started it".
 - "unknown": an update of a kind no ACP schema has, then the reply "still here".
 - "usage": a usage_update (53,000 of 200,000 tokens, 0.045 USD), then the reply "counted".
 - "quota": the same usage_update, then the reply "counted" whose response's `_meta.quota.token_count`
@@ -327,8 +328,9 @@ def main():
                 update({"sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "counted"}})
                 stop = "end_turn"
-            elif text == "hog":
-                hold = "import time; b = b'x' * (200 << 20); time.sleep(60)"
+            elif text == "hog" or text.startswith("hog "):
+                mb = int(text.split()[1]) if " " in text else 200
+                hold = f"import time; b = b'x' * ({mb} << 20); time.sleep(60)"
                 subprocess.Popen([sys.executable, "-c", hold, "https://user:secret@example.invalid/"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
                 update({"sessionUpdate": "agent_message_chunk",

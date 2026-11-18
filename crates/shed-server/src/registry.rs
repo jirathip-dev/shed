@@ -88,6 +88,25 @@ struct Entry {
     prompted: Option<Instant>,
     recipe: Option<String>,
     was: Option<String>,
+    guard: Guard,
+}
+
+#[derive(Default)]
+struct Guard {
+    over: u8,
+    last: Option<i32>,
+    kills: u64,
+    largest: Option<(u64, String)>,
+}
+
+fn process_name(pid: i32) -> String {
+    let cmd = proctree::command(pid).map(|c| c.0).unwrap_or_default();
+    let first = cmd.split_whitespace().next().unwrap_or("?");
+    first.rsplit('/').next().unwrap_or(first).to_owned()
+}
+
+fn largest<'a>(ps: &[&'a ProcessInfo]) -> Option<&'a ProcessInfo> {
+    ps.iter().copied().max_by_key(|p| p.rss_bytes)
 }
 
 impl Entry {
@@ -107,7 +126,59 @@ impl Entry {
             prompted: None,
             recipe: None,
             was: None,
+            guard: Guard::default(),
         }
+    }
+
+    fn guard(
+        &mut self,
+        tree: &[ProcessInfo],
+        limit_mb: u64,
+    ) -> Option<(String, EventKind, Option<i32>)> {
+        let (pid, agent, acp) = (self.info.pid, &self.agent, self.info.acp.is_some());
+        let own = |p: &&ProcessInfo| {
+            Some(p.pid) == pid || (acp && agent.as_ref().is_none_or(|a| a.contains(&p.pid)))
+        };
+        let (mine, started): (Vec<_>, Vec<_>) = tree.iter().partition(own);
+        let g = &mut self.guard;
+        let (process, rss, by, end) = if crate::limit::scoped() {
+            for p in &started {
+                crate::limit::kill_first(p.pid);
+            }
+            let kills = pid.and_then(crate::limit::oom_kills).unwrap_or(g.kills);
+            let now = largest(&started).map(|p| (p.rss_bytes, process_name(p.pid)));
+            let seen = std::mem::replace(&mut g.largest, now);
+            if kills <= std::mem::replace(&mut g.kills, kills) {
+                return None;
+            }
+            let (rss, name) = seen.unwrap_or((0, "?".to_owned()));
+            (name, rss, "kernel", None)
+        } else {
+            let total: u64 = tree.iter().map(|p| p.rss_bytes).sum();
+            let over = total > limit_mb.saturating_mul(1 << 20);
+            g.over = if over { g.over.saturating_add(1) } else { 0 };
+            if g.over < 2 {
+                return None;
+            }
+            g.over = 0;
+            let worker = largest(&started).map(|p| (p, "shed"));
+            let (p, by) = worker.or_else(|| Some((largest(&mine)?, "none")))?;
+            if g.last.replace(p.pid) == Some(p.pid) {
+                return None;
+            }
+            let end = (by == "shed").then_some(p.pid);
+            (process_name(p.pid), p.rss_bytes, by, end)
+        };
+        let rss_mb = rss >> 20;
+        let line = format!("mem-limit {limit_mb}M: {process} {rss_mb}M, ended by {by}");
+        let ended_by = by.to_owned();
+        let kind = EventKind::MemLimit {
+            limit_mb,
+            process,
+            rss_mb,
+            ended_by,
+        };
+        Some((line, kind, end))
     }
 
     fn ready(&self, recipe: &str) -> bool {
@@ -644,7 +715,8 @@ impl Registry {
         running.map(|t| t.name.clone()).collect()
     }
 
-    pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) {
+    pub(crate) fn sample(&mut self, procs: &[ProcessInfo], now: Instant) -> Vec<i32> {
+        let (mut ended, mut notes) = (Vec::new(), Vec::new());
         for entry in self.entries.values_mut() {
             let Some(pid) = entry.info.pid else { continue };
             let tree = proctree::tree(procs, pid, &std::collections::BTreeSet::new());
@@ -677,7 +749,17 @@ impl Registry {
                 entry.emitted = Some(now);
                 self.events.emit(&entry.info, EventKind::Resources(now));
             }
+            let limit = entry.info.mem_max_mb;
+            if let Some((line, kind, end)) = limit.and_then(|mb| entry.guard(&tree, mb)) {
+                notes.extend(note(&entry.info, &line));
+                self.events.emit(&entry.info, kind);
+                ended.extend(end);
+            }
         }
+        if !notes.is_empty() {
+            self.deliver(notes);
+        }
+        ended
     }
 
     fn bridge(
@@ -813,8 +895,8 @@ impl Registry {
         if !p.cwd.is_absolute() {
             return Err(bad("cwd must be absolute"));
         }
-        if p.rows == Some(0) || p.cols == Some(0) {
-            return Err(bad("rows and cols must be at least 1"));
+        if p.rows == Some(0) || p.cols == Some(0) || p.mem_max_mb == Some(0) {
+            return Err(bad("rows, cols and mem_max_mb must be at least 1"));
         }
         if p.labels.keys().any(|k| k.is_empty() || k.contains('=')) {
             return Err(bad("label keys must be non-empty and have no '='"));
@@ -858,9 +940,12 @@ impl Registry {
         let meta = p.meta.is_some().then_some(("SHED_ACP_META", meta.as_str()));
         let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
         let acp: Vec<_> = [resume, mcp, meta, awake].into_iter().flatten().collect();
+        let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
+        let scoped = mem_max_mb.filter(|_| crate::limit::scoped());
+        let cmd = scoped.map(|mb| crate::limit::in_scope(&p.cmd, mb));
         let term = spawn(
             size(p.rows, p.cols),
-            &p.cmd,
+            cmd.as_ref().unwrap_or(&p.cmd),
             &p.cwd,
             &name,
             p.idle_after,
@@ -887,6 +972,7 @@ impl Registry {
             acp: p.acp,
             session: None,
             parent: p.parent,
+            mem_max_mb,
         };
         self.events.emit(&info, EventKind::Started);
         let entry = Entry {
@@ -1513,6 +1599,97 @@ mod tests {
         );
         let live = registry.get("acp69").unwrap().session.unwrap();
         assert_eq!(live.commands.len(), 100);
+    }
+
+    #[test]
+    fn the_sampler_ends_a_child_over_the_limit_for_two_samples_and_leaves_the_rest() {
+        if crate::limit::scoped() {
+            writeln!(io::stderr(), "skipped: this host limits terminals by scope").ok();
+            return;
+        }
+        let path = dir("mem-guard").join("state.json");
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let run = |name: &str, limit: Option<u64>| {
+            let run = serde_json::json!({"name": name, "cwd": "/", "cmd": ["sleep", "100"],
+                "mem_max_mb": limit});
+            serde_json::from_value(run).unwrap()
+        };
+        let mut terms = Vec::new();
+        for (name, limit) in [("free", None), ("capped", Some(100))] {
+            registry.run(run(name, limit)).unwrap();
+            terms.push(Arc::clone(registry.live(name).unwrap()));
+        }
+        let pid = |n: usize| terms[n].pid();
+        let proc = |id: i32, parent: i32, mb: u64| ProcessInfo {
+            pid: id,
+            ppid: parent,
+            pgid: parent,
+            rss_bytes: mb << 20,
+            cpu: Duration::ZERO,
+            zombie: false,
+        };
+        let (child, free_child) = (1_999_999_001, 1_999_999_002);
+        let at = |agent_mb: u64, child_mb: u64| {
+            let mut procs = vec![
+                proc(pid(0), 1, 1),
+                proc(free_child, pid(0), 5000),
+                proc(pid(1), 1, agent_mb),
+                proc(child, pid(1), child_mb),
+            ];
+            procs.retain(|p| p.rss_bytes > 0);
+            procs
+        };
+        let mut sub = registry.events.subscribe(EventsParams {
+            labels: BTreeMap::new(),
+            since: Some(0),
+        });
+        let mut sample = |procs: Vec<ProcessInfo>| registry.sample(&procs, shed_core::clock::now());
+        assert_eq!(sample(at(10, 80)), Vec::<i32>::new(), "under the limit");
+        assert_eq!(sample(at(10, 80)), Vec::<i32>::new(), "under the limit");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "one sample over");
+        assert_eq!(sample(at(10, 80)), Vec::<i32>::new(), "back under");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "one sample over");
+        assert_eq!(sample(at(10, 150)), [child], "two in a row");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "once per process");
+        assert_eq!(sample(at(10, 150)), Vec::<i32>::new(), "once per process");
+        assert_eq!(sample(at(150, 0)), Vec::<i32>::new(), "the agent itself");
+        assert_eq!(
+            sample(at(150, 0)),
+            Vec::<i32>::new(),
+            "the agent is never ended"
+        );
+        let limits: Vec<_> = (sub.events().into_iter())
+            .filter_map(|e| match e.kind {
+                EventKind::MemLimit {
+                    rss_mb, ended_by, ..
+                } => Some((e.name, rss_mb, ended_by)),
+                _ => None,
+            })
+            .collect();
+        let capped = |mb: u64, by: &str| ("capped".to_owned(), mb, by.to_owned());
+        assert_eq!(limits, [capped(150, "shed"), capped(150, "none")]);
+        for term in terms {
+            term.kill(GRACE).unwrap();
+        }
+    }
+
+    #[test]
+    fn sample_time_report() {
+        let path = dir("sample-time").join("state.json");
+        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let terms: Vec<_> = (0..30)
+            .map(|n| sleeper(&mut registry, &format!("s{n}")))
+            .collect();
+        let procs = proctree::system().list().unwrap();
+        let started = shed_core::clock::now();
+        for _ in 0..200 {
+            registry.sample(&procs, shed_core::clock::now());
+        }
+        let each = started.elapsed() / 200;
+        writeln!(io::stderr(), "sample of 30 terminals: {each:?}").ok();
+        for term in terms {
+            term.kill(GRACE).unwrap();
+        }
     }
 
     #[test]

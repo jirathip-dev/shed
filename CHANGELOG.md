@@ -165,6 +165,11 @@ All notable changes to this project are documented here. The format follows
   (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
   [--full]` lists that terminal's processes over 50 MB: pid, memory, CPU, age and the command's name (the
   whole command line with `--full`).
+- `shed run --mem-max <size>` (or `$SHED_MEM_MAX` on `shed serve`, off by default) limits a terminal's process
+  tree. On Linux with a user systemd that has the memory controller the program runs in its own scope with
+  `MemoryMax`; elsewhere, two samples over ends the largest process the agent started, never the agent. Each
+  is a `mem-limit` event and a note to the parent; `get`, `ls --json` and `top` show the limit, and
+  `shed doctor` says which mechanism the host uses.
 - `shed run --acp … --warm` keeps one ready spare session per recipe (agent, command, folder, policy, MCP
   servers, meta, size): the next `--warm` run of that recipe takes it, renamed to its name and labels, with
   `session.ready_ms` 0, and a new spare starts. Spares are listed as `.warm-N`; `$SHED_WARM_MAX` (default 2)

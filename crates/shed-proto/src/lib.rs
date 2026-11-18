@@ -395,7 +395,7 @@ impl Method {
                 "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`."
             }
             Self::Run => {
-                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
+                "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`."
             }
             Self::Ls => {
                 "List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal."
@@ -587,6 +587,9 @@ pub struct RunParams {
     /// ACP: take this recipe's ready spare session if there is one, and keep a spare ready for the next run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub warm: bool,
+    /// The most memory the terminal's process tree may hold, in MB; default the server's `$SHED_MEM_MAX`, else none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_max_mb: Option<u64>,
     /// Start it on this machine, over its held link (`machine.links`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
@@ -841,7 +844,8 @@ pub struct EventsParams {
 
 /// An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in
 /// `seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),
-/// `killed` (by `kill`) or `resources` (memory or CPU moved by more than 10 % since the last one).
+/// `killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`
+/// (the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).
 ///
 /// An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`
 /// (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with
@@ -889,6 +893,18 @@ pub enum EventKind {
     Killed,
     /// The tree's memory or CPU moved by more than 10 % since the last such event.
     Resources(Resources),
+    /// The process tree passed its memory limit.
+    #[serde(rename = "mem-limit")]
+    MemLimit {
+        /// The limit, in MB.
+        limit_mb: u64,
+        /// The process over it: the largest the agent started, or the agent's own when it started none.
+        process: String,
+        /// Its memory, in MB.
+        rss_mb: u64,
+        /// `kernel` (the terminal's scope) or `shed` (the sampler) ended it; `none`: the agent's own, only reported.
+        ended_by: String,
+    },
     /// ACP: a prompt started a turn.
     Turn {
         /// The prompt text.
@@ -972,6 +988,7 @@ impl EventKind {
                 | Self::Exited { .. }
                 | Self::Killed
                 | Self::Resources(_)
+                | Self::MemLimit { .. }
         )
     }
 }
@@ -1523,6 +1540,9 @@ pub struct TerminalInfo {
     /// The terminal that started it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<Parent>,
+    /// The most memory its process tree may hold, in MB, if limited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_max_mb: Option<u64>,
 }
 
 /// `screen.watch` params.
