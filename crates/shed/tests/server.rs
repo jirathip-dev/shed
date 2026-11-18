@@ -377,33 +377,68 @@ fn a_kept_terminal_comes_back_as_a_shell_in_its_cwd() {
 }
 
 #[test]
-fn a_protocol_mismatch_is_refused() {
+fn a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest() {
     let dir = temp_dir("version");
     let _server = Server::start(&dir);
-    let mut c = Conn::open(&dir);
-    let newer = json!({"product": "shed", "version": VERSION, "build": "02fcf97", "protocol": PROTOCOL + 1});
-    let (_, line, _) = c.call(1, "hello", &newer);
+    let hello = |protocol: u32, oldest: Option<u32>| {
+        let mut c = Conn::open(&dir);
+        let mut p = json!({"product": "shed", "version": VERSION, "build": "02fcf97", "protocol": protocol});
+        if let Some(oldest) = oldest {
+            p["oldest"] = json!(oldest);
+        }
+        let (_, line, reply) = c.call(1, "hello", &p);
+        let (_, _, after) = c.call(2, "ls", &json!({}));
+        (line, reply, after)
+    };
+    let refused = |line: &str, client: &str, side: &str| {
+        assert_eq!(
+            line,
+            format!(
+                r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client {client} / server {BUILD} protocol {}-{PROTOCOL}; update {side}"}}}}"#,
+                PROTOCOL - 1
+            )
+        );
+    };
+
+    let (_, reply, after) = hello(PROTOCOL, Some(PROTOCOL - 1));
+    assert_eq!(reply["result"], ours(), "a client on N gets N's hello");
+    assert_eq!(reply["result"]["oldest"], PROTOCOL - 1);
+    assert!(after["result"].is_array(), "{after}");
+
+    let (_, reply, after) = hello(PROTOCOL - 1, None);
+    let mut previous = ours();
+    previous["protocol"] = json!(PROTOCOL - 1);
+    previous.as_object_mut().expect("object").remove("oldest");
     assert_eq!(
-        line,
-        format!(
-            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client 02fcf97 / server {BUILD}: protocol {} vs {PROTOCOL}; restart shed serve"}}}}"#,
-            PROTOCOL + 1
-        )
+        reply["result"], previous,
+        "a client on N-1 gets N-1's hello"
     );
-    let (_, _, after) = c.call(2, "ls", &json!({}));
+    assert!(after["result"].is_array(), "{after}");
+
+    let (_, reply, _) = hello(PROTOCOL + 1, Some(PROTOCOL));
+    assert_eq!(reply["result"], ours(), "a newer client that accepts N");
+
+    let (line, _, after) = hello(PROTOCOL - 2, None);
+    refused(
+        &line,
+        &format!("02fcf97 protocol {0}-{0}", PROTOCOL - 2),
+        "the client",
+    );
     assert_eq!(
         after["error"]["code"], -32001,
         "a refused client stays refused"
     );
 
+    let (line, _, _) = hello(PROTOCOL + 2, Some(PROTOCOL + 1));
+    refused(
+        &line,
+        &format!("02fcf97 protocol {}-{}", PROTOCOL + 1, PROTOCOL + 2),
+        "the server and restart shed serve",
+    );
+
     let mut old = Conn::open(&dir);
     let (_, line, _) = old.call(1, "hello", &json!({"version": VERSION}));
-    assert_eq!(
-        line,
-        format!(
-            r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client unnamed unknown / server {BUILD}: protocol 0 vs {PROTOCOL}; restart shed serve"}}}}"#
-        )
-    );
+    refused(&line, "unnamed unknown protocol 0-0", "the client");
 
     let mut same = Conn::open(&dir);
     let other_build =
