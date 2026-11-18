@@ -1,0 +1,13 @@
+Decided: PROTOCOL becomes 2 with OLDEST_PROTOCOL 1, since hello's shape gains an `oldest` field; a server answers a protocol 1 client with protocol 1 and no `oldest`
+Because: "a server on protocol N accepts clients on N and N-1, and answers an N-1 client in N-1's shapes"
+Because: crates/shed-proto/src/lib.rs:527
+Decided: compatible is a range overlap: the peer's oldest (else its protocol) is at most ours and its protocol at least our oldest; one check serves the server and the shed CLI
+Because: "`SHED_VERSION` is returned only when the ranges don't overlap; its message names both ranges and which side to update"
+Decided: the refusal tells the client to update when its protocol is below the server's oldest, else the server and restart shed serve
+Decided: machine links take the remote build from the new message, cut at " protocol "
+Because: crates/shed-server/src/machines.rs:214
+Rejected: keeping PROTOCOL 1 with oldest 0 — then a client that sends no protocol is served, against "refused by a server whose oldest served protocol is above 0"
+Rejected: a per-session protocol in the server — protocol 1 and 2 differ only in hello, so nothing else needs the session's protocol
+Check: a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest in crates/shed/tests/server.rs drives N, N-1, N+1, N-2, an out-of-range newer client and a no-protocol client
+Check: machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s fails on base e55a367 too on this host (uptime_s reads 0)
+Owner: upgrading shed no longer breaks clients built for the previous protocol; a mismatch now says which side to update
