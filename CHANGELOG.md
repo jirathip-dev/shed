@@ -181,6 +181,9 @@ All notable changes to this project are documented here. The format follows
   `toolCall` as `call` (without `content`); `shed approve <t> <option> --request <id>` (the bridge's
   `{"approve": …, "request": …}` line) answers that request, and without it the oldest as before. `tool_call`
   carries ACP's `locations` (paths) and `raw_input` (left out over 4 KiB). All additive.
+- CI publishes signed, notarized builds after green pushes: `build-<sha7>` releases from main and
+  `build-staging-<sha7>` prereleases from staging, for macOS (arm64) and Linux (x86_64), with `SHA256SUMS`
+  (docs/releases.md).
 - `shed serve` can hand over to a new build in place: the `handover` method checks the binary
   (`handover.check`), then replaces the server on the same process id, keeping the socket and every
   running terminal, ACP sessions included, with its screen, children and exit statuses. Clients see their

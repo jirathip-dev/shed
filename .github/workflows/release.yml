@@ -1,0 +1,118 @@
+name: release
+# #160: after ci ends green on a push to main or staging, build shed for macOS (signed, notarized) and Linux and
+# publish a GitHub release: build-<sha7> on main (kept), build-staging-<sha7> on staging (a prerelease, pruned after 14
+# days). A failed step ends its job green with an ::error:: annotation and publishes nothing (docs/releases.md).
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main, staging]
+
+permissions:
+  contents: read
+
+env:
+  SHA: ${{ github.event.workflow_run.head_sha }}
+  BRANCH: ${{ github.event.workflow_run.head_branch }}
+
+jobs:
+  linux:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-22.04
+    outputs:
+      ok: ${{ steps.build.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - id: build
+        run: |
+          t=x86_64-unknown-linux-gnu
+          if cargo build --release --locked -p shed --target "$t" && cp "target/$t/release/shed" "shed-$t" &&
+            "./shed-$t" --version | grep -q "($(printf %.7s "$SHA")"; then
+            echo ok=true >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::the Linux build (or its --version sha check) failed; nothing is published"
+          fi
+      - if: steps.build.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: shed-x86_64-unknown-linux-gnu
+
+  macos:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: macos-latest
+    environment: release
+    outputs:
+      ok: ${{ steps.sign.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-apple-darwin
+      - id: build
+        run: |
+          t=aarch64-apple-darwin
+          if cargo build --release --locked -p shed --target "$t" && cp "target/$t/release/shed" "shed-$t" &&
+            "./shed-$t" --version | grep -q "($(printf %.7s "$SHA")"; then
+            echo ok=true >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::the macOS build (or its --version sha check) failed; nothing is published"
+          fi
+      - id: sign
+        if: steps.build.outputs.ok == 'true'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          if sh scripts/release-sign.sh shed-aarch64-apple-darwin; then
+            echo ok=true >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::signing, notarization or its check failed; nothing is published"
+          fi
+      - if: steps.sign.outputs.ok == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: shed-aarch64-apple-darwin
+
+  publish:
+    needs: [linux, macos]
+    if: needs.linux.outputs.ok == 'true' && needs.macos.outputs.ok == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: publish
+        run: |
+          s=$(printf %.7s "$SHA")
+          if [ "$BRANCH" = main ]; then tag="build-$s" pre=""; else tag="build-$BRANCH-$s" pre=1; fi
+          sha256sum shed-aarch64-apple-darwin shed-x86_64-unknown-linux-gnu > SHA256SUMS
+          if ! gh release create "$tag" -R "$REPO" --target "$SHA" --title "$tag" --notes "shed $BRANCH @ $SHA" \
+            ${pre:+"--prerelease"} shed-aarch64-apple-darwin shed-x86_64-unknown-linux-gnu SHA256SUMS; then
+            echo "::error::publishing $tag failed"
+          fi
+      - name: prune staging prereleases over 14 days old
+        if: env.BRANCH == 'staging'
+        run: |
+          cut=$(date -u -d '14 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          gh release list -R "$REPO" --limit 1000 --json tagName,isPrerelease,createdAt \
+            --jq ".[] | select(.isPrerelease and (.tagName | startswith(\"build-staging-\")) and .createdAt < \"$cut\") | .tagName" |
+            while read -r t; do
+              gh release delete "$t" -R "$REPO" --cleanup-tag -y || echo "::error::could not delete $t"
+            done || echo "::error::pruning failed"
