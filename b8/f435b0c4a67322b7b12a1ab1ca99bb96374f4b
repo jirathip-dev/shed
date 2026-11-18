@@ -1,0 +1,11 @@
+Decided: the listener crosses the exec as the new image's stdin; the PTY masters ride a connection serve opens to its own listener, taken from the backlog by its first byte.
+Because: crates/shed-server/src/handover.rs:189
+Rejected: the listener in the SCM_RIGHTS queue as the ADR drew it — on macOS it arrived flushed (accept gave ECONNABORTED, accepted sockets read EOF), measured with a Python receiver exec'd by serve.
+Decided: the reaper waits by pid (waitpid), so an inherited terminal keeps its real exit status.
+Because: crates/shed-core/src/terminal.rs:657
+Decided: the drain guard reads the method respond already parsed, not a second Value parse per request (bench-acp).
+Because: crates/shed-server/src/lib.rs:556
+Decided: merged staging 5767dce (#166, line_cap 12100); no code change, gates rerun at the merge head.
+Because: q1990
+Check: line-cap passes at 11814 / 12100 after the merge.
+Owner: serve can now restart into a new build without dropping any terminal; the line cap raise (q1990) has landed..
