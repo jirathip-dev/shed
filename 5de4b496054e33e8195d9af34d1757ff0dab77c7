@@ -1,0 +1,6 @@
+Decided: raise line_cap from 11000 to 11645 in ci/cap.toml with a cap-history note
+Because: "Raise shed's line cap (`ci/cap.toml` `line_cap`) from 11,000 to 11,645"
+Because: q1957
+Rejected: trimming PR #154 instead — it would drop the Linux scope path the #135 amendment asks for
+Check: sh scripts/line-cap.sh prints 10969 / cap 11645 and exits 0
+Owner: The size limit goes to 11,645 lines so the per-terminal memory limit can merge.
