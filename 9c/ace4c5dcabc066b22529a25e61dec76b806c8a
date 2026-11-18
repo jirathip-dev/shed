@@ -1,0 +1,23 @@
+Decided: copy drover's release.yml and release-sign.sh, renamed to shed, the identifier changed to shed
+Because: "Copy drover's `scripts/release-sign.sh` approach rather than re-deriving it."
+Decided: ship one asset per target, because shed is the only binary and the server runs as shed serve
+Because: "for every shipped binary (`shed`, and the server if separate)"
+Decided: each build job checks that --version names the tag's sha7 before anything is uploaded
+Because: crates/shed-proto/build.rs:20
+Decided: pin dtolnay/rust-toolchain to 1.97.1, the version rust-toolchain.toml sets
+Because: rust-toolchain.toml:3
+Rejected: building on the self-hosted macOS runner — the hosted macos-latest keeps the signing secrets off a shared host
+Check: a push to staging with no release secrets ends green with an annotation and publishes no release
+Owner: set the five release secrets in this repo's release environment; releases start once this is on main
+
+Decided: copy drover's release.yml and release-sign.sh, renamed to shed, the identifier changed to shed
+Because: "Copy drover's `scripts/release-sign.sh` approach rather than re-deriving it."
+Decided: ship one asset per target, because shed is the only binary and the server runs as shed serve
+Because: "for every shipped binary (`shed`, and the server if separate)"
+Decided: each build job checks that --version names the tag's sha7 before anything is uploaded
+Because: crates/shed-proto/build.rs:20
+Decided: fix round 1 merges staging and changes no code; the red macOS test is a flake this PR does not touch
+Because: crates/shed/tests/machines.rs:270
+Rejected: building on the self-hosted macOS runner — the hosted macos-latest keeps the signing secrets off a shared host
+Check: a push to staging with no release secrets ends green with an annotation and publishes no release
+Owner: set the five release secrets in this repo's release environment; releases start once this is on main
