@@ -2,7 +2,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use serde_json::Value;
-use shed_proto::{ErrorCode, Method, PROTOCOL, Request, Response, RpcError, VERSION, openrpc};
+use shed_proto::{
+    ErrorCode, Method, OLDEST_PROTOCOL, PROTOCOL, Request, Response, RpcError, VERSION, openrpc,
+};
 
 use crate::acp::events;
 use crate::screen::screen_updates;
@@ -35,13 +37,17 @@ fn markdown() -> String {
     let mut md = format!(
         "# shed protocol\n\n\
          <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->\n\n\
-         Version: `{VERSION}`, protocol `{PROTOCOL}`. Client and server must speak the same protocol.\n\n\
+         Version: `{VERSION}`, protocol `{PROTOCOL}`, oldest served `{OLDEST_PROTOCOL}`.\n\n\
          Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:\n\
          `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one\n\
          response per line; a request without an `id` is a notification and gets no response.\n\n\
-         Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`; another\n\
-         product or protocol is refused with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>;\n\
-         restart shed serve` (a peer that sends no `product` shows as `unnamed`, no `protocol` as 0).\n\n\
+         Every connection starts with `hello`. Any other method first is refused with `NO_HELLO`. Each side\n\
+         sends its `protocol` and the `oldest` it still speaks: a server the oldest protocol it serves, a client\n\
+         the oldest server protocol it accepts. A server on protocol N serves N and N-1 for one release window,\n\
+         and answers an N-1 client in N-1's shapes: its `hello` result carries `protocol` N-1 and no `oldest`.\n\
+         Another product, or ranges that don't overlap, are refused with `SHED_VERSION: client <sha> protocol\n\
+         <a>-<b> / server <sha> protocol <c>-<d>; update <side>` (a peer that sends no `product` shows as\n\
+         `unnamed`, no `protocol` as 0, no `oldest` as its `protocol`).\n\n\
          {}\n\n## Methods\n",
         prose(&doc, "TerminalInfo")
     );
@@ -80,7 +86,7 @@ fn markdown() -> String {
     }
     let refusal = Response::err(
         1.into(),
-        RpcError::version(&peer("02fcf97", PROTOCOL + 1), &peer("56de739", PROTOCOL)),
+        RpcError::version(&peer("02fcf97", PROTOCOL + 2), &peer("56de739", PROTOCOL)),
     );
     write!(md, "\n```json\n{}\n```\n", line(&refusal)).unwrap();
     md

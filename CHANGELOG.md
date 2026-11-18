@@ -208,6 +208,9 @@ All notable changes to this project are documented here. The format follows
 - `shed-proto` no longer turns on serde_json's `preserve_order` or pulls in `schemars` for its users: the
   JSON Schema derives and `openrpc()` sit behind its `schema` feature, off by default. `shed` and
   `shed-server` turn both on, so `shed schema`, `rpc.discover` and the wire JSON are unchanged.
+- `hello` checks a protocol range, not an exact match: shed speaks protocol 2 and still serves 1, answering
+  a protocol 1 client in protocol 1's shapes. Each side's `hello` carries `oldest`, and `SHED_VERSION`
+  names both ranges and which side to update.
 
 ### Fixed
 
