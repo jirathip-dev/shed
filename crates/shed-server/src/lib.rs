@@ -581,7 +581,7 @@ async fn dispatch(
             return Err(RpcError::version(&p, &Hello::ours()));
         }
         session.hello = true;
-        return json(&Hello::ours());
+        return json(&Hello::answer(&p));
     }
     if !session.hello && method != Method::Discover {
         return Err(RpcError::new(
@@ -931,8 +931,8 @@ impl Client {
     /// Connects to the server on `socket` and checks it speaks this protocol.
     ///
     /// # Errors
-    /// [`Error::Rpc`] with `SHED_VERSION: client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`
-    /// on a protocol mismatch; [`Error::Io`] when nothing listens.
+    /// [`Error::Rpc`] with `SHED_VERSION: client <sha> protocol <a>-<b> / server <sha> protocol <c>-<d>; update <side>`
+    /// when the protocol ranges do not overlap; [`Error::Io`] when nothing listens.
     pub fn connect(socket: &Path) -> Result<Self, Error> {
         Self::over(UnixStream::connect(socket)?)
     }

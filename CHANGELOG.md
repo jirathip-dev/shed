@@ -181,6 +181,9 @@ All notable changes to this project are documented here. The format follows
   `toolCall` as `call` (without `content`); `shed approve <t> <option> --request <id>` (the bridge's
   `{"approve": …, "request": …}` line) answers that request, and without it the oldest as before. `tool_call`
   carries ACP's `locations` (paths) and `raw_input` (left out over 4 KiB). All additive.
+- CI publishes signed, notarized builds after green pushes: `build-<sha7>` releases from main and
+  `build-staging-<sha7>` prereleases from staging, for macOS (arm64) and Linux (x86_64), with `SHA256SUMS`
+  (docs/releases.md).
 
 ### Changed
 
@@ -208,6 +211,9 @@ All notable changes to this project are documented here. The format follows
 - `shed-proto` no longer turns on serde_json's `preserve_order` or pulls in `schemars` for its users: the
   JSON Schema derives and `openrpc()` sit behind its `schema` feature, off by default. `shed` and
   `shed-server` turn both on, so `shed schema`, `rpc.discover` and the wire JSON are unchanged.
+- `hello` checks a protocol range, not an exact match: shed speaks protocol 2 and still serves 1, answering
+  a protocol 1 client in protocol 1's shapes. Each side's `hello` carries `oldest`, and `SHED_VERSION`
+  names both ranges and which side to update.
 
 ### Fixed
 
