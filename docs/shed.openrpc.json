@@ -7,7 +7,7 @@
   "methods": [
     {
       "name": "hello",
-      "description": "The handshake; must come first on every connection. Another product or protocol is refused with `SHED_VERSION`.",
+      "description": "The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -43,8 +43,21 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0,
-            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.",
+            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0. A server answers a client on an older protocol it still serves with that protocol.",
             "default": 0
+          }
+        },
+        {
+          "name": "oldest",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
           }
         }
       ],
@@ -1779,14 +1792,23 @@
             "type": "integer",
             "format": "uint32",
             "minimum": 0,
-            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0.",
+            "description": "The sender's [`PROTOCOL`]; a peer that sends none counts as protocol 0. A server answers a client on an older protocol it still serves with that protocol.",
             "default": 0
+          },
+          "oldest": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
           }
         },
         "required": [
           "version"
         ],
-        "description": "`hello` params and result: the sender's product, version, build and protocol."
+        "description": "`hello` params and result: the sender's product, version, build and protocol range."
       },
       "Policy": {
         "oneOf": [

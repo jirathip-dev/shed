@@ -4,7 +4,7 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixListener;
 
 use shed_server::Client;
-use shed_server::proto::{BUILD, PROTOCOL};
+use shed_server::proto::{BUILD, OLDEST_PROTOCOL, PROTOCOL};
 
 #[test]
 fn a_server_without_a_protocol_is_refused_by_the_client() {
@@ -26,7 +26,7 @@ fn a_server_without_a_protocol_is_refused_by_the_client() {
     assert_eq!(
         err.to_string(),
         format!(
-            "SHED_VERSION: client {BUILD} / server unnamed unknown: protocol {PROTOCOL} vs 0; restart shed serve"
+            "SHED_VERSION: client {BUILD} protocol {OLDEST_PROTOCOL}-{PROTOCOL} / server unnamed unknown protocol 0-0; update the server and restart shed serve"
         )
     );
     std::fs::remove_dir_all(dir).expect("clean");
