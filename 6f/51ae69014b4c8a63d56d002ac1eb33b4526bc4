@@ -1,0 +1,15 @@
+Decided: the release tag is built from main's head sha alone (git ls-remote refs/heads/main), so a staging tag cannot be named
+Because: "Staging releases are never installed by the timer."
+Decided: download, checksum and --version check run through curl, sha256sum/shasum and the staged binary, all via runner::output, no new dependency
+Because: crates/shed/src/update.rs:106
+Decided: handover.check on the staged binary before the swap; the swap keeps <exe>.prev as a hard link and renames <exe>.new into place
+Because: crates/shed/src/update.rs:133
+Decided: after the swap a pass asks serve to hand over and reports "handed over" on its answer; a serve still on the old build is asked again by the next pass
+Because: crates/shed/src/update.rs:94
+Decided: the updating test patches the build stamp in a copy of the test binary (re-signed ad hoc on macOS) instead of a build.rs SHED_BUILD override and a second cargo build
+Because: crates/shed/tests/update.rs:119
+Decided: job texts live in dist/ with {exe}, {path}, {log} placeholders; the serve texts are byte-identical to what install wrote before, so doctor does not flag existing installs
+Because: crates/shed/src/service.rs:75
+Rejected: reconnecting attach and watch — the line cap leaves no room; wait and events reconnect, which is what lanes script against
+Check: the two tests in crates/shed/tests/update.rs drive the real binary against a local git repo and a file:// release folder
+Owner: run shed install once per host after the manual first install so the five-minute update job exists
