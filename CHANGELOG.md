@@ -184,6 +184,13 @@ All notable changes to this project are documented here. The format follows
 - CI publishes signed, notarized builds after green pushes: `build-<sha7>` releases from main and
   `build-staging-<sha7>` prereleases from staging, for macOS (arm64) and Linux (x86_64), with `SHA256SUMS`
   (docs/releases.md).
+- `shed self-update` follows main's releases: it reads main's head, downloads that commit's `build-<sha7>` asset,
+  checks it against `SHA256SUMS` and its `--version`, asks serve whether the new build can take over, swaps the
+  binary and hands serve over without dropping terminals. No release yet, a bad checksum, another build or a
+  refused check leave the binary and serve as they were; staging releases are never installed. `--dry-run`,
+  `--pause` and `--resume`. `shed install` also installs the 5-minute job (`dev.shed.update`, or the
+  `shed-update.timer` user timer), and `shed doctor` has an `update` row. `shed wait` and `shed events`
+  reconnect when a handover closes their connection.
 - `shed serve` can hand over to a new build in place: the `handover` method checks the binary
   (`handover.check`), then replaces the server on the same process id, keeping the socket and every
   running terminal, ACP sessions included, with its screen, children and exit statuses. Clients see their

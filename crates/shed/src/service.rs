@@ -2,21 +2,28 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
 use shed_server::proto::{BUILD, LONG_VERSION};
+use shed_server::runner::ExitCode;
 use shed_server::{Client, Error, Paths};
 
 const LABEL: &str = "dev.shed.serve";
+const UPDATE: &str = "dev.shed.update";
+const PLIST: &str = include_str!("../../../dist/launchd/shed.plist");
+const UPDATE_PLIST: &str = include_str!("../../../dist/launchd/dev.shed.update.plist");
+const UNIT: &str = include_str!("../../../dist/systemd/shed.service");
+const UPDATE_UNIT: &str = include_str!("../../../dist/systemd/shed-update.service");
+const UPDATE_TIMER: &str = include_str!("../../../dist/systemd/shed-update.timer");
 
 struct Job {
-    path: PathBuf,
-    text: String,
+    label: &'static str,
+    files: Vec<(PathBuf, String)>,
     start: String,
     kick: String,
     stop: String,
     log: PathBuf,
-    loaded: &'static str,
+    loaded: String,
 }
 
-fn job() -> anyhow::Result<Job> {
+fn jobs() -> anyhow::Result<[Job; 2]> {
     let var = |k| {
         shed_server::config::var_os(k)
             .filter(|v| !v.is_empty())
@@ -24,83 +31,94 @@ fn job() -> anyhow::Result<Job> {
     };
     let home = var("HOME").context("HOME is not set")?;
     let exe = std::env::current_exe().context("this binary's path")?;
-    let (h, e) = (home.display(), exe.display());
+    let (h, e) = (home.display(), exe.display().to_string());
     let path =
         format!("{h}/.cargo/bin:{h}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
+    let fill = |text: &str, log: &Path| {
+        let text = text.replace("{exe}", &e).replace("{path}", &path);
+        text.replace("{log}", &log.display().to_string())
+    };
     if cfg!(target_os = "macos") {
-        let file = home.join(format!("Library/LaunchAgents/{LABEL}.plist"));
-        let log = home.join("Library/Logs/shed.log");
-        let l = log.display();
-        let text = format!(
-            r#"<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>{LABEL}</string>
-    <key>ProgramArguments</key><array><string>{e}</string><string>serve</string></array>
-    <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string></dict>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-    <key>ProcessType</key><string>Interactive</string>
-    <key>StandardOutPath</key><string>{l}</string>
-    <key>StandardErrorPath</key><string>{l}</string>
-</dict>
-</plist>
-"#
-        );
-        let start = format!("launchctl bootstrap gui/$(id -u) {}", file.display());
-        return Ok(Job {
-            kick: format!("launchctl kickstart gui/$(id -u)/{LABEL} 2>/dev/null || {start}"),
-            start,
-            stop: format!("launchctl bootout gui/$(id -u)/{LABEL}"),
-            path: file,
-            text,
-            log,
-            loaded: "launchctl list dev.shed.serve",
-        });
+        let job = |label, text, log: &str| {
+            let plist = home.join(format!("Library/LaunchAgents/{label}.plist"));
+            let log = home.join("Library/Logs").join(log);
+            let start = format!("launchctl bootstrap gui/$(id -u) {}", plist.display());
+            Job {
+                label,
+                files: vec![(plist, fill(text, &log))],
+                kick: format!("launchctl kickstart gui/$(id -u)/{label} 2>/dev/null || {start}"),
+                start,
+                stop: format!("launchctl bootout gui/$(id -u)/{label}"),
+                log,
+                loaded: format!("launchctl list {label}"),
+            }
+        };
+        return Ok([
+            job(LABEL, PLIST, "shed.log"),
+            job(UPDATE, UPDATE_PLIST, "shed-update.log"),
+        ]);
     }
-    let config = var("XDG_CONFIG_HOME").unwrap_or_else(|| home.join(".config"));
-    let text = format!(
-        "[Unit]\nDescription=shed: keeps coding-agent terminals alive\n\n[Service]\nExecStart={e} serve\n\
-         Environment=PATH={path}\nRestart=always\nOOMPolicy=continue\n\n[Install]\nWantedBy=default.target\n"
-    );
-    Ok(Job {
-        path: config.join("systemd/user/shed.service"),
-        text,
-        start: "systemctl --user daemon-reload && systemctl --user enable --now shed.service"
-            .into(),
-        kick: "systemctl --user reset-failed shed.service 2>/dev/null; systemctl --user start shed.service"
-            .into(),
-        stop: "systemctl --user disable --now shed.service".into(),
-        log: "journalctl --user -u shed.service".into(),
-        loaded: "systemctl --user is-active --quiet shed.service",
-    })
+    let units = var("XDG_CONFIG_HOME")
+        .unwrap_or_else(|| home.join(".config"))
+        .join("systemd/user");
+    let job = |label, base: &str, texts: &[(&str, &str)]| {
+        let unit = texts
+            .last()
+            .map_or(String::new(), |(ext, _)| format!("{base}.{ext}"));
+        let log = PathBuf::from(format!("journalctl --user -u {base}"));
+        Job {
+            label,
+            files: (texts.iter())
+                .map(|(ext, text)| (units.join(format!("{base}.{ext}")), fill(text, &log)))
+                .collect(),
+            start: format!(
+                "systemctl --user daemon-reload && systemctl --user enable --now {unit}"
+            ),
+            kick: format!(
+                "systemctl --user reset-failed {unit} 2>/dev/null; systemctl --user start {unit}"
+            ),
+            stop: format!("systemctl --user disable --now {unit}"),
+            log,
+            loaded: format!("systemctl --user is-active --quiet {unit}"),
+        }
+    };
+    let update = [("service", UPDATE_UNIT), ("timer", UPDATE_TIMER)];
+    Ok([
+        job(LABEL, "shed", &[("service", UNIT)]),
+        job(UPDATE, "shed-update", &update),
+    ])
 }
 
 pub fn install(force: bool) -> anyhow::Result<()> {
-    let job = job()?;
-    let file = job.path.display();
-    match std::fs::read_to_string(&job.path) {
-        Ok(old) if old == job.text => crate::out::line(format_args!("{file} is up to date")),
-        Ok(_) if !force => bail!("{file} has other contents; `shed install --force` replaces it"),
-        _ => {
-            let dir = job.path.parent().context("the job's directory")?;
-            std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
-            std::fs::write(&job.path, &job.text).with_context(|| file.to_string())?;
-            crate::out::line(format_args!("wrote {file}"));
+    let jobs = jobs()?;
+    for (path, text) in jobs.iter().flat_map(|j| &j.files) {
+        let file = path.display();
+        match std::fs::read_to_string(path) {
+            Ok(old) if old == *text => crate::out::line(format_args!("{file} is up to date")),
+            Ok(_) if !force => {
+                bail!("{file} has other contents; `shed install --force` replaces it")
+            }
+            _ => {
+                let dir = path.parent().context("the job's directory")?;
+                std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
+                std::fs::write(path, text).with_context(|| file.to_string())?;
+                crate::out::line(format_args!("wrote {file}"));
+            }
         }
     }
-    let restart = format!("{} 2>/dev/null; {}", job.stop, job.start);
-    sh("restarting", &restart)?;
-    crate::out::line(format_args!("restarted {LABEL}:\n  {restart}"));
+    for job in &jobs {
+        let restart = format!("{} 2>/dev/null; {}", job.stop, job.start);
+        sh(job.label, "restarting", &restart)?;
+        crate::out::line(format_args!("restarted {}:\n  {restart}", job.label));
+    }
     Ok(())
 }
 
-fn sh(what: &str, line: &str) -> anyhow::Result<()> {
+fn sh(label: &str, what: &str, line: &str) -> anyhow::Result<()> {
     let ran = shed_server::runner::output("sh", ["-c", line], &[])?;
     if !ran.status.success() {
         bail!(
-            "{what} {LABEL} failed ({}): {}; run:\n  {line}",
+            "{what} {label} failed ({}): {}; run:\n  {line}",
             ran.status,
             String::from_utf8_lossy(&ran.stderr).trim()
         );
@@ -109,28 +127,44 @@ fn sh(what: &str, line: &str) -> anyhow::Result<()> {
 }
 
 pub fn start_job() -> anyhow::Result<bool> {
-    match job() {
-        Ok(job) if job.path.exists() => sh("starting", &job.kick).map(|()| true),
+    match jobs() {
+        Ok([job, _]) if job.files.iter().all(|(p, _)| p.exists()) => {
+            sh(LABEL, "starting", &job.kick).map(|()| true)
+        }
         _ => Ok(false),
     }
 }
 
 pub fn uninstall() -> anyhow::Result<()> {
-    let job = job()?;
-    crate::out::line(format_args!(
-        "stop it and remove it with:\n  {}\n  rm {}",
-        job.stop,
-        job.path.display()
-    ));
+    crate::out::line("stop them and remove them with:");
+    for job in jobs()? {
+        crate::out::line(format_args!("  {}", job.stop));
+        for (path, _) in &job.files {
+            crate::out::line(format_args!("  rm {}", path.display()));
+        }
+    }
     Ok(())
 }
 
-pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
-    let job = job()?;
-    let (file, log) = (job.path.display(), job.log.display());
+fn written(job: &Job) -> Result<String, String> {
+    let mut names = Vec::new();
+    for (path, text) in &job.files {
+        let file = path.display();
+        match std::fs::read_to_string(path) {
+            Ok(old) if old == *text => names.push(file.to_string()),
+            Ok(_) => return Err(format!("{file} differs; fix: shed install --force")),
+            Err(e) => return Err(format!("{file}: {e}; fix: shed install")),
+        }
+    }
+    Ok(names.join(", "))
+}
+
+pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
+    let [job, update] = jobs()?;
+    let log = job.log.display();
     let socket = paths.socket.display();
     let fix = format!("fix: {}", job.start);
-    let loaded = shed_server::runner::output("sh", ["-c", job.loaded], &[])
+    let loaded = shed_server::runner::output("sh", ["-c", &job.loaded], &[])
         .is_ok_and(|o| o.status.success());
     let server = Client::connect(&paths.socket);
     let outside = format!(
@@ -138,14 +172,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         job.kick
     );
     let checks = [
-        (
-            "job",
-            match std::fs::read_to_string(&job.path) {
-                Ok(text) if text == job.text => Ok(file.to_string()),
-                Ok(_) => Err(format!("{file} differs; fix: shed install --force")),
-                Err(e) => Err(format!("{file}: {e}; fix: shed install")),
-            },
-        ),
+        ("job", written(&job)),
         (
             "loaded",
             if loaded {
@@ -174,6 +201,18 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
                 Err(Error::Rpc(e)) => Err(format!("{e}; fix: shed install")),
                 Err(_) => Err("no server to ask".into()),
             },
+        ),
+        (
+            "update",
+            written(&update).and_then(|_| match crate::update::last(paths) {
+                Some(why) if why.starts_with("rejected") || why.starts_with("deferred") => {
+                    Err(format!("{why}; see docs/self-update.md"))
+                }
+                why => Ok(format!(
+                    "{UPDATE}: {}",
+                    why.as_deref().unwrap_or("no pass yet")
+                )),
+            }),
         ),
         (
             "log",
@@ -212,5 +251,10 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<bool> {
         let mark = if fix.is_empty() { "ok" } else { "--" };
         crate::out::line(format_args!("{mark:<5} hooks    {agent}: {file}{fix}"));
     }
-    Ok(bad.is_empty() && hooks.is_ok() && checks.iter().all(|(_, r)| r.is_ok()))
+    let ok = bad.is_empty() && hooks.is_ok() && checks.iter().all(|(_, r)| r.is_ok());
+    Ok(if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    })
 }
