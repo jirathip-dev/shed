@@ -86,9 +86,8 @@ pub enum Error {
     NoMachine(String),
     /// The shed on a machine speaks another protocol.
     #[error(
-        "SHED_VERSION: shed {here} here, {there} on {machine}; install the same build on both, e.g. \
-         on {machine}: `cargo install --locked --git https://github.com/jirathip-dev/shed --rev {here} \
-         shed`, then restart its server"
+        "SHED_VERSION: shed {here} here, {there} on {machine}; put both on main's latest release: \
+         `shed self-update` on each (docs/self-update.md)"
     )]
     MachineVersion {
         /// The machine.

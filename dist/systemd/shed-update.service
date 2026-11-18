@@ -1,0 +1,7 @@
+[Unit]
+Description=shed: updates itself from main's releases
+
+[Service]
+Type=oneshot
+ExecStart={exe} self-update
+Environment=PATH={path}

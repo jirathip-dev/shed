@@ -4,6 +4,7 @@
 mod attach;
 mod out;
 mod service;
+mod update;
 mod watch;
 
 use shed_server::runner::ExitCode;
@@ -144,6 +145,7 @@ enum Command {
     Uninstall,
     Doctor,
     Setup(SetupArgs),
+    SelfUpdate(update::Args),
 }
 
 #[derive(Args)]
@@ -263,6 +265,7 @@ impl Server<'_> {
                 | Command::Uninstall
                 | Command::Doctor
                 | Command::Setup(_)
+                | Command::SelfUpdate(_)
         );
         if local && on.is_some() {
             bail!(
@@ -597,9 +600,9 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::File { action, path } => file(&server, json, &action, path)?,
         Command::Install { force } => service::install(force)?,
         Command::Uninstall => service::uninstall()?,
-        Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
-        Command::Doctor => {}
+        Command::Doctor => return service::doctor(&paths),
         Command::Setup(args) => setup(&paths, &args)?,
+        Command::SelfUpdate(a) => return update::self_update(&paths, &a),
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -939,7 +942,20 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
         output: args.output,
         timeout: args.timeout,
     };
-    let done: WaitResult = server.connect(None)?.call(Method::Wait, &params)?;
+    let started = shed_server::clock::now();
+    let done: WaitResult = again(server, |c| {
+        let gone = shed_server::clock::now()
+            .duration_since(started)
+            .as_secs_f64();
+        let timeout = params.timeout.map(|t| (t - gone).max(0.0));
+        c.call(
+            Method::Wait,
+            &WaitParams {
+                timeout,
+                ..params.clone()
+            },
+        )
+    })?;
     let t = &done.terminal;
     let state = t.reported.as_ref().map(|r| &r.state);
     print(json, &done, || match (done.outcome, t.exit) {
@@ -971,14 +987,43 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     }))
 }
 
-fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
+fn again<T>(
+    server: &Server,
+    mut call: impl FnMut(&mut Client) -> Result<T, shed_server::Error>,
+) -> anyhow::Result<T> {
     let mut client = server.connect(None)?;
-    let _: Value = client.call(Method::Events, params)?;
+    for _ in 0..100 {
+        match call(&mut client) {
+            Err(shed_server::Error::BadResponse(_) | shed_server::Error::Io(_)) => {
+                shed_server::clock::sleep(Duration::from_millis(100));
+                client = server.connect(None).unwrap_or(client);
+            }
+            done => return Ok(done?),
+        }
+    }
+    Ok(call(&mut client)?)
+}
+
+fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
+    let mut params = params.clone();
+    let mut client = server.connect(None)?;
+    let _: Value = client.call(Method::Events, &params)?;
     let mut out = io::stdout().lock();
-    for line in client.split().0.lines() {
+    let mut lines = client.split().0.lines();
+    loop {
+        let Some(line) = lines.next() else {
+            let Some(Ok(mut client)) = server.on.is_none().then(|| server.connect(None)) else {
+                return Ok(());
+            };
+            let _: Value = client.call(Method::Events, &params)?;
+            lines = client.split().0.lines();
+            continue;
+        };
         let mut line = line?;
+        let event = serde_json::from_str::<Event>(&line).ok();
+        params.since = event.as_ref().map(|e| e.seq).or(params.since);
         if let Some(m) = &server.on
-            && let Ok(mut event) = serde_json::from_str::<Event>(&line)
+            && let Some(mut event) = event
         {
             let prefix = format!("{}/", m.name);
             if server.linked && !event.name.starts_with(&prefix) {
@@ -992,7 +1037,6 @@ fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
         writeln!(out, "{line}")?;
         out.flush()?;
     }
-    Ok(())
 }
 
 fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Result<ExitCode> {
