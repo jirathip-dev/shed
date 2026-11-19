@@ -226,6 +226,9 @@ All notable changes to this project are documented here. The format follows
 - `hello` checks a protocol range, not an exact match: shed speaks protocol 2 and still serves 1, answering
   a protocol 1 client in protocol 1's shapes. Each side's `hello` carries `oldest`, and `SHED_VERSION`
   names both ranges and which side to update.
+- `shed agents add` installs an `npx` agent once under `agents/<id>/<version>/` with `npm install` and records
+  `node <its bin>`, so no `npm exec` stays resident beside the adapter; `rm` removes the install. Agents
+  recorded earlier as `npx -y …` keep working; `rm` and `add` move one to the new form.
 
 ### Fixed
 

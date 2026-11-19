@@ -60,6 +60,24 @@ fn platform() -> String {
     format!("{os}-{}", std::env::consts::ARCH)
 }
 
+fn npm_package(dir: &Path, name: &str, manifest: &Value) -> String {
+    let pkg = dir.join("npm").join(name).join("package");
+    std::fs::create_dir_all(&pkg).expect("npm package dir");
+    std::fs::write(pkg.join("package.json"), manifest.to_string()).expect("package.json");
+    std::fs::write(pkg.join("bin.js"), "console.log('npx-agent ran')\n").expect("bin.js");
+    let tgz = dir.join(format!("{name}.tgz"));
+    let tar = Command::new("tar")
+        .arg("-czf")
+        .arg(&tgz)
+        .arg("-C")
+        .arg(pkg.parent().expect("parent"))
+        .arg("package")
+        .status()
+        .expect("tar");
+    assert!(tar.success());
+    tgz.to_str().expect("utf-8").to_owned()
+}
+
 fn registry(dir: &Path) -> PathBuf {
     let pkg = dir.join("pkg");
     std::fs::create_dir_all(&pkg).expect("pkg dir");
@@ -82,11 +100,24 @@ fn registry(dir: &Path) -> PathBuf {
     let sum = sha256(&archive);
     let lister = json!({platform(): {"archive": url, "cmd": "./fake-acp", "sha256": sum,
         "args": ["--sessions"]}});
+    let npx = npm_package(
+        dir,
+        "npx-agent",
+        &json!({"name": "npx-agent", "version": "1.2.3", "bin": {"npx-agent": "./bin.js"}}),
+    );
+    let no_bin = npm_package(
+        dir,
+        "no-bin",
+        &json!({"name": "no-bin", "version": "1.0.0"}),
+    );
+    let missing = dir.join("missing.tgz");
     let registry = json!({"version": "1.0.0", "agents": [
         {"id": "fake", "version": "0.1.0", "distribution": {"binary": binary(&sum)}},
         {"id": "lister", "version": "0.1.0", "distribution": {"binary": lister}},
         {"id": "npx-agent", "version": "1.2.3", "distribution": {"npx": {
-            "package": "npx-agent@1.2.3", "args": ["--acp"], "env": {"NO_UPDATE": "1"}}}},
+            "package": npx, "args": ["--acp"], "env": {"NO_UPDATE": "1"}}}},
+        {"id": "no-bin", "version": "1.0.0", "distribution": {"npx": {"package": no_bin}}},
+        {"id": "npx-missing", "version": "1.0.0", "distribution": {"npx": {"package": missing}}},
         {"id": "uvx-agent", "version": "0.4.0", "distribution": {"uvx": {"package": "uvx-agent==0.4.0"}}},
         {"id": "bad-sum", "version": "0.1.0", "distribution": {"binary": binary("00")}},
     ]});
@@ -134,6 +165,12 @@ fn registry_installs_pinned_agents_from_a_fixture() {
     assert!(agent.is_file(), "{} unpacked", agent.display());
     ok(&dir, &["agents", "add", "npx-agent", "--registry", reg]);
     ok(&dir, &["agents", "add", "uvx-agent", "--registry", reg]);
+    let npx_bin = dir.join("agents/npx-agent/1.2.3/node_modules/npx-agent/bin.js");
+    let ran = Command::new("node")
+        .arg(&npx_bin)
+        .output()
+        .expect("node runs");
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "npx-agent ran\n");
     let list: Value = serde_json::from_str(&ok(&dir, &["--json", "agents"])).expect("JSON");
     let cmds: Vec<(&str, &Value)> = list
         .as_array()
@@ -148,14 +185,7 @@ fn registry_installs_pinned_agents_from_a_fixture() {
             ("fake", &json!([agent])),
             (
                 "npx-agent",
-                &json!([
-                    "env",
-                    "NO_UPDATE=1",
-                    "npx",
-                    "-y",
-                    "npx-agent@1.2.3",
-                    "--acp"
-                ])
+                &json!(["env", "NO_UPDATE=1", "node", npx_bin, "--acp"])
             ),
             ("uvx-agent", &json!(["uvx", "uvx-agent==0.4.0"])),
         ]
@@ -172,13 +202,25 @@ fn registry_installs_pinned_agents_from_a_fixture() {
     assert!(String::from_utf8_lossy(&bad.stderr).contains("sha256 mismatch"));
     let missing = shed(&dir, &["agents", "add", "nope", "--registry", reg]);
     assert!(String::from_utf8_lossy(&missing.stderr).contains("no agent \"nope\""));
+    for (id, says) in [
+        ("no-bin", "no-bin.tgz: no bin to run"),
+        ("npx-missing", "missing.tgz\"] failed"),
+    ] {
+        let failed = shed(&dir, &["agents", "add", id, "--registry", reg]);
+        assert!(!failed.status.success());
+        let err = String::from_utf8_lossy(&failed.stderr);
+        assert!(err.contains("agents: ") && err.contains(says), "{err}");
+        assert!(!ok(&dir, &["agents"]).contains(id));
+    }
 
     assert_eq!(
         ok(&dir, &["agents", "rm", "fake"]),
         "removed fake 0.1.0 (binary)\n"
     );
     assert!(!dir.join("agents/fake").exists());
-    assert!(ok(&dir, &["agents"]).starts_with("npx-agent 1.2.3 (npx)  env NO_UPDATE=1 npx"));
+    assert!(ok(&dir, &["agents"]).starts_with("npx-agent 1.2.3 (npx)  env NO_UPDATE=1 node"));
+    ok(&dir, &["agents", "rm", "npx-agent"]);
+    assert!(!dir.join("agents/npx-agent").exists());
 }
 
 #[test]

@@ -1443,7 +1443,7 @@ pub struct Agent {
     pub id: String,
     /// The pinned version.
     pub version: String,
-    /// The distribution it came from: `binary`, `npx` or `uvx`.
+    /// The distribution it came from: `binary`, `npx` (installed once with npm, run by `node`) or `uvx`.
     pub distribution: String,
     /// The ACP adapter's command line (`env K=V …` first when the registry sets variables).
     pub cmd: Vec<String>,
