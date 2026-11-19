@@ -3,10 +3,10 @@
 ## Summary
 
 Decision: the bridge gets one driver interface. Everything that is not an agent's wire format moves into a lane core shed owns (history, the session list, resume, cancel, model, policy, usage, limits, hibernation, states). ACP becomes one driver; a second one runs an agent's own JSON-lines mode, with Claude as its first provider (a record plus one 130-line file). It is off until a host writes one line in its own `providers/claude.toml`. Anthropic's terms allow it and the three checks pass (below).
-Slices: (1) split `acp.rs` into the lane core and the ACP driver, no behaviour change, +90; (2) shed's session index, history and resume for every driver, +95; (3) the stream driver with the test fake, +330; (4) the Claude provider, measured and smoke-tested live, +135. Total about +650 lines, so one cap raise from 12,100 to 12,850 before slice 1.
-Open questions: (1) drover and cooee pass shed their own adapter command, so "no drover or cooee change" needs the driver to keep their wrapper and swap only the adapter's part for `claude`: accept (recommended), or change both callers instead? (2) Policy `allow` becomes Claude's bypass mode, which drover's lane settings already ask for, with the lane's hook as the guard: accept (recommended), or auto mode with every prompt refused? (3) shed keeps a session's record and history 30 days after its last turn, and `shed rm` deletes them at once: accept (recommended)?
+Slices: (1) split `acp.rs` into the lane core and the ACP driver, no behaviour change, +90; (2) shed's session index, history and resume for every driver, +95; (3) the stream driver with the test fake, +330; (4) the Claude provider, measured and smoke-tested live, +135. Total about +650 lines, so one cap raise from 12,612 to 12,850 (q2159) before slice 1.
+Open questions, answered by the owner in q2159 (all three accepted as recommended): (1) drover and cooee pass shed their own adapter command, so "no drover or cooee change" needs the driver to keep their wrapper and swap only the adapter's part for `claude`: accept (recommended), or change both callers instead? (2) Policy `allow` becomes Claude's bypass mode, which drover's lane settings already ask for, with the lane's hook as the guard: accept (recommended), or auto mode with every prompt refused? (3) shed keeps a session's record and history 30 days after its last turn, and `shed rm` deletes them at once: accept (recommended)?
 
-**Status:** proposed. Supersedes [0006](../../decisions/0006-claude-direct.md)'s "stay on the adapter".
+**Status:** accepted by the owner (q2159: open questions 1, 2 and 3 accepted as recommended; cap 12,850). Supersedes [0006](../../decisions/0006-claude-direct.md)'s "stay on the adapter".
 Usage, shapes, boundaries, the statechart, the event map and the slices: [README.md](README.md).
 
 ## The question
@@ -116,8 +116,8 @@ Inside C:
 - **Later, each its own issue:** making the driver the default; Codex and others after a measurement
   (#128); `run` taking an environment instead of a whole adapter command, which would retire the
   `adapter` swap; resuming a crashed agent.
-- **The cap.** Staging is at 12,098 of 12,100. The slices add about 650 (README), so the orchestrator
-  files one raise to 12,850 before slice 1.
+- **The cap.** Staging is at 12,098 of 12,612 (#173). The slices add about 650 (README), so the
+  orchestrator files one raise to 12,850 (q2159) before slice 1.
 
 ## Terms (read 2026-11-19)
 

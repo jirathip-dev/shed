@@ -3,8 +3,8 @@
 ## Summary
 
 Decision: the bridge gets one driver interface. Everything that is not an agent's wire format moves into a lane core shed owns (history, the session list, resume, cancel, model, policy, usage, limits, hibernation, states). ACP becomes one driver; a second one runs an agent's own JSON-lines mode, with Claude as its first provider (a record plus one 130-line file). It is off until a host writes one line in its own `providers/claude.toml`. Anthropic's terms allow it and the three checks pass ([adr.md](adr.md)).
-Slices: (1) split `acp.rs` into the lane core and the ACP driver, no behaviour change, +90; (2) shed's session index, history and resume for every driver, +95; (3) the stream driver with the test fake, +330; (4) the Claude provider, measured and smoke-tested live, +135. Total about +650 lines, so one cap raise from 12,100 to 12,850 before slice 1.
-Open questions: (1) drover and cooee pass shed their own adapter command, so "no drover or cooee change" needs the driver to keep their wrapper and swap only the adapter's part for `claude`: accept (recommended), or change both callers instead? (2) Policy `allow` becomes Claude's bypass mode, which drover's lane settings already ask for, with the lane's hook as the guard: accept (recommended), or auto mode with every prompt refused? (3) shed keeps a session's record and history 30 days after its last turn, and `shed rm` deletes them at once: accept (recommended)?
+Slices: (1) split `acp.rs` into the lane core and the ACP driver, no behaviour change, +90; (2) shed's session index, history and resume for every driver, +95; (3) the stream driver with the test fake, +330; (4) the Claude provider, measured and smoke-tested live, +135. Total about +650 lines, so one cap raise from 12,612 to 12,850 (q2159) before slice 1.
+Open questions, answered by the owner in q2159 (all three accepted as recommended): (1) drover and cooee pass shed their own adapter command, so "no drover or cooee change" needs the driver to keep their wrapper and swap only the adapter's part for `claude`: accept (recommended), or change both callers instead? (2) Policy `allow` becomes Claude's bypass mode, which drover's lane settings already ask for, with the lane's hook as the guard: accept (recommended), or auto mode with every prompt refused? (3) shed keeps a session's record and history 30 days after its last turn, and `shed rm` deletes them at once: accept (recommended)?
 
 The question, the options, the terms and the three checks are in [adr.md](adr.md); the checks' script is
 [check.py](check.py). This file has how it reads, the shapes, the boundaries, the statechart, the map from
@@ -426,7 +426,7 @@ Each is its own issue and PR, in this order; lines are non-test lines under `cra
 | 3 | **The stream driver and the fake** | `Stream` and `driver` in the record; `drivers/stream.rs`; `choose` in `run`; `Stop` handling and `Asleep` in the core; `providers/plain.rs`; `build.rs` collects `providers/*.rs`; `tests/fake_stream.py` and `tests/stream.rs` (a turn, a tool, cancel then resume, model, hibernate and wake, `ask` and an unmapped meta option staying on ACP, a wrapper kept, the MCP file) | +330 |
 | 4 | **Claude** | `providers/claude.rs`, the `[stream]` table, `docs/acp.md`; `scripts/measure-claude-direct.py` gains a fourth mode, a real `shed` lane on the driver; the live smoke | +135 |
 
-Total about +650 on 12,098, against a cap of 12,100: **one raise to 12,850**, filed by the orchestrator
+Total about +650 on 12,098, against a cap of 12,612: **one raise to 12,850** (q2159), filed by the orchestrator
 before slice 1 (650 plus about 100 of margin). 0006 guessed +500 to 800 for a Claude-only module; this is
 in that range, but 130 lines of it are Claude's and the next provider is a record and about that many
 lines again.
