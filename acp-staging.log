@@ -1,0 +1,125 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling libc v0.2.191
+   Compiling memchr v2.8.3
+   Compiling zmij v1.0.23
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling strsim v0.11.1
+   Compiling serde_json v1.0.154
+   Compiling pin-project-lite v0.2.17
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling indexmap v2.14.2
+   Compiling itoa v1.0.18
+   Compiling foldhash v0.2.0
+   Compiling ident_case v1.0.1
+   Compiling serde v1.0.229
+   Compiling futures-core v0.3.34
+   Compiling heck v0.5.0
+   Compiling futures-io v0.3.34
+   Compiling unicode-segmentation v1.13.3
+   Compiling darling_core v0.24.1
+   Compiling convert_case v0.10.0
+   Compiling unicode-xid v0.2.6
+   Compiling ref-cast v1.0.27
+   Compiling rustix v1.1.6
+   Compiling getrandom v0.4.3
+   Compiling anyhow v1.0.104
+   Compiling serde_derive v1.0.229
+   Compiling futures-sink v0.3.34
+   Compiling futures-channel v0.3.34
+   Compiling strum_macros v0.28.0
+   Compiling derive_more-impl v2.1.1
+   Compiling darling_macro v0.24.1
+   Compiling darling v0.24.1
+   Compiling serde_with_macros v3.24.0
+   Compiling pin-project-internal v1.1.13
+   Compiling ref-cast-impl v1.0.27
+   Compiling futures-macro v0.3.34
+   Compiling serde_derive_internals v0.30.0
+   Compiling errno v0.3.14
+   Compiling utf8parse v0.2.2
+   Compiling cfg-if v1.0.5
+   Compiling once_cell v1.21.4
+   Compiling linux-raw-sys v0.12.1
+   Compiling futures-task v0.3.34
+   Compiling fastrand v2.5.0
+   Compiling bitflags v2.13.2
+   Compiling slab v0.4.12
+   Compiling parking v2.2.1
+   Compiling thiserror v2.0.21
+   Compiling futures-util v0.3.34
+   Compiling futures-lite v2.6.1
+   Compiling schemars_derive v1.2.3
+   Compiling tracing-core v0.1.36
+   Compiling anstyle-parse v1.0.0
+   Compiling signal-hook-registry v1.4.8
+   Compiling pin-project v1.1.13
+   Compiling serde_with v3.24.0
+   Compiling derive_more v2.1.1
+   Compiling strum v0.28.0
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v2.0.21
+   Compiling tokio-macros v2.7.2
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling dyn-clone v1.0.20
+   Compiling winnow v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling fixedbitset v0.5.7
+   Compiling colorchoice v1.0.5
+   Compiling smallvec v1.16.5
+   Compiling arrayvec v0.7.8
+   Compiling shed-proto v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed-proto)
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling bytes v1.12.1
+   Compiling anstream v1.0.0
+   Compiling vte v0.15.0
+   Compiling pty-process v0.5.4
+   Compiling futures-concurrency v7.7.1
+   Compiling tokio v1.54.1
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling schemars v1.2.3
+   Compiling agent-client-protocol-schema v1.15.1
+   Compiling tracing v0.1.44
+   Compiling futures v0.3.34
+   Compiling uuid v1.29.1
+   Compiling agent-client-protocol-derive v5.0.0
+   Compiling toml_datetime v1.1.3+spec-1.1.0
+   Compiling serde_spanned v1.1.3
+   Compiling shed-server v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed-server)
+   Compiling unicode-width v0.2.3
+   Compiling rustc-hash v2.1.3
+   Compiling clap_lex v1.1.1
+   Compiling clap_builder v4.6.7
+   Compiling shed-core v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed-core)
+   Compiling toml v1.2.1+spec-1.1.0
+   Compiling agent-client-protocol v5.0.0
+   Compiling clap_derive v4.6.7
+   Compiling clap v4.6.7
+   Compiling shed v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.57s
+     Running tests/acp.rs (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/target/debug/deps/acp-1bc3f780e9720cdf)
+
+running 1 test
+test an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it ... FAILED
+
+failures:
+
+---- an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it stdout ----
+
+thread 'an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it' (3118651) panicked at crates/shed/tests/acp.rs:40:5:
+shed ["wait", "w", "--until", "hibernated", "--timeout", "10"] failed: Output { status: ExitStatus(unix_wait_status(31744)), stdout: "w timeout\n", stderr: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 35 filtered out; finished in 10.06s
+
+error: test failed, to rerun pass `-p shed --test acp`

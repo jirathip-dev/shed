@@ -1,0 +1,25 @@
+   Compiling tokio v1.54.1
+   Compiling shed-core v0.0.0 (/home/user/.local/share/drover/work/shed/issue-178/crates/shed-core)
+   Compiling shed-server v0.0.0 (/home/user/.local/share/drover/work/shed/issue-178/crates/shed-server)
+   Compiling shed v0.0.0 (/home/user/.local/share/drover/work/shed/issue-178/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.69s
+     Running tests/acp.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/acp-1bc3f780e9720cdf)
+
+running 1 test
+test an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it ... FAILED
+
+failures:
+
+---- an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it stdout ----
+
+thread 'an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it' (3108697) panicked at crates/shed/tests/acp.rs:40:5:
+shed ["wait", "w", "--until", "hibernated", "--timeout", "10"] failed: Output { status: ExitStatus(unix_wait_status(31744)), stdout: "w timeout\n", stderr: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 35 filtered out; finished in 10.06s
+
+error: test failed, to rerun pass `-p shed --test acp`

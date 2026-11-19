@@ -1,0 +1,131 @@
+   Compiling strsim v0.11.1
+   Compiling shed-proto v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed-proto)
+   Compiling tokio v1.54.1
+   Compiling shed-server v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed-server)
+   Compiling darling_core v0.24.1
+   Compiling darling_macro v0.24.1
+   Compiling darling v0.24.1
+   Compiling serde_with_macros v3.24.0
+   Compiling serde_with v3.24.0
+   Compiling shed-core v0.0.0 (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/staging/crates/shed-core)
+   Compiling agent-client-protocol-schema v1.15.1
+   Compiling agent-client-protocol v5.0.0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.99s
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/.scratch/berth-impl-178/target/debug/deps/shed_server-d9c91d7740c29963)
+
+running 53 tests
+test drivers::acp::tests::a_text_chunk_skips_the_sdk_parse_and_matches_it ... ok
+test drivers::acp::tests::a_silent_turn_ends_as_no_response_after_the_timeout ... ok
+test events::bench::fanout ... ignored, a timing bench: scripts/bench-fanout.sh
+test drivers::acp::tests::the_default_watchdog_lets_a_turn_think_silently_past_two_minutes ... ok
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+test drivers::acp::tests::thought_chunks_or_stderr_lines_keep_a_turn_alive_past_the_timeout ... ok
+test events::tests::a_reconnect_after_text_floods_from_other_lanes_gets_every_state_event_in_order ... ok
+test events::tests::a_subscriber_more_than_the_ring_behind_has_missed_events ... ok
+test events::tests::an_idle_stream_beats_every_fifteen_seconds_only_when_asked ... ok
+test events::tests::events_emitted_while_a_write_is_pending_are_sent_without_another_event ... ok
+test events::tests::every_subscriber_shares_the_one_serialised_line ... ok
+test events::tests::since_beyond_seq_still_gets_new_events ... ok
+test events::tests::a_stale_since_starts_with_a_reset_and_a_reader_overrun_ends_with_lagged ... ok
+test events::tests::text_rings_go_once_the_main_ring_has_moved_past_them ... ok
+test handover::tests::a_failed_exec_leaves_every_terminal_running_in_the_same_process ... ok
+test events::tests::the_log_keeps_the_last_ring_for_since ... ok
+test hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte ... ok
+test input::tests::a_send_waits_for_a_persons_unsent_line_and_times_out_when_they_stay_silent ... ok
+test lane::tests::frames_are_one_line_of_json ... ok
+test lane::tests::the_hibernate_delay_fits_a_shorter_cache_and_the_variable_overrides_it ... ok
+test lane::sessions::tests::an_id_with_a_slash_or_dots_stays_in_the_folder ... ok
+test lane::transcript::tests::render_keeps_prompts_one_line_per_tool_call_and_replies ... ok
+test lane::transcript::tests::the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line ... ok
+test machines::tests::add_ls_rm_round_trip_through_the_file ... ok
+test machines::tests::bad_names_targets_and_files_are_refused ... ok
+test machines::tests::reconnects_follow_the_backoff_schedule ... ok
+test machines::tests::the_berth_release_config_loads ... ok
+test providers::tests::a_provider_is_one_data_file_and_no_rust ... ok
+test providers::tests::a_user_file_overrides_its_keys_and_a_bad_one_is_skipped ... ok
+test providers::tests::an_api_login_cache_is_likely_cold_after_five_idle_minutes_a_plan_one_after_sixty ... ok
+test providers::tests::claude_turn_tokens_are_read_from_the_quota_meta_and_a_malformed_one_is_none ... ok
+test providers::tests::the_limit_messages_give_their_reset_time ... ok
+test registry::tests::a_corrupt_state_file_is_refused_and_kept ... ok
+test registry::tests::a_running_old_bridge_s_transcript_is_carried_to_its_session_and_still_written ... ok
+test registry::tests::a_thousand_changes_in_a_second_write_at_most_three_times_and_end_on_disk ... ok
+test machines::tests::parallel_writes_never_share_a_temp_file ... ok
+test registry::tests::an_exited_terminal_past_the_limit_is_pruned_and_a_running_one_kept ... ok
+test registry::tests::leftovers_go_on_load_and_a_removed_terminal_leaves_nothing ... ok
+sample of 30 terminals: 475.721µs
+test registry::tests::each_shipped_rule_matches_its_golden_screen_and_unlabelled_terminals_never_check ... ok
+test registry::tests::seventy_acp_terminals_save_under_300_kb_without_commands_or_models ... ok
+test registry::tests::state_files_of_every_past_release_load ... ok
+test registry::tests::the_prune_pass_deletes_a_session_past_the_keep_time_and_leaves_a_younger_one ... ok
+skipped: this host limits terminals by scope
+test registry::tests::the_sampler_ends_a_child_over_the_limit_for_two_samples_and_leaves_the_rest ... ok
+test stats::tests::one_sample_a_minute_on_a_fake_clock_and_24_hours_kept ... ok
+test stats::tests::parses_macos_sysctl ... ok
+test tests::a_beating_peer_is_kept_and_one_that_never_beat_is_never_timed_out ... ok
+test tests::a_silent_peer_is_dropped_after_two_missed_heartbeats ... ok
+test drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps ... FAILED
+test drivers::acp::tests::a_permission_request_waits_for_approval_and_never_times_out ... ok
+test registry::tests::sample_time_report ... ok
+test events::tests::a_subscriber_that_never_reads_is_dropped_and_the_log_stays_bounded ... ok
+test drivers::acp::tests::a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild ... ok
+test drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern ... FAILED
+test drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits ... FAILED
+
+failures:
+
+---- drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps stdout ----
+
+thread 'drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps' (3137446) panicked at crates/shed-server/src/drivers/acp.rs:864:27:
+it hibernates once done
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern stdout ----
+
+thread 'drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern' (3137442) panicked at crates/shed-server/src/drivers/acp.rs:913:9:
+assertion failed: slept.is_some()
+
+---- drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits stdout ----
+
+thread 'drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits' (3137441) panicked at crates/shed-server/src/drivers/acp.rs:895:27:
+it hibernates once the child is gone
+
+
+failures:
+    drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits
+    drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern
+    drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps
+
+test result: FAILED. 49 passed; 3 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.98s
+
+error: test failed, to rerun pass `-p shed-server --lib`
+error: 1 target failed:
+    `-p shed-server --lib`

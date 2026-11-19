@@ -1,0 +1,14 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running tests/stream.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/stream-15b18137f3df6c2a)
+
+running 7 tests
+test mcp_servers_are_in_a_private_file_until_the_agent_s_first_line ... ok
+test a_caller_s_wrapper_is_kept_and_only_its_adapter_is_swapped ... ok
+test a_turn_and_a_tool_call_run_on_the_agent_s_own_lines_under_an_id_shed_made ... ok
+test a_model_switch_stops_the_agent_and_the_next_send_starts_it_with_the_model ... ok
+test cancel_stops_the_agent_and_the_next_send_resumes_the_same_session ... ok
+test policy_ask_and_an_unmapped_meta_option_stay_on_acp_and_say_why ... ok
+test an_idle_lane_hibernates_and_a_send_wakes_it_on_its_session ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.21s
+

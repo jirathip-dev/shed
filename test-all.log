@@ -1,0 +1,481 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.04s
+     Running unittests src/main.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/shed-9d45a89251abd55b)
+
+running 4 tests
+test watch::tests::a_narrow_terminal_hides_the_preview ... ok
+test watch::tests::the_preview_shows_the_screen_at_most_ten_times_a_second ... ok
+test watch::tests::enter_attaches_and_ctrl_backslash_comes_back_to_the_selection ... ok
+test watch::tests::the_list_follows_the_event_stream ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/acp.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/acp-025a5dba022d48bc)
+
+running 36 tests
+test a_model_switch_is_reported_and_the_next_turn_uses_it ... ok
+test a_turn_with_an_approval_matches_the_golden_event_log ... ok
+test a_v2_only_agent_is_refused_with_a_clear_message ... ok
+test a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event ... ok
+test a_lane_whose_bridge_died_while_serve_was_down_comes_back_exited ... ok
+test an_agent_that_fails_the_handshake_reports_error ... ok
+test agents_sessions_lists_shed_s_own_sessions_and_one_shed_never_ran_resumes_without_history ... ok
+test a_limited_terminal_runs_in_its_own_scope_its_children_ranked_first_and_none_outlives_it ... ok
+test an_unknown_update_kind_is_skipped ... ok
+test cancel_ends_a_turn_mid_way ... ok
+test each_change_of_the_slash_commands_is_one_session_event ... ok
+test an_expired_login_ends_the_turn_as_an_auth_error ... ok
+test a_prompt_wakes_the_agent_and_its_history_is_not_repeated ... ok
+test mcp_servers_pass_through_on_new_and_resume_with_their_values_hidden ... ok
+test each_session_records_start_to_ready_and_first_token_and_agents_gives_their_medians ... ok
+test mcp_secrets_stay_in_memory_through_a_hibernation ... ok
+test recorded_sessions_of_three_agents_read_and_draw_as_the_same_blocks ... ok
+test registry_installs_pinned_agents_from_a_fixture ... ok
+test resume_is_refused_without_load_session ... ok
+test resume_replays_the_history_once_marked_replay ... ok
+test rm_closes_the_session_once_and_only_when_the_agent_can ... ok
+test meta_reaches_the_agent_unchanged_on_new_on_a_wake_and_on_resume ... ok
+test sse_servers_pass_only_when_the_agent_advertises_them ... ok
+test the_deny_policy_rejects_permission_requests ... ok
+test a_child_over_the_memory_limit_is_ended_and_the_agent_carries_on ... ok
+test a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches ... ok
+test top_splits_the_memory_of_a_child_the_agent_started_into_work_and_lists_it_by_name ... ok
+test two_requests_in_flight_are_each_answered_by_id_and_tool_calls_carry_locations_and_raw_input ... ok
+test unknown_or_malformed_mcp_servers_are_refused ... ok
+test sends_during_a_wake_are_delivered_in_order ... ok
+test top_and_ls_show_a_hibernated_agent_as_hibernated ... ok
+test no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn ... ok
+test the_watchdog_ends_a_silent_turn_but_not_a_busy_one ... ok
+test a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_as_one_session ... ok
+test an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it ... FAILED
+test an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits ... ok
+
+failures:
+
+---- an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it stdout ----
+
+thread 'an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it' (3121670) panicked at crates/shed/tests/acp.rs:40:5:
+shed ["wait", "w", "--until", "hibernated", "--timeout", "10"] failed: Output { status: ExitStatus(unix_wait_status(31744)), stdout: "w timeout\n", stderr: "" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    an_api_login_sleeps_once_its_cache_is_likely_cold_and_a_switch_after_a_turn_says_it_drops_it
+
+test result: FAILED. 35 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.58s
+
+error: test failed, to rerun pass `-p shed --test acp`
+     Running tests/acp_bench.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/acp_bench-19685f4c3ef9a9e9)
+
+running 5 tests
+test hibernate ... ignored, a memory bench: scripts/bench-acp.sh
+test hibernate_live ... ignored, a live bench: needs SHED_BENCH_LIVE and a logged-in agent
+test replay ... ignored, a timing bench: scripts/bench-acp.sh
+test shed_only ... ignored, a timing bench: scripts/bench-acp.sh
+test throughput ... ignored, a timing bench: scripts/bench-acp.sh
+
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/backpressure.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/backpressure-9c211cfe3d276faf)
+
+running 2 tests
+test a_reconnect_with_since_after_5000_text_chunks_from_other_lanes_gets_every_state_event ... ok
+test a_subscriber_that_never_reads_100k_events_is_dropped_and_serve_stays_under_10_mb ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.34s
+
+     Running tests/cli.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/cli-579dda83b576b502)
+
+running 27 tests
+test a_test_temp_dir_is_removed_when_its_test_ends_pass_or_fail ... ok
+test a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_ranges ... ok
+test a_server_that_exits_before_it_is_ready_is_reported_as_an_exit ... ok
+test a_terminal_has_shed_set ... ok
+test hello_accepts_a_server_on_the_previous_protocol_and_reports_its_build ... ok
+test hello_prints_the_version ... ok
+test help_lists_every_command ... ok
+test a_child_started_inside_a_terminal_has_that_parent ... ok
+test attach_ends_when_the_program_exits ... ok
+test a_query_the_screen_answers_reaches_the_program_once_with_a_client_attached ... ok
+test run_autostart_starts_a_detached_server ... ok
+test killing_the_parent_ends_a_child_and_spares_one_started_to_outlive_it ... ok
+test notify_puts_one_note_in_an_idle_parent_and_none_while_it_works ... ok
+test schema_prints_the_committed_openrpc_document ... ok
+test serve_prints_one_ready_line_once_its_socket_accepts ... ok
+test run_size_sets_the_program_size_and_the_default_is_wide ... ok
+test version_flag_prints_the_version_and_the_git_sha ... ok
+test run_read_send_exit_ls_and_labels_match_the_golden ... ok
+test a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list ... ok
+test a_fake_agent_reports_by_escape_and_shed_state_and_wait_returns_on_each ... ok
+test wait_children_any_returns_on_the_next_child_with_news ... ok
+test program_status_osc_7501_keys_ids_probe_clear_and_lifetime ... ok
+test wait_children_all_returns_only_after_both_children_report_done ... ok
+test a_trust_prompt_on_screen_outranks_a_reported_working_until_it_leaves ... ok
+test attach_types_resizes_and_detaches_in_a_pty ... ok
+test timing_report ... ok
+test wait_matches_output_by_pattern_and_falls_back_to_idle ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.75s
+
+     Running tests/drain_bench.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/drain_bench-dea0d682145f2b92)
+
+running 1 test
+test drain_streams ... ignored, a timing report: scripts/bench-drain.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/handover.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/handover-9dfb5dd0240fa9b0)
+
+running 1 test
+test handover_keeps_the_terminals_their_screens_and_children_twice ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/idle_bench.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/idle_bench-b43d51a00f28c2da)
+
+running 1 test
+test idle_connections ... ignored, a timing report: scripts/bench-fanout.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/lock.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/lock-dec13fb496e1da5f)
+
+running 4 tests
+test a_state_save_that_never_finishes_holds_up_no_other_request ... ok
+test a_thousand_emits_from_one_lane_keep_list_p95_under_20_ms ... ok
+test a_terminal_that_never_reads_its_input_holds_up_no_other_and_is_reported_stuck ... ok
+test killing_a_program_that_ignores_sigterm_and_sighup_holds_up_no_list ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.06s
+
+     Running tests/machines.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/machines-76de71f56befbfc7)
+
+running 10 tests
+test events_on_a_machine_pass_reset_and_lagged_notices_through ... ok
+down added
+test connect_carries_the_protocol_over_a_socketpair ... ok
+test an_acp_agent_not_installed_on_the_machine_is_refused_with_the_machines_agents ... ok
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused ... ok
+test an_acp_session_is_started_waited_on_replied_approved_and_cancelled_on_a_machine_over_the_held_link ... ok
+test a_dropped_link_reconnects_and_the_merged_stream_loses_no_events ... ok
+test exec_and_file_return_exact_bytes_and_codes_here_and_over_the_held_link ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 10.08s
+
+     Running tests/reliability.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/reliability-7787644a0b6499b7)
+
+running 16 tests
+test a_first_start_menu_is_seen_read_and_answered ... ok
+test a_program_gets_default_signals_from_a_serve_that_ignores_sighup ... ok
+test a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over ... ok
+test a_terminal_replaced_under_the_same_name_gets_the_messages ... ok
+test malformed_requests_are_denied_with_a_reason_and_never_pass_the_handshake ... ok
+test kill_lets_a_sigterm_handler_run_before_the_hangup ... ok
+test kill_ends_only_its_own_tree_and_the_other_terminals_survive ... ok
+test the_next_start_ends_a_tree_a_killed_serve_left_behind ... ok
+test sigterm_to_serve_ends_every_tree_even_one_that_ignores_sighup ... ok
+test kill_ends_an_interactive_shell_without_waiting_out_the_grace ... ok
+test two_autostarts_at_once_share_one_server ... ok
+test sigterm_to_serve_with_20_shells_ends_in_under_a_second ... ok
+test serve_raises_a_lowered_soft_limit_so_many_sessions_spawn ... ok
+test a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream ... ok
+test emfile_fails_the_spawn_and_the_daemon_and_other_sessions_live_on ... ok
+test exited_sessions_release_their_fds ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.16s
+
+     Running tests/server.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/server-de07eee843185ac1)
+
+running 13 tests
+test a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest ... ok
+test jan_osc_9999_states_are_reported_with_their_source_and_garbled_ones_ignored ... ok
+test osc_7501_state_events_carry_the_keys_and_each_id ... ok
+test events_stream_in_seq_order_filter_by_label_and_replay_since ... ok
+test fifty_concurrent_multi_line_sends_each_arrive_whole ... ok
+test a_send_is_one_bracketed_paste_and_one_enter_only_when_the_program_turned_paste_on ... ok
+test rpc_discover_answers_the_openrpc_document_before_and_after_hello ... ok
+test a_kept_terminal_comes_back_as_a_shell_in_its_cwd ... ok
+test terminal_input_and_keys_arrive_and_a_readonly_client_is_refused ... ok
+test screen_watch_sends_the_full_screen_then_diffs_and_since_skips_the_full_one ... ok
+test screen_watch_sends_at_most_20_updates_a_second ... ok
+test terminal_resize_from_the_watcher_resizes_the_screen_and_the_program ... ok
+test run_ls_read_kill_over_the_socket_match_the_goldens ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+
+     Running tests/service.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/service-c361c06f8cfd2b0c)
+
+running 9 tests
+test install_force_over_a_unit_without_the_oom_policy_leaves_one_with_it ... ok
+test install_writes_the_five_minute_update_job ... ok
+test doctor_fails_when_the_server_runs_another_build ... ok
+test install_writes_the_job_once_and_refuses_other_contents_without_force ... ok
+test autostart_without_a_job_starts_a_detached_server ... ok
+test setup_hooks_report_nothing_outside_shed_and_doctor_lists_them ... ok
+test doctor_flags_a_server_outside_a_failed_job ... ok
+test doctor_reports_a_missing_job_and_server_with_their_fix_lines ... ok
+test autostart_starts_the_installed_job_and_no_server_of_its_own ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+
+     Running tests/stream.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/stream-428ff042092318bf)
+
+running 7 tests
+test a_caller_s_wrapper_is_kept_and_only_its_adapter_is_swapped ... ok
+test mcp_servers_are_in_a_private_file_until_the_agent_s_first_line ... ok
+test a_turn_and_a_tool_call_run_on_the_agent_s_own_lines_under_an_id_shed_made ... ok
+test a_model_switch_stops_the_agent_and_the_next_send_starts_it_with_the_model ... ok
+test cancel_stops_the_agent_and_the_next_send_resumes_the_same_session ... ok
+test policy_ask_and_an_unmapped_meta_option_stay_on_acp_and_say_why ... ok
+test an_idle_lane_hibernates_and_a_send_wakes_it_on_its_session ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.22s
+
+     Running tests/update.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/update-659032dca79349c9)
+
+running 2 tests
+test one_pass_installs_mains_release_and_hands_serve_over_keeping_the_terminals ... ok
+test no_release_a_staging_release_a_bad_checksum_and_another_build_change_nothing ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.17s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/shed_core-1cb54ec44f5cd5a2)
+
+running 27 tests
+test keys::tests::key_encoding_table ... ok
+test keys::tests::unknown_keys_are_errors ... ok
+test pattern::tests::rejects_broken_patterns ... ok
+test pattern::tests::matches_the_supported_subset ... ok
+test proctree::tests::parses_proc_stat ... ok
+test proctree::tests::parses_ps_lines ... ok
+test screen::tests::a_wide_character_at_the_last_column_wraps_whole ... ok
+test proctree::tests::tree_takes_the_group_descendants_and_known_orphans ... ok
+test screen::tests::cursor_moves_and_erases ... ok
+test screen::tests::a_repaint_fed_to_a_blank_screen_gives_the_same_screen ... ok
+test screen::tests::alternate_screen_keeps_the_primary_and_no_history ... ok
+test screen::tests::osc_7501_probe_gets_the_spec_reply_in_the_same_terminator ... ok
+test screen::tests::answers_cursor_position_queries ... ok
+test screen::tests::osc_7501_drops_garbled_reports ... ok
+test screen::tests::prints_lines_and_drops_trailing_blanks ... ok
+test screen::tests::osc_7501_reports_state_and_never_reaches_the_screen ... ok
+test screen::tests::resize_moves_rows_into_scrollback ... ok
+test screen::tests::jan_osc_9999_maps_waiting_to_blocked_and_ignores_garbage ... ok
+test screen::tests::rows_past_their_written_cells_read_as_blanks ... ok
+test screen::tests::osc_7501_reads_every_state_and_key ... ok
+test screen::tests::scrollback_is_bounded ... ok
+test screen::tests::sgr_sets_the_pen_and_snapshot_groups_cells_into_runs ... ok
+test screen::tests::wide_and_combining_characters_keep_the_box_edge_in_its_column ... ok
+test screen::tests::wraps_at_the_last_column ... ok
+test screen::tests::scrollback_bytes_are_bounded_by_whole_lines ... ok
+test history::tests::the_log_stays_under_twice_the_cap_and_restores_the_tail ... ok
+test history::tests::tail_reads_only_the_tail_and_skips_a_cut_character ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+     Running tests/drain_raw.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/drain_raw-4000acc26c99fece)
+
+running 1 test
+test drain_raw ... ignored, a timing report: scripts/bench-drain.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/history.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/history-f5aff39834b69a52)
+
+running 2 tests
+test a_terminal_starts_from_its_log ... ok
+test throughput_report_with_full_scrollback ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.30s
+
+     Running tests/terminal.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/terminal-f404faeec969a769)
+
+running 9 tests
+test kill_ends_the_whole_tree ... ok
+test subscribers_get_raw_output_until_the_pty_closes ... ok
+test a_subscriber_that_never_reads_is_dropped_while_the_program_runs ... ok
+test reads_printf_output_exactly ... ok
+test scrollback_is_bounded ... ok
+test kill_ends_the_group_when_the_process_table_cannot_be_read ... ok
+test passes_cwd_env_and_input ... ok
+test resize_reaches_the_program_and_the_screen ... ok
+test kill_escalates_to_sigkill_after_the_grace_period ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.36s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/shed_proto-d1ed6d5ac8572aa4)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/protocol_doc/main.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/protocol_doc-147e61a4aaaf74c3)
+
+running 8 tests
+test method_names_round_trip ... ok
+test acp::emit_params_round_trip ... ok
+test version_refusal_reads_as_specified ... ok
+test every_method_is_in_the_openrpc_document ... ok
+test the_schemas_refuse_broken_messages ... ok
+test every_golden_message_validates_against_its_schema ... ok
+test render::protocol_md_matches_the_types ... ok
+test render::openrpc_json_matches_the_types ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/lib.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/shed_server-fd14f61d72d583a8)
+
+running 55 tests
+test drivers::acp::tests::a_text_chunk_skips_the_sdk_parse_and_matches_it ... ok
+test drivers::acp::tests::a_silent_turn_ends_as_no_response_after_the_timeout ... ok
+test drivers::stream::tests::a_lane_stays_on_acp_for_each_reason_it_cannot_be_served_whole ... ok
+test drivers::stream::tests::a_served_lane_keeps_the_wrapper_and_maps_each_option_by_its_type ... ok
+test events::bench::fanout ... ignored, a timing bench: scripts/bench-fanout.sh
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+still thinking
+test drivers::acp::tests::thought_chunks_or_stderr_lines_keep_a_turn_alive_past_the_timeout ... ok
+test drivers::acp::tests::the_default_watchdog_lets_a_turn_think_silently_past_two_minutes ... ok
+test events::tests::a_subscriber_more_than_the_ring_behind_has_missed_events ... ok
+test events::tests::a_reconnect_after_text_floods_from_other_lanes_gets_every_state_event_in_order ... ok
+test events::tests::an_idle_stream_beats_every_fifteen_seconds_only_when_asked ... ok
+test events::tests::events_emitted_while_a_write_is_pending_are_sent_without_another_event ... ok
+test events::tests::every_subscriber_shares_the_one_serialised_line ... ok
+test events::tests::since_beyond_seq_still_gets_new_events ... ok
+test events::tests::a_stale_since_starts_with_a_reset_and_a_reader_overrun_ends_with_lagged ... ok
+test events::tests::text_rings_go_once_the_main_ring_has_moved_past_them ... ok
+test handover::tests::a_failed_exec_leaves_every_terminal_running_in_the_same_process ... ok
+test events::tests::the_log_keeps_the_last_ring_for_since ... ok
+test hooks::tests::setup_adds_its_hooks_once_and_remove_restores_the_file_byte_for_byte ... ok
+test lane::sessions::tests::an_id_with_a_slash_or_dots_stays_in_the_folder ... ok
+test lane::tests::frames_are_one_line_of_json ... ok
+test lane::tests::the_hibernate_delay_fits_a_shorter_cache_and_the_variable_overrides_it ... ok
+test lane::transcript::tests::render_keeps_prompts_one_line_per_tool_call_and_replies ... ok
+test lane::transcript::tests::the_preview_draws_an_unknown_status_plain_and_keeps_each_call_on_its_first_line ... ok
+test machines::tests::add_ls_rm_round_trip_through_the_file ... ok
+test machines::tests::bad_names_targets_and_files_are_refused ... ok
+test input::tests::a_send_waits_for_a_persons_unsent_line_and_times_out_when_they_stay_silent ... ok
+test machines::tests::reconnects_follow_the_backoff_schedule ... ok
+test machines::tests::the_berth_release_config_loads ... ok
+test providers::tests::a_provider_is_one_data_file_and_no_rust ... ok
+test providers::tests::a_user_file_overrides_its_keys_and_a_bad_one_is_skipped ... ok
+test providers::tests::an_api_login_cache_is_likely_cold_after_five_idle_minutes_a_plan_one_after_sixty ... ok
+test providers::tests::claude_turn_tokens_are_read_from_the_quota_meta_and_a_malformed_one_is_none ... ok
+test providers::tests::the_limit_messages_give_their_reset_time ... ok
+test registry::tests::a_corrupt_state_file_is_refused_and_kept ... ok
+test registry::tests::a_running_old_bridge_s_transcript_is_carried_to_its_session_and_still_written ... ok
+test machines::tests::parallel_writes_never_share_a_temp_file ... ok
+test registry::tests::an_exited_terminal_past_the_limit_is_pruned_and_a_running_one_kept ... ok
+test registry::tests::a_thousand_changes_in_a_second_write_at_most_three_times_and_end_on_disk ... ok
+test registry::tests::leftovers_go_on_load_and_a_removed_terminal_leaves_nothing ... ok
+test registry::tests::each_shipped_rule_matches_its_golden_screen_and_unlabelled_terminals_never_check ... ok
+test registry::tests::seventy_acp_terminals_save_under_300_kb_without_commands_or_models ... ok
+test registry::tests::state_files_of_every_past_release_load ... ok
+test registry::tests::the_prune_pass_deletes_a_session_past_the_keep_time_and_leaves_a_younger_one ... ok
+skipped: this host limits terminals by scope
+test registry::tests::the_sampler_ends_a_child_over_the_limit_for_two_samples_and_leaves_the_rest ... ok
+test stats::tests::one_sample_a_minute_on_a_fake_clock_and_24_hours_kept ... ok
+test stats::tests::parses_macos_sysctl ... ok
+test tests::a_beating_peer_is_kept_and_one_that_never_beat_is_never_timed_out ... ok
+test tests::a_silent_peer_is_dropped_after_two_missed_heartbeats ... ok
+sample of 30 terminals: 579.751µs
+test registry::tests::sample_time_report ... ok
+test drivers::acp::tests::a_permission_request_waits_for_approval_and_never_times_out ... ok
+test drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps ... FAILED
+test events::tests::a_subscriber_that_never_reads_is_dropped_and_the_log_stays_bounded ... ok
+test drivers::acp::tests::a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild ... ok
+test drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern ... FAILED
+test drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits ... FAILED
+
+failures:
+
+---- drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps stdout ----
+
+thread 'drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps' (3132551) panicked at crates/shed-server/src/drivers/acp.rs:858:27:
+it hibernates once done
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern stdout ----
+
+thread 'drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern' (3132547) panicked at crates/shed-server/src/drivers/acp.rs:907:9:
+assertion failed: slept.is_some()
+
+---- drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits stdout ----
+
+thread 'drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits' (3132546) panicked at crates/shed-server/src/drivers/acp.rs:889:27:
+it hibernates once the child is gone
+
+
+failures:
+    drivers::acp::tests::a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits
+    drivers::acp::tests::a_limit_line_is_rate_limited_only_for_an_agent_with_a_pattern
+    drivers::acp::tests::a_tool_call_in_progress_runs_past_both_timeouts_then_the_lane_is_done_and_sleeps
+
+test result: FAILED. 51 passed; 3 failed; 1 ignored; 0 measured; 0 filtered out; finished in 2.89s
+
+error: test failed, to rerun pass `-p shed-server --lib`
+     Running tests/client.rs (/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/client-e278fe516cc0903a)
+
+running 1 test
+test a_server_without_a_protocol_is_refused_by_the_client ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests shed_core
+error: doctest failed, to rerun pass `-p shed-core --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2024 --crate-type lib --color auto --crate-name shed_core --test crates/shed-core/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/shed/issue-178/crates/shed-core '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--deny=clippy::todo' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' --warn=missing_docs '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern pty_process=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libpty_process-49b8558d7399b925.rlib --extern rustix=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/librustix-83f2dffb206d24c1.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libserde_json-02371f1fb22a3fe5.rlib --extern shed_core=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libshed_core-aea44940a36d41bd.rlib --extern thiserror=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libthiserror-7247be36f5e22db9.rlib --extern tokio=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libtokio-5bd88e68d06443ad.rlib --extern unicode_width=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libunicode_width-63514cc171d22de6.rlib --extern vte=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libvte-ad8667587819deac.rlib -L dependency=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests shed_proto
+error: doctest failed, to rerun pass `-p shed-proto --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2024 --crate-type lib --color auto --crate-name shed_proto --test crates/shed-proto/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/shed/issue-178/crates/shed-proto '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--deny=clippy::todo' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' --warn=missing_docs '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern schemars=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libschemars-69d142b7ee8739b2.rlib --extern serde=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libserde-21e696067748f8fc.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libserde_json-02371f1fb22a3fe5.rlib --extern shed_proto=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libshed_proto-04ae1f603bb3408d.rlib -L dependency=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps -C embed-bitcode=no --cfg 'feature="schema"' --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values("schema"))' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+   Doc-tests shed_server
+error: doctest failed, to rerun pass `-p shed-server --doc`
+
+Caused by:
+  could not execute process `rustdoc --edition=2024 --crate-type lib --color auto --crate-name shed_server --test crates/shed-server/src/lib.rs --test-run-directory /home/user/.local/share/drover/work/shed/issue-178/crates/shed-server '--warn=clippy::pedantic' '--deny=clippy::unwrap_used' --forbid=unsafe_code '--deny=clippy::unimplemented' '--deny=clippy::todo' '--deny=clippy::print_stdout' '--deny=clippy::print_stderr' '--deny=clippy::panic' --warn=missing_docs '--deny=clippy::let_underscore_must_use' '--deny=clippy::indexing_slicing' '--deny=clippy::expect_used' '--deny=clippy::dbg_macro' '--deny=clippy::as_conversions' '--deny=clippy::allow_attributes_without_reason' --extern agent_client_protocol=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libagent_client_protocol-22e2e7ce8d3434e2.rlib --extern futures=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libfutures-48d1c4c001dd42da.rlib --extern rustix=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/librustix-83f2dffb206d24c1.rlib --extern serde=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libserde-21e696067748f8fc.rlib --extern serde_json=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libserde_json-02371f1fb22a3fe5.rlib --extern shed_core=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libshed_core-aea44940a36d41bd.rlib --extern shed_proto=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libshed_proto-04ae1f603bb3408d.rlib --extern shed_server=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libshed_server-9626aff4dbd9568b.rlib --extern thiserror=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libthiserror-7247be36f5e22db9.rlib --extern tokio=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libtokio-5bd88e68d06443ad.rlib --extern toml=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps/libtoml-b1efd85c1fce4aea.rlib -L dependency=/home/user/.local/share/drover/work/.build/berth-impl-178/debug/deps -C embed-bitcode=no --check-cfg 'cfg(docsrs,test)' --check-cfg 'cfg(feature, values())' --error-format human` (never executed)
+
+Caused by:
+  No such file or directory (os error 2)
+error: 5 targets failed:
+    `-p shed --test acp`
+    `-p shed-server --lib`
+    `-p shed-core --doc`
+    `-p shed-proto --doc`
+    `-p shed-server --doc`
