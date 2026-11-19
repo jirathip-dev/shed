@@ -1,0 +1,21 @@
+Decided: the ACP driver hands the lane Heard values through Driver::heard and Driver::open instead of a channel, since the SDK runs the session inside connect_with.
+Because: crates/shed-server/src/drivers/acp.rs:428
+Decided: the driver owns the prompt request ids and the permission responders; the lane owns the turn count and the asks it shows, and Driver::forget drops the open turns when the lane fails.
+Because: "A driver never emits an event, reports a state, touches the transcript or reads a provider pattern."
+Decided: TurnEnd carries the prompt reply's _meta, not tokens, so the token sums stay with the record's patterns in the lane; Heard::Replayed and Heard::Note stay until slice 2.
+Because: crates/shed-server/src/lane.rs:394
+Rejected: Stop and Start.model now — nothing would construct or read them before the stream driver (slice 3), and clippy fails dead code.
+Decided: the CLI calls drivers::acp::sessions for agents sessions, as the registry calls drivers::acp::close and mcp_servers; slice 2 replaces it with the index.
+Because: "Out of scope: the session index (slice 2)"
+Decided: the inline ACP lane tests live in drivers/acp.rs (they speak ACP and name a claude record); only their two setup helpers changed to build a Lane and call talk.
+Because: "`lane*` imports no protocol crate and names no agent."
+Check: git diff --stat origin/staging -- docs crates/shed/tests is two import lines; every moved test runs under its new path (drivers::acp::tests, lane::tests, lane::transcript::tests).
+Check: src/ net +295 against the ADR's +90: the core and driver each need their own imports and the Heard, Tool, Ask, Start, Opened and Driver types.
+Owner: acp.rs is now the lane core and an ACP driver in separate files, behaving exactly as before, so a second driver can plug in.
+
+Decided: bench-acp.sh builds the head's bench at the base with --no-run and, if it fails, restores the base's own acp_bench.rs, so a moved import no longer fails the base build.
+Because: "Tests only move with their code; the only edits in test files are import paths."
+Rejected: a shed_server::acp re-export alias for the old path — the spec says it is gone.
+Rejected: building Input frames by hand in the bench — it would re-implement production code in a test.
+Check: CI bench-acp at 6792ae9 builds both sides and reports base and head medians.
+Owner: the CI speed comparison no longer breaks when a test's import path moves; the bench numbers come from CI.
