@@ -1,0 +1,14 @@
+machine: macOS-27.2-arm64-arm-64bit, 12 cpus; node v24.22.2
+adapter: @agentclientprotocol/claude-agent-acp@0.107.0 (Claude Agent SDK 0.3.323); claude: 2.1.323 (Claude Code)
+
+npx: ready 1338 ms, first update 2848 ms, wake to first update 3035 ms, awake 556336 KiB (median of 1; RSS per run [556336])
+    111936 KiB  npm exec @agentclientprotocol/claude-agent-acp@0.107.0   
+    132128 KiB  node ~/.npm/_npx/52b1605b61e16a45/node_modules/.bin/claude-agent-acp
+    312272 KiB  ~/.npm/_npx/52b1605b61e16a45/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude --output-format s
+
+node: ready 1032 ms, first update 2578 ms, wake to first update 3104 ms, awake 436016 KiB (median of 1; RSS per run [436016])
+    131168 KiB  node $TMP/npm/node_modules/@agentclientprotocol/claude-agent-acp/dist/index.js
+    304848 KiB  $TMP/npm/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude --output-format stream-json --verbose
+
+stream-json: ready 644 ms, first update 2192 ms, wake to first update 2366 ms, awake 311392 KiB (median of 1; RSS per run [311392])
+    311392 KiB  $TMP/npm/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude -p --input-format stream-json --outpu

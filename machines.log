@@ -1,0 +1,41 @@
+   Compiling shed-proto v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-170/crates/shed-proto)
+   Compiling shed-server v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-170/crates/shed-server)
+   Compiling shed v0.0.0 (/Users/jkmacmini/.local/share/drover/work/shed/issue-170/crates/shed)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.39s
+     Running tests/machines.rs (/Users/jkmacmini/.local/share/herdsman/work/.build/berth-impl-170/debug/deps/machines-4107bd3927e46b18)
+
+running 10 tests
+down added
+test connect_carries_the_protocol_over_a_socketpair ... ok
+test on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint ... ok
+test machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s ... FAILED
+test events_on_a_machine_pass_reset_and_lagged_notices_through ... ok
+test over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused ... FAILED
+test an_acp_agent_not_installed_on_the_machine_is_refused_with_the_machines_agents ... ok
+test on_a_machine_run_read_kill_and_ls_reach_the_remote_server_and_versions_must_match ... ok
+test an_acp_session_is_started_waited_on_replied_approved_and_cancelled_on_a_machine_over_the_held_link ... ok
+test a_dropped_link_reconnects_and_the_merged_stream_loses_no_events ... ok
+test exec_and_file_return_exact_bytes_and_codes_here_and_over_the_held_link ... ok
+
+failures:
+
+---- machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s stdout ----
+
+thread 'machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s' (864632094) panicked at crates/shed/tests/machines.rs:632:9:
+{"at":1795051828,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":98147,"cpus":12,"uptime_s":0,"terminals":{"exited":1,"working":1},"history":[{"at":1795051828,"load_per_cpu":0.0,"mem_pressure_pct":0,"swap_used_mb":0,"disk_free_mb":98153,"cpus":12,"uptime_s":0,"terminals":{}}]}
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused stdout ----
+
+thread 'over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused' (864632098) panicked at crates/shed/tests/machines.rs:270:43:
+why it is down
+
+
+failures:
+    machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s
+    over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_version_is_refused
+
+test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.17s
+
+error: test failed, to rerun pass `-p shed --test machines`
+exit 101
