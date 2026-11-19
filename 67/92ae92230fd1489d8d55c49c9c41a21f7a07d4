@@ -1,0 +1,6 @@
+Decided: bench-acp.sh builds the head's bench at the base with --no-run and, if it fails, restores the base's own acp_bench.rs, so a moved import no longer fails the base build.
+Because: "Tests only move with their code; the only edits in test files are import paths."
+Rejected: a shed_server::acp re-export alias for the old path — the spec says it is gone.
+Rejected: building Input frames by hand in the bench — it would re-implement production code in a test.
+Check: CI bench-acp at 6792ae9 builds both sides and reports base and head medians.
+Owner: the CI speed comparison no longer breaks when a test's import path moves; the bench numbers come from CI.
