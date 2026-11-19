@@ -1,0 +1,5 @@
+Decided: the replay bench seeds shed's sessions/sess-1.jsonl and resumes from it; the agent gets an empty history
+Because: "replays shed's own transcript (events marked `\"replay\": true`), then tells the agent to load the session"
+Rejected: keeping the agent-history replay bench — this PR drops the agent's replay, so it can only count 0
+Check: stable (macos) resume test saw exited vs running after a restart; staging c423d35 failed identically (job 135285333884), unchanged here
+Owner: The replay speed check now measures shed replaying its own saved history, which is what a resume does now.
