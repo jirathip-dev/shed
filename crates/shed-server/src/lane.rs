@@ -30,13 +30,14 @@ use shed_proto::{
     AcpSession, AcpUsage, ApprovalOption, EventKind, Method, Provider, Reported, StateParams,
     Tokens,
 };
+use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWriteExt as _, BufReader};
 use tokio::process::Child;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::time::Instant;
 use transcript::{Preview, clean};
 use writer::{Out, Writer};
 
-use crate::drivers::acp;
+use crate::drivers::{acp, stream};
 use crate::{Client, Error};
 
 /// The states only an ACP lane reports, beside `working`, `done` and `error`.
@@ -78,12 +79,15 @@ pub fn pty_socket(socket: &Path, name: &str) -> PathBuf {
     socket.with_file_name(format!("pty-{name}.sock"))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum Heard {
     Session {
         model: Option<String>,
         models: Option<Vec<[String; 2]>>,
         commands: Option<Vec<[String; 3]>>,
     },
+    Prompted,
     Text(String),
     Tool(Tool),
     Plan(Vec<Value>),
@@ -99,21 +103,29 @@ pub(crate) enum Heard {
     Note(String),
 }
 
+#[derive(Deserialize)]
 pub(crate) struct Tool {
     pub id: String,
     pub title: Option<String>,
     pub kind: Option<String>,
     pub status: Option<String>,
+    #[serde(default)]
     pub locations: Vec<PathBuf>,
     pub raw_input: Option<Value>,
 }
 
+#[derive(Deserialize)]
 pub(crate) struct Ask {
     pub id: String,
     pub title: Option<String>,
     pub tool_call: String,
     pub options: Vec<ApprovalOption>,
     pub call: Option<Value>,
+}
+
+pub(crate) enum Stop {
+    No,
+    Yes,
 }
 
 #[derive(Default)]
@@ -138,8 +150,8 @@ pub(crate) trait Driver {
     async fn heard(&mut self) -> Option<Heard>;
     fn gone(&self) -> impl Future<Output = ()> + 'static;
     fn prompt(&mut self, text: &str) -> Result<(), String>;
-    fn cancel(&mut self) -> Result<(), String>;
-    fn model(&mut self, model: &str) -> Result<(), String>;
+    fn cancel(&mut self) -> Result<Stop, String>;
+    fn model(&mut self, model: &str) -> Result<Stop, String>;
     fn approve(&mut self, request: &str, option: Option<&str>) -> Result<(), String>;
     fn forget(&mut self);
 }
@@ -165,6 +177,8 @@ pub(crate) struct Lane {
     open: Vec<String>,
     ended: Option<String>,
     child: Option<String>,
+    restart: bool,
+    sleep_after: Option<Duration>,
 }
 
 impl Lane {
@@ -195,6 +209,8 @@ impl Lane {
             open: Vec::new(),
             ended: None,
             child: None,
+            restart: false,
+            sleep_after: None,
         }
     }
 
@@ -229,8 +245,8 @@ impl Lane {
     }
 
     fn fail(&mut self, why: String, driver: &mut impl Driver) -> Result<(), String> {
-        let cancelled = self.input(Input::Cancel, driver);
         self.turns = 0;
+        let cancelled = self.input(Input::Cancel, driver);
         driver.forget();
         if let Some((_, resets)) = self.rules.limit_hit(&why) {
             self.state("rate-limited", resets);
@@ -326,11 +342,27 @@ impl Lane {
                 self.settle();
             }
             Input::Cancel => {
-                driver.cancel()?;
+                if let Stop::Yes = driver.cancel()? {
+                    self.restart = true;
+                }
+                if self.restart && self.turns > 0 {
+                    self.turns = 0;
+                    self.open.clear();
+                    let text = std::mem::take(&mut self.reply);
+                    let stop_reason = "cancelled".to_owned();
+                    self.emit(EventKind::Reply { text, stop_reason });
+                    (self.ended, self.child) = (Some("cancelled".to_owned()), None);
+                    self.settle();
+                }
                 self.asks.clear();
             }
             Input::Name(name) => return self.send(Out::Name(name)),
-            Input::Model(model) => driver.model(&model)?,
+            Input::Model(model) => {
+                if let Stop::Yes = driver.model(&model)? {
+                    self.restart = true;
+                    return self.set_model(model);
+                }
+            }
         }
         Ok(())
     }
@@ -368,6 +400,7 @@ impl Lane {
                 return self.say(clean(&format!("shed: skipped a session/update: {why}")));
             }
             Heard::Note(line) => return self.say(line),
+            Heard::Prompted => {}
         }
         Ok(())
     }
@@ -438,6 +471,11 @@ impl Lane {
         self.send(Out::Emit(shown))
     }
 
+    fn set_model(&mut self, model: String) -> Result<(), String> {
+        let models = Some(self.shown.models.clone());
+        self.session(Some(model), models, None)
+    }
+
     fn show_usage(&mut self) {
         if let Some(usage) = &mut self.shown.usage {
             (usage.turn, usage.total) = (self.tokens.map(|t| t.0), self.tokens.map(|t| t.1));
@@ -476,6 +514,17 @@ impl Lane {
         Ok(())
     }
 
+    async fn asleep(&mut self, inputs: &mut UnboundedReceiver<Input>) -> Option<Input> {
+        if std::mem::take(&mut self.restart) {
+            let after = self.sleep_after.unwrap_or(Duration::MAX);
+            if let Ok(input) = tokio::time::timeout(after, inputs.recv()).await {
+                return input;
+            }
+        }
+        self.state("hibernated", None);
+        inputs.recv().await
+    }
+
     pub(crate) async fn drive<D: Driver>(
         &mut self,
         driver: &mut D,
@@ -503,15 +552,21 @@ impl Lane {
             self.input(input, driver)?;
         }
         let set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
-        let sleep_after =
+        self.sleep_after =
             hibernate_after(set, self.shown.cache_lifetime).filter(|_| opened.resumable);
         let (mut typing, mut polled) = (true, shed_core::clock::tokio_now());
         let gone = driver.gone();
         tokio::pin!(gone);
         loop {
+            if self.restart && self.turns == 0 {
+                return Ok(true);
+            }
             tokio::select! {
                 biased;
-                Some(heard) = driver.heard() => self.hear(heard, driver)?,
+                heard = driver.heard() => match heard {
+                    Some(heard) => self.hear(heard, driver)?,
+                    None => return Ok(false),
+                },
                 input = inputs.recv(), if typing => match input {
                     Some(input) => self.input(input, driver)?,
                     None => typing = false,
@@ -531,7 +586,7 @@ impl Lane {
                         self.fail("no response".to_owned(), driver)?;
                     } else if self.turns == 0 && typing && (start.resumed || self.prompted)
                         && ["done", "idle"].contains(&self.last.0.as_str())
-                        && sleep_after.is_some_and(|d| quiet >= d)
+                        && self.sleep_after.is_some_and(|d| quiet >= d)
                     {
                         return Ok(true);
                     }
@@ -564,6 +619,10 @@ fn hibernate_after(set: Option<String>, cache_lifetime: Option<u64>) -> Option<D
 /// the session (MCP servers included) in memory; the next input starts the agent again, loads the session
 /// and then delivers it.
 ///
+/// With `stream` it runs the stream driver instead, by the record's `stream` table: `cmd` is then the
+/// agent's command, and a cancel or a model switch stops the agent until the next input. `why`, the reason
+/// a lane stays on ACP, is its first line.
+///
 /// A failure to start is reported as the terminal's state `error`, with the reason as its note.
 ///
 /// # Errors
@@ -575,9 +634,17 @@ pub fn bridge(
     cwd: &Path,
     (socket, state): (&Path, &Path),
     (agent, policy, rules): (&str, Policy, Provider),
+    (stream, why): (bool, Option<&str>),
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
-    let result = run(cmd, cwd, (socket, state), (agent, policy, rules), &name);
+    let launch = if stream {
+        let record = rules.stream.clone();
+        Launch::Stream(Box::new(stream::Launch::from_env(cmd, record, state)?))
+    } else {
+        Launch::Acp(acp::Launch::from_env()?)
+    };
+    let at = (socket, state);
+    let result = run(cmd, cwd, at, (agent, policy, rules), (&name, launch, why));
     if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
         let report = Reported {
             state: "error".to_owned(),
@@ -599,14 +666,30 @@ pub(crate) fn stop(mut child: Child) {
     }
 }
 
+pub(crate) fn echo(stderr: impl AsyncRead + Send + Unpin + 'static, stirred: Arc<AtomicBool>) {
+    tokio::spawn(async move {
+        let (mut from, mut to, mut line) =
+            (BufReader::new(stderr), tokio::io::stderr(), Vec::new());
+        while from.read_until(b'\n', &mut line).await.is_ok_and(|n| n > 0) {
+            stirred.store(true, Ordering::Relaxed);
+            to.write_all(&line).await.ok();
+            line.clear();
+        }
+    });
+}
+
+enum Launch {
+    Acp(acp::Launch),
+    Stream(Box<stream::Launch>),
+}
+
 fn run(
     cmd: &[String],
     cwd: &Path,
     (socket, state): (&Path, &Path),
     (agent, policy, rules): (&str, Policy, Provider),
-    name: &str,
+    (name, mut launch, why): (&str, Launch, Option<&str>),
 ) -> Result<i32, Error> {
-    let mut launch = acp::Launch::from_env()?;
     let reported = Arc::default();
     let lent = pty_socket(socket, name);
     let taken = crate::handover::take_over(io::stderr(), 1).map(|(fds, _)| fds.into_iter().next());
@@ -641,6 +724,9 @@ fn run(
     let writer = runtime.spawn(writer.run(outs));
     runtime.spawn(writer::read_input(typed));
     let mut lane = Lane::new(out, policy, rules, turn_idle_timeout());
+    if let Some(why) = why {
+        lane.say(format!("shed: on ACP: {why}")).ok();
+    }
     let result = runtime.block_on(async move {
         let resumed = resume.is_some();
         let session = resume.unwrap_or_default();
@@ -650,14 +736,23 @@ fn run(
             deliver: None,
         };
         loop {
-            let drive = async |d: &mut acp::Acp| lane.drive(d, &mut inputs, cwd, start).await;
-            let (mut child, slept) = acp::run(cmd, cwd, &mut launch, drive).await?;
+            let (mut child, slept) = match &mut launch {
+                Launch::Acp(launch) => {
+                    let drive =
+                        async |d: &mut acp::Acp| lane.drive(d, &mut inputs, cwd, start).await;
+                    acp::run(cmd, cwd, launch, drive).await?
+                }
+                Launch::Stream(launch) => {
+                    let drive =
+                        async |d: &mut stream::Agent| lane.drive(d, &mut inputs, cwd, start).await;
+                    stream::run(launch, drive).await?
+                }
+            };
             if !slept {
                 return Ok(child.wait().await?.code().unwrap_or(1));
             }
             stop(child);
-            lane.state("hibernated", None);
-            let Some(input) = inputs.recv().await else {
+            let Some(input) = lane.asleep(&mut inputs).await else {
                 return Ok(0);
             };
             let session = lane.shown.id.clone();

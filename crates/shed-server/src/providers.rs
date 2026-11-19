@@ -1,5 +1,6 @@
 //! What shed knows about each agent, as data: the built-in `providers/<name>.toml` files, each overridden
-//! key by key by `<name>.toml` in the user's providers folder, which can also add agents.
+//! key by key by `<name>.toml` in the user's providers folder, which can also add agents; and the line
+//! formats of the stream driver, `providers/<wire>.rs`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -10,9 +11,16 @@ use serde::{Deserialize, Serialize};
 use toml::Table;
 
 use crate::Error;
+use crate::drivers::stream::Wire;
 use crate::proto::{AgentInfo, Medians, Provider};
 
 const BUILT_IN: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/providers.rs"));
+type MakeWire = fn() -> Box<dyn Wire>;
+include!(concat!(env!("OUT_DIR"), "/wires.rs"));
+
+pub(crate) fn wire(name: &str) -> Option<Box<dyn Wire>> {
+    WIRES.iter().find(|w| w.0 == name).map(|w| (w.1)())
+}
 
 fn parse(text: &str) -> Result<Table, String> {
     text.parse().map_err(|e: toml::de::Error| e.to_string())

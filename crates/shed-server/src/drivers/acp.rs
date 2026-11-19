@@ -30,7 +30,7 @@ use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::Error;
-use crate::lane::{Ask, Driver, Heard, Opened, Start, Tool};
+use crate::lane::{Ask, Driver, Heard, Opened, Start, Stop, Tool};
 
 type AcpResult<T> = Result<T, agent_client_protocol::Error>;
 type Asked = Responder<RequestPermissionResponse>;
@@ -50,7 +50,7 @@ pub fn mcp_servers(entries: &[Value]) -> Result<Vec<McpServer>, String> {
     entries.iter().enumerate().map(parse).collect()
 }
 
-fn redacted(servers: &[McpServer]) -> Vec<Value> {
+pub(crate) fn redacted(servers: &[McpServer]) -> Vec<Value> {
     let mut shown = servers.to_vec();
     for server in &mut shown {
         let values: Vec<&mut String> = match server {
@@ -374,7 +374,7 @@ impl Driver for Acp {
         Ok(())
     }
 
-    fn cancel(&mut self) -> Result<(), String> {
+    fn cancel(&mut self) -> Result<Stop, String> {
         if !self.prompts.is_empty() {
             let cancel = CancelNotification::new(self.id.clone());
             self.cx
@@ -384,14 +384,14 @@ impl Driver for Acp {
         while let Some((_, asked)) = self.asks.pop_front() {
             answer(asked, None)?;
         }
-        Ok(())
+        Ok(Stop::No)
     }
 
-    fn model(&mut self, model: &str) -> Result<(), String> {
+    fn model(&mut self, model: &str) -> Result<Stop, String> {
         let Some(option) = self.launch.model.clone() else {
             let none = "shed: the agent offers no models".to_owned();
             self.notes.push_back(Heard::Note(none));
-            return Ok(());
+            return Ok(Stop::No);
         };
         let model = SessionConfigOptionValue::value_id(model.to_owned());
         let set = SetSessionConfigOptionRequest::new(self.id.clone(), option, model);
@@ -403,6 +403,7 @@ impl Driver for Acp {
                     .ok();
                 Ok(())
             })
+            .map(|()| Stop::No)
             .map_err(|e| e.to_string())
     }
 
@@ -478,16 +479,7 @@ async fn connect<T>(
         stirred.store(true, Ordering::Relaxed);
         Some((line, (lines, stirred)))
     });
-    let echo = stirred.clone();
-    tokio::spawn(async move {
-        let (mut from, mut to, mut line) =
-            (BufReader::new(stderr), tokio::io::stderr(), Vec::new());
-        while from.read_until(b'\n', &mut line).await.is_ok_and(|n| n > 0) {
-            echo.store(true, Ordering::Relaxed);
-            to.write_all(&line).await.ok();
-            line.clear();
-        }
-    });
+    crate::lane::echo(stderr, stirred.clone());
     let outgoing = sink::unfold(stdin, async |mut stdin, line: String| {
         stdin.write_all(format!("{line}\n").as_bytes()).await?;
         stdin.flush().await?;
@@ -561,7 +553,9 @@ fn oneshot<T>(
 }
 
 pub(crate) fn close(info: &TerminalInfo) -> Result<(), Error> {
-    let id = info.session.as_ref().map(|s| s.id.clone());
+    let id = (info.session.as_ref())
+        .filter(|s| s.driver != "stream")
+        .map(|s| s.id.clone());
     let Some(id) = id.filter(|id| !id.is_empty() && info.acp.is_some()) else {
         return Ok(());
     };

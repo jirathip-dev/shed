@@ -1,4 +1,5 @@
-//! Builds in every provider record in `src/providers/*.toml`, so a new agent is one data file.
+//! Builds in every provider record in `src/providers/*.toml` and every line format in
+//! `src/providers/*.rs`, so a new agent is one data file and, for the stream driver, one Rust file.
 
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
@@ -9,16 +10,31 @@ fn main() -> io::Result<()> {
     let mut files: Vec<PathBuf> = fs::read_dir(&dir)?
         .map(|e| e.map(|e| e.path()))
         .collect::<io::Result<_>>()?;
-    files.retain(|f| f.extension().is_some_and(|e| e == "toml"));
     files.sort();
-    let entries: Vec<String> = files
-        .iter()
-        .map(|f| {
-            let name = f.file_stem().unwrap_or_default().to_string_lossy();
-            format!("({name:?}, include_str!({:?}))", f.display().to_string())
-        })
-        .collect();
+    let of = |ext: &str, entry: &dyn Fn(String, String) -> String| {
+        let files = files
+            .iter()
+            .filter(|f| f.extension().is_some_and(|e| e == ext));
+        let entries: Vec<String> = files
+            .map(|f| {
+                let name = f.file_stem().unwrap_or_default().to_string_lossy();
+                entry(name.into_owned(), f.display().to_string())
+            })
+            .collect();
+        entries.concat()
+    };
+    let records = of("toml", &|name, path| {
+        format!("({name:?}, include_str!({path:?})), ")
+    });
+    let mods = of("rs", &|name, path| {
+        format!("#[path = {path:?}]\nmod {name};\n")
+    });
+    let wires = of("rs", &|name, _| format!("({name:?}, {name}::wire), "));
     let out = env::var_os("OUT_DIR").ok_or_else(|| io::Error::other("OUT_DIR is unset"))?;
-    let list = format!("&[{}]\n", entries.join(", "));
-    fs::write(Path::new(&out).join("providers.rs"), list)
+    fs::write(
+        Path::new(&out).join("providers.rs"),
+        format!("&[{records}]\n"),
+    )?;
+    let wires = format!("{mods}const WIRES: &[(&str, MakeWire)] = &[{wires}];\n");
+    fs::write(Path::new(&out).join("wires.rs"), wires)
 }

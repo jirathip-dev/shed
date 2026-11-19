@@ -34,7 +34,11 @@ fn folder(path: &Path) -> io::Result<()> {
         .create(dir)
 }
 
-pub(super) fn create(path: &Path, append: bool) -> io::Result<File> {
+pub(crate) fn mcp(state: &Path, id: &str) -> PathBuf {
+    file(state, id, "mcp.json")
+}
+
+pub(crate) fn create(path: &Path, append: bool) -> io::Result<File> {
     folder(path)?;
     let mut open = fs::OpenOptions::new();
     open.create(true).mode(0o600);
