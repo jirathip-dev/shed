@@ -3942,7 +3942,7 @@
           },
           "distribution": {
             "type": "string",
-            "description": "The distribution it came from: `binary`, `npx` or `uvx`."
+            "description": "The distribution it came from: `binary`, `npx` (installed once with npm, run by `node`) or `uvx`."
           },
           "cmd": {
             "type": "array",
