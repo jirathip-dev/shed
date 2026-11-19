@@ -1,0 +1,7 @@
+Decided: no code change for the red macOS checks; merged origin/staging twice so CI runs on staging's exact code
+Because: "No product code changes in this issue."
+Decided: restated the ADR's cap lines on staging after the raise landed: 12,112 of 12,850
+Because: docs/architecture/agent-drivers/adr.md:119
+Rejected: changing handover.rs or machines.rs here — the failing tests differ each run and the diff is docs only
+Check: git diff --quiet origin/staging HEAD -- crates scripts ci exits 0; staging's macOS CI is green
+Owner: Unrelated tests failed by chance on the Mac runner; the approved plan is unchanged and only its cap figures were refreshed.
