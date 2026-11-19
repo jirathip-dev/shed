@@ -4026,6 +4026,19 @@
             "description": "The arguments that set the model (`{model}`).",
             "default": []
           },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "The models `shed model` offers: id and name.",
+            "default": []
+          },
           "mcp": {
             "type": "array",
             "items": {
@@ -4052,6 +4065,32 @@
             },
             "description": "Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.",
             "default": {}
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Each tool's ACP kind and the input key that is its title.",
+            "default": {}
+          },
+          "plan": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "The tool, and its input key, whose list is the plan.",
+            "default": null
           }
         },
         "description": "How the stream driver starts an agent in its own JSON-lines mode."

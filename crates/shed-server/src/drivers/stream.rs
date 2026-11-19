@@ -16,7 +16,7 @@ use crate::lane::{Driver, Heard, Opened, Start, Stop, sessions};
 
 pub(crate) trait Wire: Send {
     fn prompt(&self, text: &str) -> String;
-    fn heard(&mut self, line: &Value) -> Vec<Heard>;
+    fn heard(&mut self, line: &Value, record: &Stream) -> Vec<Heard>;
     fn mcp(&self, servers: &[Value]) -> String;
 }
 
@@ -190,7 +190,7 @@ impl Agent {
 
     fn hear(&mut self, line: &str) {
         let heard = match serde_json::from_str(line) {
-            Ok(line) => self.wire.heard(&line),
+            Ok(line) => self.wire.heard(&line, &self.launch.record),
             Err(e) => vec![Heard::Skipped(e.to_string())],
         };
         for heard in heard {
@@ -216,7 +216,10 @@ impl Driver for Agent {
         (self.launch.cwd, self.launch.resumed) = (cwd.to_owned(), start.resumed);
         self.spawn()?;
         let pid = (self.child.as_ref()).and_then(|c| c.id().and_then(|p| i32::try_from(p).ok()));
-        let (model, models) = (self.launch.model.clone(), Some(Vec::new()));
+        let (model, models) = (
+            self.launch.model.clone(),
+            Some(self.launch.record.models.clone()),
+        );
         Ok(Opened {
             id: self.launch.session.clone(),
             resumable: true,

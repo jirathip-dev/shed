@@ -93,6 +93,7 @@ pub(crate) enum Heard {
     Plan(Vec<Value>),
     Mode(String),
     Usage(Option<AcpUsage>),
+    Limit(Option<String>),
     Ask(Ask),
     TurnEnd {
         stop: String,
@@ -347,7 +348,20 @@ impl Lane {
                 }
                 if self.restart && self.turns > 0 {
                     self.turns = 0;
-                    self.open.clear();
+                    for id in std::mem::take(&mut self.open) {
+                        let (title, kind) = self.titles.get(&id).cloned().unwrap_or_default();
+                        let (status, locations, raw_input) =
+                            ("failed".to_owned(), Vec::new(), None);
+                        let call = EventKind::ToolCall {
+                            id,
+                            title,
+                            status,
+                            kind,
+                            locations,
+                            raw_input,
+                        };
+                        self.emit(call);
+                    }
                     let text = std::mem::take(&mut self.reply);
                     let stop_reason = "cancelled".to_owned();
                     self.emit(EventKind::Reply { text, stop_reason });
@@ -388,6 +402,7 @@ impl Lane {
                 self.shown.usage = usage;
                 self.show_usage();
             }
+            Heard::Limit(resets) => self.state("rate-limited", resets),
             Heard::Ask(ask) => return self.ask(ask, driver),
             Heard::TurnEnd { stop, error, meta } => {
                 self.turns = self.turns.saturating_sub(1);

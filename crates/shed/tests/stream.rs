@@ -190,7 +190,7 @@ fn cancel_stops_the_agent_and_the_next_send_resumes_the_same_session() {
     );
     assert_eq!(
         ok(&lab.dir, &["read", "c"]),
-        "> slow\nthinking\n> more\n[default] you said: more\n"
+        "> slow\n[tool] Sleep (failed)\nthinking\n> more\n[default] you said: more\n"
     );
 }
 
