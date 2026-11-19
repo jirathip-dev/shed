@@ -1,0 +1,15 @@
+Decided: a lane goes to the stream driver only through drivers::choose, one pure function called once in the server's run; the bridge trusts --stream or --why=<reason>
+Because: "A lane goes to the stream driver only when it can be served whole"
+Decided: the Prompted gate and the one retry with new live in drivers/stream.rs; the core only learns Stop and asleep
+Because: crates/shed-server/src/drivers/stream.rs:202
+Decided: "exits at once" means stdout closed before the agent's first line, not a timer
+Rejected: a start timeout for the resume retry — it would race a slow start and needs the clock outside clock.rs
+Decided: the reason line is said only when the record sets driver = "stream", so a host without it sees no change
+Because: "The built-in records carry no `driver` key: nothing changes for a host that has not turned it on."
+Decided: rm sends no ACP close through a stream lane's command
+Because: crates/shed-server/src/drivers/acp.rs:557
+Rejected: a special path for a model sent while asleep — it wakes once and stops again; same events, fewer lines
+Check: cargo test -p shed --test stream covers turn, tool, cancel+resume, model (with the resume-then-new retry), hibernate+wake, ask and unmapped meta on ACP, wrapper kept, MCP file 0600 then removed
+Check: src net +472 against the ADR's +330; with the raise merged (#185) line-cap.sh gives 13025 / 13250
+Because: q2192
+Owner: the stream driver works with the test agent and now fits the raised line cap
