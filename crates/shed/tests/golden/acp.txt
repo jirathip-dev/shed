@@ -20,7 +20,7 @@ $ shed read a --lines 2
 you said: hi
 $ shed events --label run=golden --since 0
 {"seq":1,"name":"a","labels":{"run":"golden"},"event":"started"}
-{"seq":2,"name":"a","labels":{"run":"golden"},"event":"session","id":"sess-1","model":"fast","models":[["fast","Fast"],["smart","Smart"]]}
+{"seq":2,"name":"a","labels":{"run":"golden"},"event":"session","id":"sess-1","driver":"acp","model":"fast","models":[["fast","Fast"],["smart","Smart"]]}
 {"seq":3,"name":"a","labels":{"run":"golden"},"event":"state","state":"working","from":"reported"}
 {"seq":4,"name":"a","labels":{"run":"golden"},"event":"turn","prompt":"tool"}
 {"seq":5,"name":"a","labels":{"run":"golden"},"event":"plan","entries":[{"content":"Write notes","priority":"high","status":"in_progress"}]}

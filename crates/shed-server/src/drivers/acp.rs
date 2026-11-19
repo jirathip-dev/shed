@@ -11,13 +11,13 @@ use std::time::Duration;
 use agent_client_protocol::schema::ProtocolVersion;
 use agent_client_protocol::v1::schema::{
     AgentCapabilities, AvailableCommandInput, CancelNotification, CloseSessionRequest,
-    ContentBlock, ContentChunk, Implementation, InitializeRequest, ListSessionsRequest,
-    LoadSessionRequest, McpServer, McpServerHttp, McpServerSse, Meta, NewSessionRequest,
-    PromptRequest, PromptResponse, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionConfigKind as Kind,
-    SessionConfigOption, SessionConfigOptionCategory as Category, SessionConfigOptionValue,
-    SessionConfigSelectOption, SessionConfigSelectOptions as Choices, SessionId,
-    SessionNotification, SessionUpdate, SetSessionConfigOptionRequest, TextContent,
+    ContentBlock, ContentChunk, Implementation, InitializeRequest, LoadSessionRequest, McpServer,
+    McpServerHttp, McpServerSse, Meta, NewSessionRequest, PromptRequest, PromptResponse,
+    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
+    SelectedPermissionOutcome, SessionConfigKind as Kind, SessionConfigOption,
+    SessionConfigOptionCategory as Category, SessionConfigOptionValue, SessionConfigSelectOption,
+    SessionConfigSelectOptions as Choices, SessionId, SessionNotification, SessionUpdate,
+    SetSessionConfigOptionRequest, TextContent,
 };
 use agent_client_protocol::v1::{ConnectionTo, Responder};
 use agent_client_protocol::{Agent, ErrorCode, JsonRpcMessage as _, Lines, UntypedMessage};
@@ -152,7 +152,7 @@ pub(crate) struct Acp {
     prompts: BTreeSet<u64>,
     next: u64,
     asks: VecDeque<(String, Asked)>,
-    notes: VecDeque<String>,
+    notes: VecDeque<Heard>,
 }
 
 impl Acp {
@@ -186,7 +186,6 @@ impl Acp {
         };
         Some(match u {
             SessionUpdate::AgentMessageChunk(c) => Heard::Text(text(c.content)?),
-            SessionUpdate::UserMessageChunk(c) => Heard::Replayed(text(c.content)?),
             SessionUpdate::ToolCall(call) => {
                 return self.update(SessionUpdate::ToolCallUpdate(call.into()));
             }
@@ -280,6 +279,8 @@ impl Acp {
 }
 
 impl Driver for Acp {
+    const NAME: &'static str = "acp";
+
     async fn open(&mut self, cwd: &Path, start: &Start) -> Result<Opened, String> {
         let cx = self.cx.clone();
         let refused = |e| {
@@ -302,7 +303,7 @@ impl Driver for Acp {
             ));
         }
         let (mcp, meta) = (self.launch.mcp.clone(), self.launch.meta.clone());
-        let (options, replayed) = match start {
+        let options = match start {
             Start { resumed: true, .. } if !agent.load_session => {
                 return Err("the agent cannot resume a session (no loadSession)".to_owned());
             }
@@ -316,17 +317,19 @@ impl Driver for Acp {
                     .mcp_servers(mcp)
                     .meta(meta);
                 let loaded = cx.send_request(load).block_task().await.map_err(refused)?;
-                let mut replayed = Vec::new();
                 while let Ok(m) = self.from.try_recv() {
-                    replayed.extend(self.hear(m));
+                    let held = self.hear(m);
+                    let history =
+                        |h: &Heard| matches!(h, Heard::Text(_) | Heard::Tool(_) | Heard::Plan(_));
+                    self.notes.extend(held.filter(|h| !history(h)));
                 }
-                (loaded.config_options, replayed)
+                loaded.config_options
             }
             Start { .. } => {
                 let new = NewSessionRequest::new(cwd).mcp_servers(mcp).meta(meta);
                 let new = cx.send_request(new).block_task().await.map_err(refused)?;
                 self.id = new.session_id;
-                (new.config_options, Vec::new())
+                new.config_options
             }
         };
         Ok(Opened {
@@ -334,7 +337,6 @@ impl Driver for Acp {
             resumable: agent.load_session,
             mcp: redacted(&self.launch.mcp),
             session: self.models(&options.unwrap_or_default()),
-            replayed,
             pid: self.pid,
             stirred: Arc::clone(&self.stirred),
         })
@@ -342,8 +344,8 @@ impl Driver for Acp {
 
     async fn heard(&mut self) -> Option<Heard> {
         loop {
-            if let Some(note) = self.notes.pop_front() {
-                return Some(Heard::Note(note));
+            if let Some(held) = self.notes.pop_front() {
+                return Some(held);
             }
             let m = self.from.recv().await?;
             if let Some(heard) = self.hear(m) {
@@ -387,8 +389,8 @@ impl Driver for Acp {
 
     fn model(&mut self, model: &str) -> Result<(), String> {
         let Some(option) = self.launch.model.clone() else {
-            self.notes
-                .push_back("shed: the agent offers no models".to_owned());
+            let none = "shed: the agent offers no models".to_owned();
+            self.notes.push_back(Heard::Note(none));
             return Ok(());
         };
         let model = SessionConfigOptionValue::value_id(model.to_owned());
@@ -556,33 +558,6 @@ fn oneshot<T>(
         crate::lane::stop(child);
         done.map_err(|_| Error::Acp("the agent did not answer within 30 s".to_owned()))?
     })
-}
-
-/// The sessions agent `cmd` (run in `cwd`) lists (`session/list`, every page), as ACP's objects.
-///
-/// # Errors
-/// [`Error::Acp`] when the agent cannot start or list sessions.
-pub fn sessions(cmd: &[String], cwd: &Path) -> Result<Vec<Value>, Error> {
-    let all = oneshot(cmd, cwd, async |cx, can| {
-        if can.session_capabilities.list.is_none() {
-            let why = "the agent cannot list sessions (no sessionCapabilities.list)";
-            return Err(acp_error(why));
-        }
-        let (mut all, mut cursor) = (Vec::new(), None);
-        loop {
-            let page = cx.send_request(ListSessionsRequest::new().cursor(cursor));
-            let page = page.block_task().await?;
-            all.extend(page.sessions);
-            cursor = page.next_cursor;
-            if cursor.is_none() {
-                return Ok(all);
-            }
-        }
-    })?;
-    Ok(all
-        .iter()
-        .map(serde_json::to_value)
-        .collect::<Result<_, _>>()?)
 }
 
 pub(crate) fn close(info: &TerminalInfo) -> Result<(), Error> {

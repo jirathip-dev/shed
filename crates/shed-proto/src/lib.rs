@@ -621,7 +621,8 @@ pub struct RunParams {
     /// ACP: how the bridge answers permission requests (default `ask`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<Policy>,
-    /// ACP: load this agent session (`session/load`, `$SHED_ACP_RESUME` to the bridge) instead of a new one.
+    /// ACP: continue this session (`$SHED_ACP_RESUME` to the bridge): shed's transcript of it is replayed, then
+    /// the agent loads it (`session/load`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<String>,
     /// ACP: MCP servers for the agent, in ACP's shapes: stdio `{name, command, args, env}`, or
@@ -902,9 +903,10 @@ pub struct EventsParams {
 /// (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with
 /// `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session
 /// is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of
-/// the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its
-/// events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state
-/// `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
+/// the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from
+/// shed's own transcript, its events marked `"replay": true` so a client does not count them as new; what the
+/// agent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next
+/// send wakes it on the same session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Event {
@@ -921,7 +923,7 @@ pub struct Event {
     /// What happened.
     #[serde(flatten)]
     pub kind: EventKind,
-    /// ACP: a resumed session's history, replayed (`session/load`), not a new event.
+    /// ACP: a resumed session's history, replayed from shed's transcript, not a new event.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub replay: bool,
 }
@@ -1062,6 +1064,9 @@ pub struct ApprovalOption {
 pub struct AcpSession {
     /// The agent's session id, for `run --acp … --resume`.
     pub id: String,
+    /// How the lane talks to its agent: `acp`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub driver: String,
     /// The current model, when the agent offers models.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -1100,6 +1105,30 @@ impl AcpSession {
     pub fn cache_warm(&self, now: u64) -> Option<bool> {
         Some(now.saturating_sub(self.turn_ended?) < self.cache_lifetime?)
     }
+}
+
+/// A session shed ran, `sessions/<id>.json` beside the state file: `agents sessions` lists these, `run
+/// --resume <id>` continues one. Its transcript is `sessions/<id>.jsonl`; in a file name each byte of `id`
+/// outside `[A-Za-z0-9._-]` is `%XX`. Kept `$SHED_SESSIONS_KEEP` days (default 30) after its last turn; `rm`
+/// of its terminal deletes both at once.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct SessionRecord {
+    /// The agent's session id.
+    pub id: String,
+    /// The agent id of `run --acp`.
+    pub agent: String,
+    /// The folder it ran in.
+    pub cwd: PathBuf,
+    /// The first prompt's first line, at most 80 characters.
+    pub title: String,
+    /// When its last turn ended, else when it started, unix seconds.
+    pub updated: u64,
+    /// How many turns it has had.
+    pub turns: u64,
+    /// The transcript's path; filled in by `agents sessions`, not stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<PathBuf>,
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.
@@ -1809,6 +1838,7 @@ pub fn openrpc() -> Value {
         .with(|s| s.definitions_path = "/components/schemas".into())
         .into_generator();
     let methods: Vec<Value> = Method::ALL.map(|m| describe(m, &mut g)).into();
+    let record = g.subschema_for::<SessionRecord>();
     let errors: serde_json::Map<String, Value> = ErrorCode::ALL
         .into_iter()
         .map(|c| {
@@ -1819,7 +1849,7 @@ pub fn openrpc() -> Value {
         })
         .collect();
     json!({"openrpc": "1.3.2", "info": {"title": "shed", "version": VERSION}, "methods": methods,
-        "components": {"schemas": g.take_definitions(true), "errors": errors}})
+        "x-files": {"sessions/<id>.json": record}, "components": {"schemas": g.take_definitions(true), "errors": errors}})
 }
 
 #[cfg(feature = "schema")]

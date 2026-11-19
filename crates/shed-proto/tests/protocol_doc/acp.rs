@@ -4,7 +4,7 @@ use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, EmitParams, Event, EventKind,
     EventsParams, Hooks, MatchParams, Matched, Medians, Method, ModelParams, Provider, Quota, Rule,
-    State, Tokens,
+    SessionRecord, State, Tokens,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -12,6 +12,7 @@ use crate::terminal::{RESOURCES, done, info};
 fn session() -> AcpSession {
     AcpSession {
         id: "sess_1".into(),
+        driver: "acp".into(),
         model: Some("opus".into()),
         models: vec![
             ["opus".into(), "Opus".into()],
@@ -28,6 +29,18 @@ fn session() -> AcpSession {
         cache_likely: Some("warm".into()),
         ready_ms: Some(2400),
         first_token_ms: Some(1800),
+    }
+}
+
+pub(crate) fn session_record() -> SessionRecord {
+    SessionRecord {
+        id: "sess_1".into(),
+        agent: "claude-acp".into(),
+        cwd: "/work".into(),
+        title: "Fix the failing test".into(),
+        updated: 1_763_337_600,
+        turns: 3,
+        transcript: Some("/run/shed/sessions/sess_1.jsonl".into()),
     }
 }
 
