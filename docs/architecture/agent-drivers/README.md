@@ -426,8 +426,8 @@ Each is its own issue and PR, in this order; lines are non-test lines under `cra
 | 3 | **The stream driver and the fake** | `Stream` and `driver` in the record; `drivers/stream.rs`; `choose` in `run`; `Stop` handling and `Asleep` in the core; `providers/plain.rs`; `build.rs` collects `providers/*.rs`; `tests/fake_stream.py` and `tests/stream.rs` (a turn, a tool, cancel then resume, model, hibernate and wake, `ask` and an unmapped meta option staying on ACP, a wrapper kept, the MCP file) | +330 |
 | 4 | **Claude** | `providers/claude.rs`, the `[stream]` table, `docs/acp.md`; `scripts/measure-claude-direct.py` gains a fourth mode, a real `shed` lane on the driver; the live smoke | +135 |
 
-Total about +650 on 12,098, against a cap of 12,612: **one raise to 12,850** (q2159), filed by the orchestrator
-before slice 1 (650 plus about 100 of margin). 0006 guessed +500 to 800 for a Claude-only module; this is
+Total about +650 on 12,112, against a cap of 12,850: **the one raise to 12,850** (q2159) is in (#175)
+(650 plus about 100 of margin). 0006 guessed +500 to 800 for a Claude-only module; this is
 in that range, but 130 lines of it are Claude's and the next provider is a record and about that many
 lines again.
 

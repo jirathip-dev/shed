@@ -116,8 +116,8 @@ Inside C:
 - **Later, each its own issue:** making the driver the default; Codex and others after a measurement
   (#128); `run` taking an environment instead of a whole adapter command, which would retire the
   `adapter` swap; resuming a crashed agent.
-- **The cap.** Staging is at 12,098 of 12,612 (#173). The slices add about 650 (README), so the
-  orchestrator files one raise to 12,850 (q2159) before slice 1.
+- **The cap.** Staging is at 12,112 of 12,850, the one raise (q2159) already in (#175). The slices add
+  about 650 (README), about 12,762 in all, inside it.
 
 ## Terms (read 2026-11-19)
 
