@@ -1,6 +1,3 @@
-//! The stream driver: an agent in its own JSON-lines mode, started by its record's `stream` table and
-//! read by its provider's [`Wire`]. A cancel or a model switch stops it; the next send starts it again.
-
 use std::collections::VecDeque;
 use std::fs;
 use std::io::{Read as _, Write as _};
@@ -371,8 +368,17 @@ mod tests {
     #[test]
     fn a_lane_stays_on_acp_for_each_reason_it_cannot_be_served_whole() {
         let off = Err("the agent's record does not turn the stream driver on".to_owned());
-        let built_in = crate::providers::tests::fake("claude-acp");
-        assert_eq!(chose(&built_in, "allow", &[], &json!({})), off);
+        let (records, _) = crate::providers::load(&crate::providers::tests::fake_dir());
+        let built_in: Vec<_> = records.iter().filter(|(_, s)| s == "built-in").collect();
+        assert!(!built_in.is_empty());
+        for (record, _) in built_in {
+            assert_eq!(
+                chose(record, "allow", &[], &json!({})),
+                off,
+                "{}",
+                record.id
+            );
+        }
         let no_table = Provider {
             stream: None,
             ..record()

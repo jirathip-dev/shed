@@ -1,6 +1,3 @@
-//! The `plain` wire: a prompt is `{"prompt": "…"}` and each line the agent prints is one of shed's
-//! `Heard` values as JSON, so an agent that can print them needs only a record.
-
 use serde_json::{Value, json};
 
 use crate::drivers::stream::Wire;
