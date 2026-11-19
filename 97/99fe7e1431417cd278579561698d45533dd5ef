@@ -1,0 +1,6 @@
+Decided: raise line_cap from 12100 to 12612 in ci/cap.toml with a cap-history note
+Because: "Raise shed's line cap (`ci/cap.toml` `line_cap`) from 12,100 to 12,612"
+Because: q2133
+Rejected: trimming PR #171 further — the owner chose raise (q2133 option 1)
+Check: sh scripts/line-cap.sh prints 12098 / cap 12612 and exits 0
+Owner: The size limit goes to 12,612 lines so running npx agents with node can merge.
