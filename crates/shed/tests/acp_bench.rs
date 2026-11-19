@@ -13,7 +13,7 @@ use std::time::Instant;
 use common::{Server, temp_dir};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessTable as _};
-use shed_server::acp::{Input, frame};
+use shed_server::lane::{Input, frame};
 use shed_server::proto::{EventsParams, Method};
 use shed_server::{Client, Paths};
 

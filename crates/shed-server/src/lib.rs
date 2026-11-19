@@ -4,13 +4,14 @@
 //! Unix socket, one tokio task per connection. [`Client`] is the other end.
 #![forbid(unsafe_code)]
 
-pub mod acp;
 pub mod agents;
 pub mod config;
+pub mod drivers;
 mod events;
 pub mod handover;
 pub mod hooks;
 mod input;
+pub mod lane;
 pub mod limit;
 mod links;
 pub mod machines;
@@ -741,7 +742,9 @@ async fn rm(registry: &Shared, Target { name }: Target) -> Result<Value, RpcErro
     let (info, remove) = lock(registry).refresh()?.rm(&name)?;
     blocking(remove).await?;
     let closing = info.clone();
-    blocking(move || crate::acp::close(&closing)).await?.ok();
+    blocking(move || crate::drivers::acp::close(&closing))
+        .await?
+        .ok();
     json(&info)
 }
 
@@ -848,7 +851,7 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
         return Err(bad(&"give until, output or children"));
     }
     if let Some(s) = p.until.iter().find(|s| {
-        !(*s == "idle" || STATES.contains(&s.as_str()) || acp::LANE_STATES.contains(&s.as_str()))
+        !(*s == "idle" || STATES.contains(&s.as_str()) || lane::LANE_STATES.contains(&s.as_str()))
     }) {
         return Err(bad(&format!("unknown state {s:?}")));
     }

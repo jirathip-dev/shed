@@ -21,9 +21,9 @@ use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
 use shed_server::handover;
+use shed_server::lane::{self, Input, Policy};
 use shed_server::machines::{self, Machine};
 use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
@@ -712,11 +712,11 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
 fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> {
     let mut read: ReadResult = server.connect(None)?.call(Method::Read, params)?;
     if params.events && !json {
-        let mut preview = shed_server::acp::Preview::default();
+        let mut preview = shed_server::lane::transcript::Preview::default();
         for e in read.events.drain(..) {
             preview.push(e.kind);
         }
-        let (cols, _, color) = shed_server::acp::stdout_style();
+        let (cols, _, color) = shed_server::lane::transcript::stdout_style();
         read.text = preview.draw(cols, color, usize::MAX).join("\n");
     }
     let end = if read.text.is_empty() { "" } else { "\n" };
@@ -741,7 +741,7 @@ fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
         };
         let state = StateParams { name, report };
         let _: TerminalInfo = client.call(Method::State, &state)?;
-        params.text = acp::frame(&Input::Prompt(std::mem::take(&mut params.text)));
+        params.text = lane::frame(&Input::Prompt(std::mem::take(&mut params.text)));
     }
     let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
@@ -751,7 +751,7 @@ fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
     let rules = shed_server::providers::find(&a.providers, &a.agent);
-    let code = acp::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
+    let code = lane::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
@@ -770,7 +770,7 @@ fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::R
     if info.acp.is_none() {
         bail!("{name} is not an ACP terminal (shed run --acp)");
     }
-    let text = acp::frame(input);
+    let text = lane::frame(input);
     let params = SendParams {
         name,
         text,
@@ -805,7 +805,7 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
             let agent = agents.iter().find(|a| a.id == id);
             let agent = agent.with_context(|| format!("ACP agent {id} is not installed"))?;
             let here = std::env::current_dir().context("current directory")?;
-            let list = acp::sessions(&agent.cmd, &here)?;
+            let list = shed_server::drivers::acp::sessions(&agent.cmd, &here)?;
             print(json, &list, || {
                 let field = |s: &Value, k: &str| s[k].as_str().unwrap_or("-").to_owned();
                 let row = |s| ["sessionId", "updatedAt", "cwd", "title"].map(|k| field(s, k));
