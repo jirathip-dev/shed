@@ -1,5 +1,8 @@
 # Running shed serve as a user job
 
+`shed install` also installs the job that keeps shed on main's latest release; see
+[self-update.md](self-update.md).
+
 `shed serve` is the per-user server: it owns the terminals, the state file and the socket. Run it as a
 user job so it starts at login and comes back after a crash:
 
@@ -23,8 +26,9 @@ exits with an error.
 
 ## macOS (launchd)
 
-[`dist/launchd/shed.plist`](../dist/launchd/shed.plist): set the binary's absolute path in
-`ProgramArguments` (launchd does not expand `~`), then:
+[`dist/launchd/shed.plist`](../dist/launchd/shed.plist) is the text `shed install` writes: replace `{exe}`
+with the binary's absolute path (launchd does not expand `~`), `{path}` with a `PATH` and `{log}` with a log
+file, then:
 
 ```sh
 cp dist/launchd/shed.plist ~/Library/LaunchAgents/dev.shed.serve.plist
@@ -34,7 +38,8 @@ launchctl bootout "gui/$(id -u)/dev.shed.serve"   # stop and unload
 
 ## Linux (systemd)
 
-[`dist/systemd/shed.service`](../dist/systemd/shed.service): set `ExecStart` to your binary, then:
+[`dist/systemd/shed.service`](../dist/systemd/shed.service) is the text `shed install` writes: replace `{exe}`
+with your binary and `{path}` with a `PATH`, then:
 
 ```sh
 mkdir -p ~/.config/systemd/user

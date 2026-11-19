@@ -171,7 +171,7 @@
               "string",
               "null"
             ],
-            "description": "ACP: load this agent session (`session/load`, `$SHED_ACP_RESUME` to the bridge) instead of a new one."
+            "description": "ACP: continue this session (`$SHED_ACP_RESUME` to the bridge): shed's transcript of it is replayed, then\nthe agent loads it (`session/load`)."
           }
         },
         {
@@ -1767,8 +1767,63 @@
         "name": "result",
         "schema": true
       }
+    },
+    {
+      "name": "handover.check",
+      "description": "Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The build the binary must be."
+          }
+        },
+        {
+          "name": "candidate",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The binary's path."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Handover"
+        }
+      }
+    },
+    {
+      "name": "handover",
+      "description": "Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The build the server's own binary must be now."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Handover"
+        }
+      }
     }
   ],
+  "x-files": {
+    "sessions/<id>.json": {
+      "$ref": "#/components/schemas/SessionRecord"
+    }
+  },
   "components": {
     "schemas": {
       "Hello": {
@@ -2127,6 +2182,10 @@
           "id": {
             "type": "string",
             "description": "The agent's session id, for `run --acp … --resume`."
+          },
+          "driver": {
+            "type": "string",
+            "description": "How the lane talks to its agent: `acp`."
           },
           "model": {
             "type": [
@@ -2794,7 +2853,7 @@
           },
           "replay": {
             "type": "boolean",
-            "description": "ACP: a resumed session's history, replayed (`session/load`), not a new event."
+            "description": "ACP: a resumed session's history, replayed from shed's transcript, not a new event."
           }
         },
         "required": [
@@ -3145,7 +3204,7 @@
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
           }
         ],
-        "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its\nevents marked `\"replay\": true` so a client does not count them as new. An idle agent hibernates (state\n`hibernated`, its processes stopped); the next send wakes it, its history replayed the same way."
+        "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
       },
       "ScreenUpdate": {
         "type": "object",
@@ -3726,6 +3785,23 @@
             ],
             "description": "How long its prompt cache lives on each login.",
             "default": null
+          },
+          "driver": {
+            "$ref": "#/components/schemas/DriverKind",
+            "description": "Which driver runs its lanes.",
+            "default": "acp"
+          },
+          "stream": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stream driver's data: the agent's own JSON-lines mode.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
@@ -3878,6 +3954,147 @@
         ],
         "description": "The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key."
       },
+      "DriverKind": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "acp",
+            "description": "Its ACP adapter."
+          },
+          {
+            "type": "string",
+            "const": "stream",
+            "description": "Its own JSON-lines mode, by the record's `stream` table, when a lane can be served whole."
+          }
+        ],
+        "description": "The driver a provider's lanes run on."
+      },
+      "Stream": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "wire": {
+            "type": "string",
+            "description": "The provider's line format: `providers/<wire>.rs`.",
+            "default": ""
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The agent's command line, before the arguments of one start.",
+            "default": []
+          },
+          "adapter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Text that names the ACP adapter when it is the last argument of a caller's own command.",
+            "default": null
+          },
+          "launchers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The words an adapter is started with; `command` replaces them and the adapter.",
+            "default": []
+          },
+          "new": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that start a session under the id shed made (`{session}`).",
+            "default": []
+          },
+          "resume": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that start the agent on a session it has (`{session}`).",
+            "default": []
+          },
+          "model": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that set the model (`{model}`).",
+            "default": []
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "The models `shed model` offers: id and name.",
+            "default": []
+          },
+          "mcp": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that pass the MCP servers (`{file}`: a private file with the wire's text).",
+            "default": []
+          },
+          "policy": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Each policy's arguments; a policy without an entry stays on ACP.",
+            "default": {}
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.",
+            "default": {}
+          },
+          "tools": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Each tool's ACP kind and the input key that is its title.",
+            "default": {}
+          },
+          "plan": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2,
+            "maxItems": 2,
+            "description": "The tool, and its input key, whose list is the plan.",
+            "default": null
+          }
+        },
+        "description": "How the stream driver starts an agent in its own JSON-lines mode."
+      },
       "Agent": {
         "type": "object",
         "additionalProperties": false,
@@ -3892,7 +4109,7 @@
           },
           "distribution": {
             "type": "string",
-            "description": "The distribution it came from: `binary`, `npx` or `uvx`."
+            "description": "The distribution it came from: `binary`, `npx` (installed once with npm, run by `node`) or `uvx`."
           },
           "cmd": {
             "type": "array",
@@ -3965,6 +4182,80 @@
           }
         },
         "description": "`agents.match` result: the lines the agent's rules find."
+      },
+      "Handover": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "The server's build."
+          },
+          "to": {
+            "type": "string",
+            "description": "The binary's build."
+          },
+          "terminals": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "The running terminals that cross."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "terminals"
+        ],
+        "description": "The answer to `handover.check` and `handover`."
+      },
+      "SessionRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The agent's session id."
+          },
+          "agent": {
+            "type": "string",
+            "description": "The agent id of `run --acp`."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The folder it ran in."
+          },
+          "title": {
+            "type": "string",
+            "description": "The first prompt's first line, at most 80 characters."
+          },
+          "updated": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When its last turn ended, else when it started, unix seconds."
+          },
+          "turns": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many turns it has had."
+          },
+          "transcript": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The transcript's path; filled in by `agents sessions`, not stored."
+          }
+        },
+        "required": [
+          "id",
+          "agent",
+          "cwd",
+          "title",
+          "updated",
+          "turns"
+        ],
+        "description": "A session shed ran, `sessions/<id>.json` beside the state file: `agents sessions` lists these, `run\n--resume <id>` continues one. Its transcript is `sessions/<id>.jsonl`; in a file name each byte of `id`\noutside `[A-Za-z0-9._-]` is `%XX`. Kept `$SHED_SESSIONS_KEEP` days (default 30) after its last turn; `rm`\nof its terminal deletes both at once."
       }
     },
     "errors": {
@@ -4027,6 +4318,10 @@
       "DRAFT_HELD": {
         "code": -32009,
         "message": "DRAFT_HELD"
+      },
+      "HANDOVER_REFUSED": {
+        "code": -32010,
+        "message": "HANDOVER_REFUSED"
       }
     }
   }

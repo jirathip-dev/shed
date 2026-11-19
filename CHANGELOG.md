@@ -184,6 +184,29 @@ All notable changes to this project are documented here. The format follows
 - CI publishes signed, notarized builds after green pushes: `build-<sha7>` releases from main and
   `build-staging-<sha7>` prereleases from staging, for macOS (arm64) and Linux (x86_64), with `SHA256SUMS`
   (docs/releases.md).
+- `shed self-update` follows main's releases: it reads main's head, downloads that commit's `build-<sha7>` asset,
+  checks it against `SHA256SUMS` and its `--version`, asks serve whether the new build can take over, swaps the
+  binary and hands serve over without dropping terminals. No release yet, a bad checksum, another build or a
+  refused check leave the binary and serve as they were; staging releases are never installed. `--dry-run`,
+  `--pause` and `--resume`. `shed install` also installs the 5-minute job (`dev.shed.update`, or the
+  `shed-update.timer` user timer), and `shed doctor` has an `update` row. `shed wait` and `shed events`
+  reconnect when a handover closes their connection.
+- `shed serve` can hand over to a new build in place: the `handover` method checks the binary
+  (`handover.check`), then replaces the server on the same process id, keeping the socket and every
+  running terminal, ACP sessions included, with its screen, children and exit statuses. Clients see their
+  connection close and reconnect; an `events` reader with an older `since` gets `reset`. A refused check or
+  a failed exec leaves the server serving as it was.
+- The stream driver (off by default): a provider record with `driver = "stream"` and a `[stream]` table runs
+  its lanes on the agent's own JSON-lines mode instead of its ACP adapter, read by a line format in
+  `providers/<wire>.rs` (the first, `plain`, reads shed's own values). A lane goes to it only when it can be
+  served whole (the policy has flags, so never `ask`; the command is the adapter or none; every `--meta`
+  option has a flag); else it stays on ACP and its first line says why. A caller's wrapper around the adapter
+  is kept. shed makes the session id; a cancel or a model switch stops the agent and the next send resumes
+  it; MCP servers go through a private `sessions/<id>.mcp.json` removed at the agent's first line.
+- Claude can run on the stream driver: `claude`'s own stream-json mode with shed's bridge, no Node adapter
+  (about 120 MB less per awake lane). It is off by default; a host turns it on with `driver = "stream"` in
+  its own `providers/claude.toml`. Lanes with policy `ask`, another command or an unmapped `--meta` option
+  stay on ACP. What a client sees differently is in docs/acp.md, "The stream driver".
 
 ### Changed
 
@@ -214,6 +237,13 @@ All notable changes to this project are documented here. The format follows
 - `hello` checks a protocol range, not an exact match: shed speaks protocol 2 and still serves 1, answering
   a protocol 1 client in protocol 1's shapes. Each side's `hello` carries `oldest`, and `SHED_VERSION`
   names both ranges and which side to update.
+- `shed agents add` installs an `npx` agent once under `agents/<id>/<version>/` with `npm install` and records
+  `node <its bin>`, so no `npm exec` stays resident beside the adapter; `rm` removes the install. Agents
+  recorded earlier as `npx -y …` keep working; `rm` and `add` move one to the new form.
+- shed owns ACP sessions: each has a record and a transcript in `sessions/` beside the state file.
+  `run --resume` replays shed's own transcript (the agent's replay is dropped), `agents sessions` lists shed's
+  sessions without starting the agent, `rm` deletes a session's files, and sessions go
+  `$SHED_SESSIONS_KEEP` days (default 30) after their last turn. `session.driver` is new (`acp`).
 
 ### Fixed
 

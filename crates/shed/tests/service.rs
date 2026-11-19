@@ -61,21 +61,66 @@ fn job_file(home: &Path) -> PathBuf {
 }
 
 #[test]
-fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
-    let home = temp_dir("install");
-    let file = job_file(&home);
+fn install_writes_the_five_minute_update_job() {
+    let home = temp_dir("install-update");
+    assert!(shed(&home, &["install"]).status.success());
+    let update = update_files(&home);
+    let update = update
+        .iter()
+        .map(std::fs::read_to_string)
+        .collect::<Result<String, _>>();
+    let update = update.expect("the update job's files");
+    let every = if cfg!(target_os = "macos") {
+        "<key>StartInterval</key><integer>300</integer>"
+    } else {
+        "OnUnitActiveSec=5min"
+    };
+    assert!(update.contains(every), "{update}");
+    assert!(
+        update.contains(&format!("{SHED}</string><string>self-update<"))
+            || update.contains(&format!("ExecStart={SHED} self-update\n")),
+        "{update}"
+    );
+}
+
+fn restarted(home: &Path) -> String {
+    let file = job_file(home);
     let uid = Command::new("id").arg("-u").output().expect("id -u").stdout;
     let uid = String::from_utf8_lossy(&uid).trim().to_owned();
-    let restarted = if cfg!(target_os = "macos") {
+    let update = update_files(home);
+    if cfg!(target_os = "macos") {
         format!(
-            "launchctl bootout gui/{uid}/dev.shed.serve\nlaunchctl bootstrap gui/{uid} {}\n",
-            file.display()
+            "launchctl bootout gui/{uid}/dev.shed.serve\nlaunchctl bootstrap gui/{uid} {}\n\
+             launchctl bootout gui/{uid}/dev.shed.update\nlaunchctl bootstrap gui/{uid} {}\n",
+            file.display(),
+            update.first().expect("the update job").display()
         )
     } else {
         "systemctl --user disable --now shed.service\nsystemctl --user daemon-reload\n\
-         systemctl --user enable --now shed.service\n"
+         systemctl --user enable --now shed.service\n\
+         systemctl --user disable --now shed-update.timer\nsystemctl --user daemon-reload\n\
+         systemctl --user enable --now shed-update.timer\n"
             .to_owned()
-    };
+    }
+}
+
+fn update_files(home: &Path) -> Vec<PathBuf> {
+    if cfg!(target_os = "macos") {
+        vec![home.join("Library/LaunchAgents/dev.shed.update.plist")]
+    } else {
+        let units = home.join(".config/systemd/user");
+        vec![
+            units.join("shed-update.service"),
+            units.join("shed-update.timer"),
+        ]
+    }
+}
+
+#[test]
+fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
+    let home = temp_dir("install");
+    let file = job_file(&home);
+    let restarted = restarted(&home);
 
     let out = shed(&home, &["install"]);
     assert!(out.status.success(), "{out:?}");
@@ -196,6 +241,8 @@ fn doctor_reports_a_missing_job_and_server_with_their_fix_lines() {
         report.contains(&format!("ok    socket   {}\n", socket.display())),
         "{report}"
     );
+    let update = "ok    update   dev.shed.update: no pass yet\n";
+    assert!(report.contains(update), "{report}");
     let version = format!("ok    version  shed {LONG_VERSION}\n");
     assert!(report.contains(&version), "{report}");
     assert!(!report.contains("provider"), "{report}");

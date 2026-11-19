@@ -187,11 +187,13 @@ pub enum ErrorCode {
     Io,
     /// A person's unsent line held the `send` past `draft_wait`; nothing was written.
     DraftHeld,
+    /// The server will not hand over (`handover.check`, `handover`); the message says why, and nothing changed.
+    HandoverRefused,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -207,6 +209,7 @@ impl ErrorCode {
         Self::NoLink,
         Self::Io,
         Self::DraftHeld,
+        Self::HandoverRefused,
     ];
 
     /// The numeric JSON-RPC code.
@@ -228,6 +231,7 @@ impl ErrorCode {
             Self::NoLink => -32007,
             Self::Io => -32008,
             Self::DraftHeld => -32009,
+            Self::HandoverRefused => -32010,
         }
     }
 
@@ -250,6 +254,7 @@ impl ErrorCode {
             Self::NoLink => "NO_LINK",
             Self::Io => "IO",
             Self::DraftHeld => "DRAFT_HELD",
+            Self::HandoverRefused => "HANDOVER_REFUSED",
         }
     }
 }
@@ -317,11 +322,15 @@ pub enum Method {
     AgentsMatch,
     /// The API as an `OpenRPC` document: `{}` → `openrpc()` (the `schema` feature).
     Discover,
+    /// Would the server hand over to a binary: [`HandoverCheckParams`] → [`Handover`].
+    HandoverCheck,
+    /// Hand over to the server's own binary: [`HandoverParams`] → [`Handover`].
+    Handover,
 }
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 32] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -352,6 +361,8 @@ impl Method {
         Self::Agents,
         Self::AgentsMatch,
         Self::Discover,
+        Self::HandoverCheck,
+        Self::Handover,
     ];
 
     /// The wire name.
@@ -388,6 +399,8 @@ impl Method {
             Self::Agents => "agents",
             Self::AgentsMatch => "agents.match",
             Self::Discover => "rpc.discover",
+            Self::HandoverCheck => "handover.check",
+            Self::Handover => "handover",
         }
     }
 
@@ -484,6 +497,12 @@ impl Method {
             }
             Self::Discover => {
                 "The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`."
+            }
+            Self::HandoverCheck => {
+                "Would the server hand over to the binary at `candidate`: it runs `<candidate> serve --preflight`, which must name `build`, read the state file and inherit this server's handover format, and speak the protocol of every live ACP bridge. Changes nothing; `HANDOVER_REFUSED` says why not."
+            }
+            Self::Handover => {
+                "Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was."
             }
         }
     }
@@ -602,7 +621,8 @@ pub struct RunParams {
     /// ACP: how the bridge answers permission requests (default `ask`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<Policy>,
-    /// ACP: load this agent session (`session/load`, `$SHED_ACP_RESUME` to the bridge) instead of a new one.
+    /// ACP: continue this session (`$SHED_ACP_RESUME` to the bridge): shed's transcript of it is replayed, then
+    /// the agent loads it (`session/load`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume: Option<String>,
     /// ACP: MCP servers for the agent, in ACP's shapes: stdio `{name, command, args, env}`, or
@@ -883,9 +903,10 @@ pub struct EventsParams {
 /// (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with
 /// `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session
 /// is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of
-/// the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its
-/// events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state
-/// `hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
+/// the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from
+/// shed's own transcript, its events marked `"replay": true` so a client does not count them as new; what the
+/// agent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next
+/// send wakes it on the same session.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Event {
@@ -902,7 +923,7 @@ pub struct Event {
     /// What happened.
     #[serde(flatten)]
     pub kind: EventKind,
-    /// ACP: a resumed session's history, replayed (`session/load`), not a new event.
+    /// ACP: a resumed session's history, replayed from shed's transcript, not a new event.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub replay: bool,
 }
@@ -1043,6 +1064,9 @@ pub struct ApprovalOption {
 pub struct AcpSession {
     /// The agent's session id, for `run --acp … --resume`.
     pub id: String,
+    /// How the lane talks to its agent: `acp`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub driver: String,
     /// The current model, when the agent offers models.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -1081,6 +1105,30 @@ impl AcpSession {
     pub fn cache_warm(&self, now: u64) -> Option<bool> {
         Some(now.saturating_sub(self.turn_ended?) < self.cache_lifetime?)
     }
+}
+
+/// A session shed ran, `sessions/<id>.json` beside the state file: `agents sessions` lists these, `run
+/// --resume <id>` continues one. Its transcript is `sessions/<id>.jsonl`; in a file name each byte of `id`
+/// outside `[A-Za-z0-9._-]` is `%XX`. Kept `$SHED_SESSIONS_KEEP` days (default 30) after its last turn; `rm`
+/// of its terminal deletes both at once.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct SessionRecord {
+    /// The agent's session id.
+    pub id: String,
+    /// The agent id of `run --acp`.
+    pub agent: String,
+    /// The folder it ran in.
+    pub cwd: PathBuf,
+    /// The first prompt's first line, at most 80 characters.
+    pub title: String,
+    /// When its last turn ended, else when it started, unix seconds.
+    pub updated: u64,
+    /// How many turns it has had.
+    pub turns: u64,
+    /// The transcript's path; filled in by `agents sessions`, not stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcript: Option<PathBuf>,
 }
 
 /// An ACP session's context window use and cost, as the agent last reported it.
@@ -1304,6 +1352,55 @@ pub struct Provider {
     pub quota: Option<Quota>,
     /// How long its prompt cache lives on each login.
     pub cache: Option<Cache>,
+    /// Which driver runs its lanes.
+    pub driver: DriverKind,
+    /// The stream driver's data: the agent's own JSON-lines mode.
+    pub stream: Option<Stream>,
+}
+
+/// The driver a provider's lanes run on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum DriverKind {
+    /// Its ACP adapter.
+    #[default]
+    Acp,
+    /// Its own JSON-lines mode, by the record's `stream` table, when a lane can be served whole.
+    Stream,
+}
+
+/// How the stream driver starts an agent in its own JSON-lines mode.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Stream {
+    /// The provider's line format: `providers/<wire>.rs`.
+    pub wire: String,
+    /// The agent's command line, before the arguments of one start.
+    pub command: Vec<String>,
+    /// Text that names the ACP adapter when it is the last argument of a caller's own command.
+    pub adapter: Option<String>,
+    /// The words an adapter is started with; `command` replaces them and the adapter.
+    pub launchers: Vec<String>,
+    /// The arguments that start a session under the id shed made (`{session}`).
+    pub new: Vec<String>,
+    /// The arguments that start the agent on a session it has (`{session}`).
+    pub resume: Vec<String>,
+    /// The arguments that set the model (`{model}`).
+    pub model: Vec<String>,
+    /// The models `shed model` offers: id and name.
+    pub models: Vec<[String; 2]>,
+    /// The arguments that pass the MCP servers (`{file}`: a private file with the wire's text).
+    pub mcp: Vec<String>,
+    /// Each policy's arguments; a policy without an entry stays on ACP.
+    pub policy: BTreeMap<String, Vec<String>>,
+    /// Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.
+    pub meta: BTreeMap<String, String>,
+    /// Each tool's ACP kind and the input key that is its title.
+    pub tools: BTreeMap<String, [String; 2]>,
+    /// The tool, and its input key, whose list is the plan.
+    pub plan: Option<[String; 2]>,
 }
 
 /// The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key.
@@ -1424,7 +1521,7 @@ pub struct Agent {
     pub id: String,
     /// The pinned version.
     pub version: String,
-    /// The distribution it came from: `binary`, `npx` or `uvx`.
+    /// The distribution it came from: `binary`, `npx` (installed once with npm, run by `node`) or `uvx`.
     pub distribution: String,
     /// The ACP adapter's command line (`env K=V …` first when the registry sets variables).
     pub cmd: Vec<String>,
@@ -1670,6 +1767,36 @@ pub struct TerminalResizeParams {
     pub rows: u16,
 }
 
+/// `handover.check` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct HandoverCheckParams {
+    /// The build the binary must be.
+    pub build: String,
+    /// The binary's path.
+    pub candidate: PathBuf,
+}
+
+/// `handover` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct HandoverParams {
+    /// The build the server's own binary must be now.
+    pub build: String,
+}
+
+/// The answer to `handover.check` and `handover`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Handover {
+    /// The server's build.
+    pub from: String,
+    /// The binary's build.
+    pub to: String,
+    /// The running terminals that cross.
+    pub terminals: usize,
+}
+
 /// `terminal.readonly` params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -1712,6 +1839,8 @@ impl Method {
             Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
             Self::AgentsMatch => pair::<MatchParams, Matched>(g),
             Self::Discover => [Empty::json_schema(g), Schema::from(true)],
+            Self::HandoverCheck => pair::<HandoverCheckParams, Handover>(g),
+            Self::Handover => pair::<HandoverParams, Handover>(g),
         }
     }
 
@@ -1758,6 +1887,7 @@ pub fn openrpc() -> Value {
         .with(|s| s.definitions_path = "/components/schemas".into())
         .into_generator();
     let methods: Vec<Value> = Method::ALL.map(|m| describe(m, &mut g)).into();
+    let record = g.subschema_for::<SessionRecord>();
     let errors: serde_json::Map<String, Value> = ErrorCode::ALL
         .into_iter()
         .map(|c| {
@@ -1768,7 +1898,7 @@ pub fn openrpc() -> Value {
         })
         .collect();
     json!({"openrpc": "1.3.2", "info": {"title": "shed", "version": VERSION}, "methods": methods,
-        "components": {"schemas": g.take_definitions(true), "errors": errors}})
+        "x-files": {"sessions/<id>.json": record}, "components": {"schemas": g.take_definitions(true), "errors": errors}})
 }
 
 #[cfg(feature = "schema")]

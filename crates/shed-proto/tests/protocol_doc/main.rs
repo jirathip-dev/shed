@@ -11,7 +11,7 @@ mod terminal;
 use serde_json::{Map, Value, json, to_value};
 use shed_proto::{ErrorCode, Hello, Method, PROTOCOL, RpcError, openrpc};
 
-use acp::{emit_params, events};
+use acp::{emit_params, events, session_record};
 use screen::screen_updates;
 use terminal::run_params;
 
@@ -215,6 +215,8 @@ fn every_golden_message_validates_against_its_schema() {
     for event in events() {
         check(&doc, stream, &to_value(&event).unwrap()).unwrap_or_else(|e| panic!("{e}"));
     }
+    let record = &doc["x-files"]["sessions/<id>.json"];
+    check(&doc, record, &to_value(session_record()).unwrap()).unwrap_or_else(|e| panic!("{e}"));
     let updates = &method_doc(&doc, "screen.watch")["x-stream"];
     for update in screen_updates() {
         check(&doc, updates, &to_value(&update).unwrap()).unwrap_or_else(|e| panic!("{e}"));

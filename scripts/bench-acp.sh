@@ -3,15 +3,20 @@
 # runs: the throughput bench (fake_acp.py streams 1,000 session/updates through the bridge to a socket
 # client), median of 5, and the shed-only bench (10,000 canned updates; ns per update through the bridge
 # and the server), median of 9. Fails if the head is more than 10% slower on either. Then the head's
-# 1,000-update session/load replay, reported only, and the hibernation bench (10 idle fake agents' RSS
+# 1,000-event resume replay of shed's transcript, reported only, and the hibernation bench (10 idle fake agents' RSS
 # with hibernation off and on, failing unless it is lower on; the wake time). Both sides run the head's
-# bench and fake agent. Builds go to $BENCH_TARGET/acp-{base,head}.
+# bench and fake agent, unless the head's bench does not build at the base (a moved import): then the base
+# keeps its own. Builds go to $BENCH_TARGET/acp-{base,head}.
 set -euo pipefail
 base=$(cd "$1" && pwd) head=$(cd "$2" && pwd)
 target=${BENCH_TARGET:-$head/target}
 for f in crates/shed/tests/acp_bench.rs crates/shed/tests/fake_acp.py; do
   [ "$base" = "$head" ] || cp "$head/$f" "$base/$f"
 done
+if [ "$base" != "$head" ] && ! (cd "$base" && CARGO_TARGET_DIR="$target/acp-base" cargo test -q -p shed --release \
+  --locked --test acp_bench --no-run); then
+  git -C "$base" checkout -- crates/shed/tests/acp_bench.rs
+fi
 run() {
   (cd "$1" && CARGO_TARGET_DIR="$target/acp-$2" cargo test -q -p shed --release --locked --test acp_bench \
     "$3" -- --ignored --exact --nocapture)

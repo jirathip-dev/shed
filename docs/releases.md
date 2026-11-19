@@ -51,3 +51,6 @@ gh release download "$t" -R jirathip-dev/shed -p "$a" -p SHA256SUMS
 grep " $a\$" SHA256SUMS | shasum -a 256 -c -
 chmod 755 "$a" && "./$a" --version && mv "$a" ~/.local/bin/shed
 ```
+
+This manual install is the only one: once the binary is in place, `shed install` adds the job that keeps it on
+main's latest release, and handing serve over keeps the terminals running ([self-update.md](self-update.md)).

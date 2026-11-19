@@ -6,7 +6,7 @@ use shed_proto::{
     ErrorCode, Method, OLDEST_PROTOCOL, PROTOCOL, Request, Response, RpcError, VERSION, openrpc,
 };
 
-use crate::acp::events;
+use crate::acp::{events, session_record};
 use crate::screen::screen_updates;
 use crate::{example, peer};
 
@@ -73,6 +73,9 @@ fn markdown() -> String {
         writeln!(md, "{}", line(&event)).unwrap();
     }
     md.push_str("```\n");
+    let record = prose(&doc, "SessionRecord");
+    let record = format!("{record}\n\n```json\n{}\n```\n", line(&session_record()));
+    write!(md, "\n## Session records\n\n{record}").unwrap();
     let screen = prose(&doc, "ScreenUpdate");
     write!(md, "\n## Screen updates\n\n{screen}\n\n```json\n").unwrap();
     for update in screen_updates() {

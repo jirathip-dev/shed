@@ -3,6 +3,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
+use std::os::fd::{AsFd as _, OwnedFd};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt as _;
@@ -10,13 +11,18 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use crate::handover::Control;
 use serde::{Deserialize, Serialize};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
-use shed_core::{History, Report, STATES, Size, Terminal};
+use shed_core::{Detached, History, Report, STATES, Size, Terminal};
+
+type Frozen = Vec<(String, Detached)>;
+
 use shed_proto::{
-    AcpSession, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams,
-    MachineStats, ModelParams, Parent, Policy, ReadParams, ReadResult, Reported, ResizeParams,
-    Resources, RpcError, RunParams, Sample, SendParams, State, StateParams, TerminalInfo,
+    AcpSession, DriverKind, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged,
+    LsParams, MachineStats, ModelParams, PROTOCOL, Parent, Policy, ReadParams, ReadResult,
+    Reported, ResizeParams, Resources, RpcError, RunParams, Sample, SendParams, State, StateParams,
+    TerminalInfo,
 };
 
 use tokio::net::unix::OwnedWriteHalf;
@@ -25,6 +31,7 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::events::{Events, Subscriber};
 use crate::input::{DRAFT_WAIT, Draft, Input};
+use crate::lane::sessions;
 use crate::stats::Stats;
 
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
@@ -59,6 +66,15 @@ async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: Receiver<Arc
 struct StateFile {
     version: u32,
     terminals: Vec<Saved>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    handover: Option<Handed>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Handed {
+    format: u32,
+    seq: u64,
+    screens: Vec<(String, String)>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -71,6 +87,10 @@ struct Saved {
     recipe: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     was: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    speaks: Option<u32>,
 }
 
 struct Entry {
@@ -88,6 +108,7 @@ struct Entry {
     prompted: Option<Instant>,
     recipe: Option<String>,
     was: Option<String>,
+    speaks: Option<u32>,
     guard: Guard,
 }
 
@@ -112,7 +133,6 @@ fn largest<'a>(ps: &[&'a ProcessInfo]) -> Option<&'a ProcessInfo> {
 impl Entry {
     fn new(info: TerminalInfo, term: Option<Arc<Terminal>>) -> Self {
         Self {
-            info,
             term,
             draft: Arc::default(),
             exited_at: None,
@@ -126,7 +146,9 @@ impl Entry {
             prompted: None,
             recipe: None,
             was: None,
+            speaks: info.acp.is_some().then_some(PROTOCOL),
             guard: Guard::default(),
+            info,
         }
     }
 
@@ -218,6 +240,8 @@ impl Entry {
             exited_at: self.exited_at,
             recipe: self.recipe.clone(),
             was: self.was.clone(),
+            notes: self.notes.clone(),
+            speaks: self.speaks,
         }
     }
 }
@@ -307,6 +331,8 @@ pub(crate) struct Registry {
     pub(crate) saver: Saver,
     pub(crate) events: Events,
     pub(crate) stats: Stats,
+    handed: Option<Handed>,
+    pub(crate) control: Option<Arc<crate::handover::Control>>,
 }
 
 fn write_state(path: &Path, file: &StateFile) -> io::Result<()> {
@@ -400,23 +426,23 @@ fn spawn(
     let (ours, theirs) = pair.transpose()?.unzip();
     let term = Terminal::spawn_with(cmd, cwd, env, size, history, theirs.map(Into::into))?;
     if let Some(ours) = ours {
-        crate::acp::hand_over(ours, term.master()?, b"null")?;
+        crate::handover::hand_over(ours, &[term.master()?.as_fd()], b"null")?;
     }
     term.set_idle_after(idle_after.map(Duration::from_secs));
     Ok(term)
 }
 
 fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<Terminal> {
-    let lent = crate::acp::pty_socket(socket, &info.name);
+    let lent = crate::lane::pty_socket(socket, &info.name);
     let taken = UnixStream::connect(&lent).and_then(|bridge| {
         bridge.set_read_timeout(Some(GRACE))?;
-        crate::acp::take_over(&bridge)
+        crate::handover::take_over(&bridge, 4096)
     });
-    let Ok((master, said)) = taken else {
+    let Ok((Some(master), said)) = taken.map(|(fds, said)| (fds.into_iter().next(), said)) else {
         fs::remove_file(lent).ok();
         return None;
     };
-    let term = Terminal::adopt(master, info.pid?, &history(state, &info.name)).ok()?;
+    let term = Terminal::adopt(master, info.pid?, &history(state, &info.name), None).ok()?;
     term.set_idle_after(info.idle_after.map(Duration::from_secs));
     if let Ok(Some(r)) = serde_json::from_slice::<Option<Reported>>(&said) {
         term.set_report(Report {
@@ -426,6 +452,63 @@ fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<Terminal> {
         });
     }
     Some(term)
+}
+
+fn inherit(state: &Path, info: &TerminalInfo, master: OwnedFd, repaint: &str) -> Option<Terminal> {
+    let history = history(state, &info.name);
+    let term = Terminal::adopt(master, info.pid?, &history, Some(repaint)).ok()?;
+    term.set_idle_after(info.idle_after.map(Duration::from_secs));
+    let reported = info
+        .reported
+        .iter()
+        .filter(|r| r.from.as_deref() == Some("reported"));
+    for r in reported.chain(&info.records).cloned() {
+        let (state, note, id, kind, progress) = (r.state, r.note, r.id, r.kind, r.progress);
+        let (source, app, title, msg) = (r.state_source, r.app, r.title, r.msg);
+        let report = Report {
+            state,
+            note,
+            source,
+            id,
+            kind,
+            progress,
+            app,
+            title,
+            msg,
+            from: None,
+        };
+        term.set_report(report);
+    }
+    Some(term)
+}
+
+fn picked_up(
+    path: &Path,
+    socket: &Path,
+    file: &StateFile,
+    handed: Option<&Handed>,
+    masters: Vec<OwnedFd>,
+) -> BTreeMap<String, Terminal> {
+    let running = |name: &str| {
+        let running = |s: &&Saved| s.info.state == State::Running && s.info.name == name;
+        file.terminals.iter().find(running).map(|s| &s.info)
+    };
+    let screens = handed.iter().flat_map(|h| h.screens.iter()).zip(masters);
+    let mut adopted: BTreeMap<_, _> = (screens)
+        .filter_map(|((name, repaint), master)| {
+            Some((
+                name.clone(),
+                inherit(path, running(name)?, master, repaint)?,
+            ))
+        })
+        .collect();
+    let lanes: Vec<_> = (file.terminals.iter())
+        .filter(|s| s.info.state == State::Running && s.info.acp.is_some())
+        .filter(|s| !adopted.contains_key(&s.info.name))
+        .filter_map(|s| Some((s.info.name.clone(), adopt(socket, path, &s.info)?)))
+        .collect();
+    adopted.extend(lanes);
+    adopted
 }
 
 fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalInfo>) {
@@ -478,30 +561,37 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Registry {
-    pub(crate) fn load(path: &Path, socket: &Path) -> io::Result<Self> {
+    pub(crate) fn readable(path: &Path) -> io::Result<()> {
+        serde_json::from_slice::<StateFile>(&fs::read(path)?)?;
+        Ok(())
+    }
+
+    pub(crate) fn load(path: &Path, socket: &Path, masters: Vec<OwnedFd>) -> io::Result<Self> {
         let file: StateFile = match fs::read(path) {
             Ok(bytes) => serde_json::from_slice(&bytes)?,
             Err(e) if e.kind() == io::ErrorKind::NotFound => StateFile {
                 version: FILE_VERSION,
                 terminals: Vec::new(),
+                handover: None,
             },
             Err(e) => return Err(e),
         };
-        let mut adopted: BTreeMap<_, _> = (file.terminals.iter())
-            .filter(|s| s.info.state == State::Running && s.info.acp.is_some())
-            .filter_map(|s| Some((s.info.name.clone(), adopt(socket, path, &s.info)?)))
-            .collect();
+        let handed = (file.handover.clone()).filter(|h| h.format == crate::handover::FORMAT);
+        let mut adopted = picked_up(path, socket, &file, handed.as_ref(), masters);
         let infos = file.terminals.iter().map(|s| &s.info);
         end_left_over(path, infos.filter(|i| !adopted.contains_key(&i.name)));
         let shell = crate::config::var("SHELL").unwrap_or_else(|| "/bin/sh".to_owned());
         let mut entries = BTreeMap::new();
         let mut events = Events::default();
+        events.resume(handed.as_ref().map_or(0, |h| h.seq));
         let now = shed_core::clock::unix_now();
         for Saved {
             mut info,
             exited_at,
             recipe,
             was,
+            notes,
+            speaks,
         } in file.terminals
         {
             let mut term = adopted.remove(&info.name).map(Arc::new);
@@ -531,13 +621,15 @@ impl Registry {
             }
             info.pid = term.as_ref().map(|t| t.pid());
             let exited_at = (info.state == State::Exited).then(|| exited_at.unwrap_or(now));
-            let name = info.name.clone();
+            sessions::carry_over(path, &info, now);
             entries.insert(
-                name,
+                info.name.clone(),
                 Entry {
                     exited_at,
+                    notes,
                     recipe,
                     was,
+                    speaks,
                     ..Entry::new(info, term)
                 },
             );
@@ -570,6 +662,8 @@ impl Registry {
             saver,
             events,
             stats: Stats::load(&path.with_file_name("stats.json")),
+            handed: None,
+            control: None,
         };
         write_state(path, &registry.state_file())?;
         Ok(registry)
@@ -579,7 +673,53 @@ impl Registry {
         StateFile {
             version: FILE_VERSION,
             terminals: self.entries.values().map(Entry::saved).collect(),
+            handover: self.handed.clone(),
         }
+    }
+
+    pub(crate) fn set_rules(&self) {
+        for e in self.entries.values().filter(|e| e.info.acp.is_none()) {
+            if let (Some(term), Some(agent)) = (&e.term, e.info.labels.get("agent")) {
+                term.set_rules(self.rules(agent));
+            }
+        }
+    }
+
+    pub(crate) fn bridges(&self) -> impl Iterator<Item = (&str, u32)> {
+        let lanes = self.entries.values().filter(|e| e.info.acp.is_some());
+        let live = lanes.filter(|e| e.info.state == State::Running);
+        live.map(|e| (e.info.name.as_str(), e.speaks.unwrap_or(0)))
+    }
+
+    pub(crate) fn freeze(&mut self) -> (Frozen, io::Result<()>, Option<Arc<Control>>) {
+        let running = self.running().into_iter();
+        let detached = running.filter_map(|(name, term)| Some((name, term.detach().ok()?)));
+        let mut frozen: Vec<_> = detached.collect();
+        self.refresh().ok();
+        frozen.retain(|(name, _)| self.live(name).is_ok());
+        self.handed = Some(Handed {
+            format: crate::handover::FORMAT,
+            seq: self.events.seq(),
+            screens: (frozen.iter().map(|(n, d)| (n.clone(), d.repaint.clone()))).collect(),
+        });
+        let saved = write_state(&self.path, &self.state_file());
+        (frozen, saved, self.control.clone())
+    }
+
+    pub(crate) fn thaw(&mut self, frozen: Frozen) -> Vec<(String, Arc<Terminal>)> {
+        self.handed = None;
+        let mut back = Vec::new();
+        for (name, Detached { master, repaint }) in frozen {
+            let Some(entry) = self.entries.get_mut(&name) else {
+                continue;
+            };
+            if let Some(term) = inherit(&self.path, &entry.info, master, &repaint).map(Arc::new) {
+                entry.term = Some(Arc::clone(&term));
+                back.push((name, term));
+            }
+        }
+        self.set_rules();
+        self.saved(back)
     }
 
     fn save(&mut self) {
@@ -697,7 +837,7 @@ impl Registry {
                     state,
                     ..Report::default()
                 });
-                crate::acp::frame(&crate::acp::Input::Prompt(notes.join("\n")))
+                crate::lane::frame(&crate::lane::Input::Prompt(notes.join("\n")))
             } else {
                 notes.into_iter().map(|n| n + "\r").collect()
             };
@@ -769,16 +909,35 @@ impl Registry {
         ended
     }
 
-    fn bridge(
-        &self,
-        id: &str,
-        policy: Option<Policy>,
-        cmd: Vec<String>,
-    ) -> Result<Vec<String>, RpcError> {
-        let cmd = if cmd.is_empty() {
-            let installed = crate::agents::list(&self.path).map_err(internal)?;
-            let ids: Vec<_> = installed.iter().map(|a| a.id.as_str()).collect();
-            let Some(agent) = installed.iter().find(|a| a.id == id) else {
+    fn bridge(&self, p: &mut RunParams) -> Result<(), RpcError> {
+        let cmd = std::mem::take(&mut p.cmd);
+        let id = p.acp.as_deref().unwrap_or_default();
+        let policy = match p.policy.unwrap_or(Policy::Ask) {
+            Policy::Allow => "allow",
+            Policy::Deny => "deny",
+            Policy::Ask => "ask",
+        };
+        let installed = crate::agents::list(&self.path).map_err(internal)?;
+        let adapter = installed
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.cmd.as_slice());
+        let record = crate::providers::find(&self.providers, id);
+        let meta = p.meta.as_ref();
+        let chosen = crate::drivers::choose(&record, policy, &cmd, adapter, meta);
+        let driver = match &chosen {
+            Ok(_) => vec!["--stream".to_owned()],
+            Err(why) if record.driver == DriverKind::Stream => {
+                vec![format!("--why={why}")]
+            }
+            Err(_) => Vec::new(),
+        };
+        let cmd = match (chosen, adapter) {
+            (Ok(stream), _) => stream,
+            (Err(_), _) if !cmd.is_empty() => cmd,
+            (Err(_), Some(adapter)) => adapter.to_vec(),
+            (Err(_), None) => {
+                let ids: Vec<_> = installed.iter().map(|a| a.id.as_str()).collect();
                 let ids = if ids.is_empty() {
                     "none".to_owned()
                 } else {
@@ -788,17 +947,9 @@ impl Registry {
                     "ACP agent {id} is not installed; installed: {ids}; `shed agents add {id}`"
                 );
                 return Err(RpcError::new(ErrorCode::InvalidParams, e));
-            };
-            agent.cmd.clone()
-        } else {
-            cmd
+            }
         };
         let exe = std::env::current_exe().map_err(internal)?;
-        let policy = match policy.unwrap_or(Policy::Ask) {
-            Policy::Allow => "allow",
-            Policy::Deny => "deny",
-            Policy::Ask => "ask",
-        };
         let path = |p: &Path| p.to_string_lossy().into_owned();
         let bridge = [
             path(&exe),
@@ -813,9 +964,9 @@ impl Registry {
             id.to_owned(),
             "--providers".to_owned(),
             path(&self.providers),
-            "--".to_owned(),
         ];
-        Ok([bridge.to_vec(), cmd].concat())
+        p.cmd = [bridge.to_vec(), driver, vec!["--".to_owned()], cmd].concat();
+        Ok(())
     }
 
     pub(crate) fn dir(&self) -> PathBuf {
@@ -837,10 +988,21 @@ impl Registry {
 
     pub(crate) fn record(&mut self, mut sample: Sample) -> impl FnOnce() + Send + use<> {
         self.refresh().ok();
-        self.prune(shed_core::clock::unix_now());
+        let now = shed_core::clock::unix_now();
+        self.prune(now);
         sample.terminals = self.counts();
         self.stats.push(sample);
-        self.stats.saving()
+        let saving = self.stats.saving();
+        let running = self
+            .entries
+            .values()
+            .filter(|e| e.info.state == State::Running);
+        let live = running.filter_map(|e| Some(e.info.session.as_ref()?.id.clone()));
+        let (state, live) = (self.path.clone(), live.collect());
+        move || {
+            saving();
+            sessions::prune(&state, now, crate::config::sessions_keep(), &live);
+        }
     }
 
     pub(crate) fn machine_stats(&self, mut now: Sample, since: Option<u64>) -> MachineStats {
@@ -893,8 +1055,8 @@ impl Registry {
             return Err(bad("warm needs acp and takes no resume"));
         }
         let recipe = p.warm.then(|| recipe(&p));
-        if let Some(id) = &p.acp {
-            p.cmd = self.bridge(id, p.policy, std::mem::take(&mut p.cmd))?;
+        if p.acp.is_some() {
+            self.bridge(&mut p)?;
         }
         if p.cmd.is_empty() {
             return Err(bad("empty cmd"));
@@ -908,7 +1070,7 @@ impl Registry {
         if p.labels.keys().any(|k| k.is_empty() || k.contains('=')) {
             return Err(bad("label keys must be non-empty and have no '='"));
         }
-        crate::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
+        crate::drivers::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
         if let Some(parent) = &mut p.parent {
             parent.name = self.named(&parent.name);
         }
@@ -1009,7 +1171,7 @@ impl Registry {
             session.ready_ms = Some(0);
         }
         if let Some(term) = entry.term.clone() {
-            let text = crate::acp::frame(&crate::acp::Input::Name(name.clone()));
+            let text = crate::lane::frame(&crate::lane::Input::Name(name.clone()));
             std::thread::spawn(move || term.write(text.as_bytes()).ok());
         }
         self.events.emit(&entry.info, EventKind::Started);
@@ -1077,10 +1239,9 @@ impl Registry {
             .filter(|_| entry.info.state == State::Running)
     }
 
-    fn files(&self, name: &str) -> [Option<PathBuf>; 3] {
-        let transcript = Some(crate::acp::transcript(&self.path, name));
-        let lent = Some(crate::acp::pty_socket(&self.socket, name));
-        [history(&self.path, name).log, transcript, lent]
+    fn files(&self, name: &str) -> [Option<PathBuf>; 2] {
+        let lent = Some(crate::lane::pty_socket(&self.socket, name));
+        [history(&self.path, name).log, lent]
     }
 
     fn rules(&self, agent: &str) -> Vec<shed_core::Rule> {
@@ -1125,11 +1286,14 @@ impl Registry {
         let entry = self.entry(&p.name)?;
         let (state, term) = (self.path.clone(), entry.term.clone());
         let acp = entry.info.acp.is_some();
+        let id = (entry.info.session.as_ref()).map_or_else(String::new, |s| s.id.clone());
         Ok(move || {
             let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
-            let file = || fs::read_to_string(crate::acp::transcript(&state, &p.name));
+            let file = || fs::read_to_string(sessions::transcript(&state, &id));
             let mut text = match &term {
-                _ if acp && !p.events => crate::acp::render(&file().unwrap_or_default()),
+                _ if acp && !p.events => {
+                    crate::lane::transcript::render(&file().unwrap_or_default())
+                }
                 _ if acp => {
                     let (file, before) = (file().unwrap_or_default(), p.before.unwrap_or(u64::MAX));
                     let lines = (file.lines().zip(1..)).take_while(|&(_, seq)| seq < before);
@@ -1143,7 +1307,7 @@ impl Registry {
                 Some(term) => term.screen(),
                 None => {
                     let screen = history(&state, &p.name)
-                        .restore(size(None, None))
+                        .restore(size(None, None), None)
                         .map_err(internal)?;
                     if p.history {
                         screen.history(n)
@@ -1230,7 +1394,7 @@ impl Registry {
 
     pub(crate) fn state(&mut self, mut p: StateParams) -> Result<TerminalInfo, RpcError> {
         p.name = self.named(&p.name);
-        let lane = crate::acp::LANE_STATES.contains(&p.report.state.as_str());
+        let lane = crate::lane::LANE_STATES.contains(&p.report.state.as_str());
         let acp = self.entry(&p.name)?.info.acp.is_some() && lane;
         if !acp && !STATES.contains(&p.report.state.as_str()) {
             return Err(RpcError::new(
@@ -1323,7 +1487,7 @@ impl Registry {
         let why = format!("{} is not an ACP terminal", p.name);
         let acp = self.entry(&p.name)?.info.acp.as_ref();
         acp.ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, why))?;
-        let text = crate::acp::frame(&crate::acp::Input::Model(p.model));
+        let text = crate::lane::frame(&crate::lane::Input::Model(p.model));
         Ok(Input::Now(
             Arc::clone(self.live(&p.name)?),
             text.into_bytes(),
@@ -1371,9 +1535,14 @@ impl Registry {
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
         let files = self.files(name);
+        let session = (entry.info.session.as_ref()).filter(|_| entry.info.acp.is_some());
+        let (state, session) = (self.path.clone(), session.map(|s| s.id.clone()));
         Ok((self.saved(entry.info), move || {
             for file in files.into_iter().flatten() {
                 fs::remove_file(file).ok();
+            }
+            if let Some(id) = session {
+                sessions::remove(&state, &id);
             }
         }))
     }
@@ -1382,6 +1551,7 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shed_proto::SessionRecord;
 
     fn dir(name: &str) -> PathBuf {
         crate::temp_dir(&format!("registry-{name}"))
@@ -1416,7 +1586,7 @@ mod tests {
             terminals.join(",")
         );
         fs::write(&path, file).unwrap();
-        let registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         let names: Vec<String> = registry
             .ls(&LsParams::default())
             .into_iter()
@@ -1435,7 +1605,7 @@ mod tests {
     #[tokio::test]
     async fn each_shipped_rule_matches_its_golden_screen_and_unlabelled_terminals_never_check() {
         let path = dir("rules").join("state.json");
-        let mut reg = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let mut reg = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         let screens = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
         let records = crate::providers::load(&reg.providers).0;
         let rules = records
@@ -1485,7 +1655,7 @@ mod tests {
     fn a_corrupt_state_file_is_refused_and_kept() {
         let path = dir("corrupt").join("state.json");
         fs::write(&path, "{\"version\":1,\"terminals\":[").unwrap();
-        let e = Registry::load(&path, Path::new("shed.sock"))
+        let e = Registry::load(&path, Path::new("shed.sock"), Vec::new())
             .err()
             .expect("refused");
         assert!(e.to_string().contains("EOF"), "{e}");
@@ -1499,11 +1669,11 @@ mod tests {
     fn leftovers_go_on_load_and_a_removed_terminal_leaves_nothing() {
         let root = dir("leftovers");
         let path = root.join("state.json");
-        let file = r#"{"version":1,"terminals":[{"name":"kept.1","labels":{},"cwd":"/home/user","cmd":["make"],"keep":false,"state":"exited","exit":0,"pid":null}]}"#;
+        let file = r#"{"version":1,"terminals":[{"name":"kept.1","labels":{},"cwd":"/home/user","cmd":["make"],"keep":false,"state":"exited","exit":0,"pid":null,"acp":"fake","session":{"id":"s1"}}]}"#;
         fs::write(&path, file).unwrap();
         let files = [
             "history/kept.1.log",
-            "acp/kept.1.jsonl",
+            "sessions/s1.jsonl",
             "history/gone.log",
             "history/gone.log.tmp",
             "acp/gone.jsonl",
@@ -1513,7 +1683,7 @@ mod tests {
             fs::write(root.join(f), "x").unwrap();
         }
         let exists = || files.map(|f| root.join(f).exists());
-        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         assert_eq!(exists(), [true, true, false, false, false]);
         registry.rm("kept.1").unwrap().1();
         assert_eq!(exists(), [false; 5]);
@@ -1533,7 +1703,7 @@ mod tests {
     async fn a_thousand_changes_in_a_second_write_at_most_three_times_and_end_on_disk() {
         let path = dir("burst").join("state.json");
         let registry = Arc::new(Mutex::new(
-            Registry::load(&path, Path::new("shed.sock")).unwrap(),
+            Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap(),
         ));
         tokio::spawn(keep_saved(Arc::clone(&registry)));
         let term = sleeper(&mut crate::lock(&registry), "busy");
@@ -1591,7 +1761,7 @@ mod tests {
         let old = serde_json::json!({"version": 1, "terminals": terminals});
         fs::write(&path, serde_json::to_vec_pretty(&old).unwrap()).unwrap();
         assert!(fs::metadata(&path).unwrap().len() > 1_000_000);
-        let registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         assert!(fs::metadata(&path).unwrap().len() < 300_000);
         let file = saved(&path);
         let acp69 = file["terminals"]
@@ -1615,7 +1785,7 @@ mod tests {
             return;
         }
         let path = dir("mem-guard").join("state.json");
-        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         let run = |name: &str, limit: Option<u64>| {
             let run = serde_json::json!({"name": name, "cwd": "/", "cmd": ["sleep", "100"],
                 "mem_max_mb": limit});
@@ -1683,7 +1853,7 @@ mod tests {
     #[test]
     fn sample_time_report() {
         let path = dir("sample-time").join("state.json");
-        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         let terms: Vec<_> = (0..30)
             .map(|n| sleeper(&mut registry, &format!("s{n}")))
             .collect();
@@ -1697,6 +1867,76 @@ mod tests {
         for term in terms {
             term.kill(GRACE).unwrap();
         }
+    }
+
+    #[test]
+    fn a_running_old_bridge_s_transcript_is_carried_to_its_session_and_still_written() {
+        let root = dir("carry");
+        let path = root.join("state.json");
+        let terminal = r#"{"name":"a","labels":{},"cwd":"/work","cmd":["shed"],"keep":false,"state":"running","exit":null,"pid":null,"acp":"fake","session":{"id":"s/1"}}"#;
+        fs::write(
+            &path,
+            format!(r#"{{"version":1,"terminals":[{terminal}]}}"#),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("acp")).unwrap();
+        let line = |prompt: &str, reply: &str| {
+            let turn = serde_json::json!({"event": "turn", "prompt": prompt});
+            let reply =
+                serde_json::json!({"event": "reply", "text": reply, "stop_reason": "end_turn"});
+            format!("{turn}\n{reply}\n")
+        };
+        fs::write(root.join("acp/a.jsonl"), line("fix it\nplease", "done")).unwrap();
+        let mut bridge = fs::OpenOptions::new()
+            .append(true)
+            .open(root.join("acp/a.jsonl"))
+            .unwrap();
+        let registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
+        bridge.write_all(line("more", "again").as_bytes()).unwrap();
+        assert!(!root.join("acp/a.jsonl").exists());
+        assert!(root.join("sessions/s%2F1.jsonl").exists());
+        let params = ReadParams {
+            name: "a".into(),
+            lines: None,
+            history: false,
+            events: false,
+            before: None,
+            n: None,
+        };
+        let read = registry.read(params).unwrap()().unwrap();
+        assert_eq!(read.text, "> fix it\nplease\ndone\n> more\nagain");
+        let record = sessions::read(&path, "s/1").unwrap();
+        assert_eq!(
+            (record.agent.as_str(), record.cwd),
+            ("fake", PathBuf::from("/work"))
+        );
+    }
+
+    #[test]
+    fn the_prune_pass_deletes_a_session_past_the_keep_time_and_leaves_a_younger_one() {
+        let root = dir("sessions-prune");
+        let path = root.join("state.json");
+        let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
+        let now = shed_core::clock::unix_now();
+        for (id, days) in [("old", 31), ("young", 29)] {
+            let updated = now - days * 86_400;
+            let record = SessionRecord {
+                id: id.into(),
+                updated,
+                ..SessionRecord::default()
+            };
+            sessions::write(&path, &record).unwrap();
+            fs::write(sessions::transcript(&path, id), "{}\n").unwrap();
+        }
+        registry.record(Sample::default())();
+        let left: Vec<String> = sessions::list(&path)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(left, ["young"]);
+        assert!(!sessions::transcript(&path, "old").exists());
+        assert!(sessions::transcript(&path, "young").exists());
     }
 
     #[test]
@@ -1717,7 +1957,7 @@ mod tests {
         fs::write(&path, file).unwrap();
         fs::create_dir_all(root.join("history")).unwrap();
         fs::write(root.join("history/old.log"), "x").unwrap();
-        let mut registry = Registry::load(&path, Path::new("shed.sock")).unwrap();
+        let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         let term = sleeper(&mut registry, "running");
         let names = |r: &Registry| -> Vec<String> {
             r.ls(&LsParams::default())

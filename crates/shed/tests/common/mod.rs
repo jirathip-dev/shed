@@ -47,7 +47,11 @@ impl Server {
     }
 
     pub fn with_env(dir: &Path, secs: &str, env: &[(&str, &str)]) -> Self {
-        let child = Command::new(env!("CARGO_BIN_EXE_shed"))
+        Self::of(Path::new(env!("CARGO_BIN_EXE_shed")), dir, secs, env)
+    }
+
+    pub fn of(exe: &Path, dir: &Path, secs: &str, env: &[(&str, &str)]) -> Self {
+        let child = Command::new(exe)
             .args(["serve", "--sample", secs, "--dir"])
             .arg(dir)
             .env("SHELL", "/bin/sh")

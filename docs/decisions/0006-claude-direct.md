@@ -1,6 +1,9 @@
 # 0006: Claude stays on the ACP adapter; drop `npx`, no direct bridge
 
-**Status:** accepted (#133). Measurement only; no runtime change.
+**Status:** accepted (#133). Measurement only; no runtime change. Its "stay on the adapter, no direct
+bridge" is superseded by [the agent drivers ADR](../architecture/agent-drivers/adr.md) (#172, accepted in q2159):
+shed owns history, the session list and resume itself, and cancel and a model switch stop and resume the
+process, so the three losses below no longer hold. The measurement and "drop `npx`" (#170) stand.
 
 ## Context
 

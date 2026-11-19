@@ -5,6 +5,7 @@
 //! one joins the cell before it, as `unicode-width` measures them.
 
 use std::collections::VecDeque;
+use std::fmt::Write as _;
 
 use unicode_width::UnicodeWidthChar as _;
 use vte::{Params, Parser, Perform};
@@ -224,6 +225,67 @@ impl Screen {
     /// Changes the size. Rows that no longer fit move into scrollback; lines are not re-wrapped.
     pub fn resize(&mut self, size: Size) {
         self.grid.resize(size);
+    }
+
+    /// VT text that gives a blank screen of this size the same rows, pens, cursor and modes.
+    #[must_use]
+    pub fn repaint(&self) -> String {
+        let g = &self.grid;
+        let mut out = String::from("\x1b[?1049l\x1b[r\x1b[H\x1b[2J");
+        if let Some((cells, (row, col))) = &g.primary {
+            paint(&mut out, cells);
+            write!(out, "\x1b[{};{}H\x1b[?1049h", row + 1, col + 1).ok();
+        }
+        paint(&mut out, &g.cells);
+        if g.top > 0 || g.bottom + 1 < g.rows {
+            write!(out, "\x1b[{};{}r", g.top + 1, g.bottom + 1).ok();
+        }
+        let (saved, row) = (g.saved, g.cells.get(g.row));
+        write!(out, "\x1b[{};{}H\x1b7", saved.0 + 1, saved.1 + 1).ok();
+        let tail = row.and_then(|l| l.get(g.col)).is_some_and(|c| c.0 == TAIL);
+        let col = g.col - usize::from(g.wrap_next && tail);
+        write!(out, "\x1b[{};{}H", g.row + 1, col + 1).ok();
+        if g.wrap_next {
+            let (glyph, pen) = row.and_then(|l| l.get(col)).copied().unwrap_or_else(space);
+            out.push_str(&sgr(&pen));
+            out.extend(chars(&glyph));
+        }
+        out.push_str(&sgr(&g.pen));
+        out.push_str(if g.paste {
+            "\x1b[?2004h"
+        } else {
+            "\x1b[?2004l"
+        });
+        out
+    }
+}
+
+fn sgr(pen: &Pen) -> String {
+    let color = |c: Option<Color>, base: u8| match c {
+        None => String::new(),
+        Some(Color::Index(i)) => format!(";{base};5;{i}"),
+        Some(Color::Rgb(r, g, b)) => format!(";{base};2;{r};{g};{b}"),
+    };
+    let flags = [(pen.bold, ";1"), (pen.italic, ";3"), (pen.underline, ";4")];
+    let flags = flags.into_iter().chain([(pen.inverse, ";7")]);
+    let on: String = flags.filter(|(on, _)| *on).map(|(_, f)| f).collect();
+    format!("\x1b[0{on}{}{}m", color(pen.fg, 38), color(pen.bg, 48))
+}
+
+fn paint(out: &mut String, cells: &Cells) {
+    let mut pen = None;
+    for (r, row) in cells.iter().enumerate() {
+        let end = row.iter().rposition(|c| *c != space()).map_or(0, |i| i + 1);
+        if end > 0 {
+            write!(out, "\x1b[{};1H", r + 1).ok();
+        }
+        for (glyph, p) in row.iter().take(end) {
+            if pen != Some(*p) {
+                out.push_str(&sgr(p));
+                pen = Some(*p);
+            }
+            out.extend(chars(glyph));
+        }
     }
 }
 
@@ -898,6 +960,22 @@ mod tests {
         let mut s = Screen::new(Size { rows, cols }, scrollback);
         s.feed(input.as_bytes());
         s
+    }
+
+    #[test]
+    fn a_repaint_fed_to_a_blank_screen_gives_the_same_screen() {
+        let mut s = screen(4, 6, 10, "\x1b[1;31mred\x1b[0m 世e\u{301}\r\n");
+        s.feed("\x1b[48;2;1;2;3mbg\x1b[0m\x1b[2;4H\x1b7\x1b[?2004h\x1b[?1049h".as_bytes());
+        s.feed("alt\x1b[38;5;200;4m\x1b[2;3r\x1b[4;1Habcdef".as_bytes());
+        let mut t = screen(4, 6, 10, "");
+        t.feed(s.repaint().as_bytes());
+        assert_eq!((t.snapshot(), t.repaint()), (s.snapshot(), s.repaint()));
+        for more in ["x\x1b8y", "\x1b[?1049l", "z\r\n\r\n\r\n"] {
+            s.feed(more.as_bytes());
+            t.feed(more.as_bytes());
+            assert_eq!(t.snapshot(), s.snapshot(), "after {more:?}");
+        }
+        assert!(t.bracketed_paste());
     }
 
     #[test]

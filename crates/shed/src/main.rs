@@ -4,6 +4,7 @@
 mod attach;
 mod out;
 mod service;
+mod update;
 mod watch;
 
 use shed_server::runner::ExitCode;
@@ -20,15 +21,16 @@ use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use shed_server::acp::{self, Input, Policy};
 use shed_server::agents;
+use shed_server::handover;
+use shed_server::lane::{self, Input, Policy};
 use shed_server::machines::{self, Machine};
 use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
     Children, Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState,
     LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported,
-    RunParams, SendParams, State, StateParams, StatsParams, Target, TerminalInfo, WaitOutcome,
-    WaitParams, WaitResult,
+    RunParams, SendParams, SessionRecord, State, StateParams, StatsParams, Target, TerminalInfo,
+    WaitOutcome, WaitParams, WaitResult,
 };
 use shed_server::{Client, Paths};
 
@@ -49,12 +51,7 @@ struct Cli {
 enum Command {
     Hello,
     Schema,
-    Serve {
-        #[arg(long)]
-        detach: bool,
-        #[arg(long, value_name = "S", default_value_t = 2.0)]
-        sample: f64,
-    },
+    Serve(ServeArgs),
     Run(Box<RunArgs>),
     Ls {
         #[arg(long = "label", value_name = "K=V", value_parser = label)]
@@ -148,6 +145,19 @@ enum Command {
     Uninstall,
     Doctor,
     Setup(SetupArgs),
+    SelfUpdate(update::Args),
+}
+
+#[derive(Args)]
+struct ServeArgs {
+    #[arg(long)]
+    detach: bool,
+    #[arg(long, value_name = "S", default_value_t = 2.0)]
+    sample: f64,
+    #[arg(long, hide = true)]
+    inherit: bool,
+    #[arg(long, hide = true)]
+    preflight: bool,
 }
 
 #[derive(Args)]
@@ -162,6 +172,10 @@ struct BridgeArgs {
     agent: String,
     #[arg(long)]
     providers: PathBuf,
+    #[arg(long)]
+    stream: bool,
+    #[arg(long)]
+    why: Option<String>,
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
 }
@@ -244,7 +258,7 @@ impl Server<'_> {
             command,
             Command::Hello
                 | Command::Schema
-                | Command::Serve { .. }
+                | Command::Serve(_)
                 | Command::Connect { .. }
                 | Command::Machine(
                     MachineCommand::Add { .. } | MachineCommand::Ls | MachineCommand::Rm { .. }
@@ -255,6 +269,7 @@ impl Server<'_> {
                 | Command::Uninstall
                 | Command::Doctor
                 | Command::Setup(_)
+                | Command::SelfUpdate(_)
         );
         if local && on.is_some() {
             bail!(
@@ -509,7 +524,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             }
         }
         Command::Schema => out::line(format_args!("{:#}", shed_server::proto::openrpc())),
-        Command::Serve { detach, sample } => serve(&paths, cli.dir.as_deref(), detach, sample)?,
+        Command::Serve(args) => serve(&paths, cli.dir.as_deref(), &args)?,
         Command::Run(args) => run_terminal(&server, json, *args)?,
         Command::Ls { labels, parent } => {
             let labels = labels.into_iter().collect();
@@ -589,9 +604,9 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::File { action, path } => file(&server, json, &action, path)?,
         Command::Install { force } => service::install(force)?,
         Command::Uninstall => service::uninstall()?,
-        Command::Doctor if !service::doctor(&paths)? => return Ok(ExitCode::FAILURE),
-        Command::Doctor => {}
+        Command::Doctor => return service::doctor(&paths),
         Command::Setup(args) => setup(&paths, &args)?,
+        Command::SelfUpdate(a) => return update::self_update(&paths, &a),
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -605,15 +620,36 @@ fn ls(server: &Server, json: bool, params: &LsParams) -> anyhow::Result<()> {
     print(json, &list, || table(&list, false))
 }
 
-fn serve(paths: &Paths, dir: Option<&Path>, detach: bool, sample: f64) -> anyhow::Result<()> {
-    if detach {
+fn serve(paths: &Paths, dir: Option<&Path>, args: &ServeArgs) -> anyhow::Result<()> {
+    let sample = args.sample;
+    if args.preflight {
+        out::line(handover::preflight(paths)?);
+        return Ok(());
+    }
+    if args.detach {
         return serve_detached(paths, dir, Some(sample));
     }
     let every = Duration::try_from_secs_f64(sample)
         .ok()
         .filter(|d| !d.is_zero())
         .context("--sample must be a positive number of seconds")?;
-    shed_server::serve(paths, every).context("shed serve")
+    let again = handover::Restart {
+        exe: std::env::current_exe()?,
+        inherit: [serve_args(dir, Some(sample)), vec!["--inherit".into()]].concat(),
+        preflight: [serve_args(dir, None), vec!["--preflight".into()]].concat(),
+    };
+    shed_server::serve(paths, every, args.inherit, again).context("shed serve")
+}
+
+fn serve_args(dir: Option<&Path>, sample: Option<f64>) -> Vec<OsString> {
+    let mut args = vec![OsString::from("serve")];
+    if let Some(dir) = dir {
+        args.extend(["--dir".into(), dir.into()]);
+    }
+    if let Some(sample) = sample {
+        args.extend(["--sample".into(), sample.to_string().into()]);
+    }
+    args
 }
 
 fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()> {
@@ -680,11 +716,11 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
 fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> {
     let mut read: ReadResult = server.connect(None)?.call(Method::Read, params)?;
     if params.events && !json {
-        let mut preview = shed_server::acp::Preview::default();
+        let mut preview = shed_server::lane::transcript::Preview::default();
         for e in read.events.drain(..) {
             preview.push(e.kind);
         }
-        let (cols, _, color) = shed_server::acp::stdout_style();
+        let (cols, _, color) = shed_server::lane::transcript::stdout_style();
         read.text = preview.draw(cols, color, usize::MAX).join("\n");
     }
     let end = if read.text.is_empty() { "" } else { "\n" };
@@ -709,7 +745,7 @@ fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
         };
         let state = StateParams { name, report };
         let _: TerminalInfo = client.call(Method::State, &state)?;
-        params.text = acp::frame(&Input::Prompt(std::mem::take(&mut params.text)));
+        params.text = lane::frame(&Input::Prompt(std::mem::take(&mut params.text)));
     }
     let done: Value = client.call(Method::Send, &params)?;
     print(json, &done, String::new)
@@ -719,7 +755,9 @@ fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
     let rules = shed_server::providers::find(&a.providers, &a.agent);
-    let code = acp::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
+    let at = (a.socket.as_path(), a.state.as_path());
+    let driver = (a.stream, a.why.as_deref());
+    let code = lane::bridge(&a.cmd, &here, at, (&a.agent, a.policy, rules), driver)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
@@ -738,7 +776,7 @@ fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::R
     if info.acp.is_none() {
         bail!("{name} is not an ACP terminal (shed run --acp)");
     }
-    let text = acp::frame(input);
+    let text = lane::frame(input);
     let params = SendParams {
         name,
         text,
@@ -769,15 +807,14 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
             print(json, &agent, || format!("removed {}", line(&agent)))
         }
         Some(AgentsCommand::Sessions { id }) => {
-            let agents = agents::list(&paths.state)?;
-            let agent = agents.iter().find(|a| a.id == id);
-            let agent = agent.with_context(|| format!("ACP agent {id} is not installed"))?;
-            let here = std::env::current_dir().context("current directory")?;
-            let list = acp::sessions(&agent.cmd, &here)?;
+            let mut list = lane::sessions::list(&paths.state)?;
+            list.retain(|s| s.agent == id);
             print(json, &list, || {
-                let field = |s: &Value, k: &str| s[k].as_str().unwrap_or("-").to_owned();
-                let row = |s| ["sessionId", "updatedAt", "cwd", "title"].map(|k| field(s, k));
-                list.iter().map(|s| row(s).join("  ") + "\n").collect()
+                let row = |s: &SessionRecord| {
+                    let (id, updated, cwd) = (&s.id, s.updated, s.cwd.display());
+                    format!("{id}  {updated}  {cwd}  {}\n", s.title)
+                };
+                list.iter().map(row).collect()
             })
         }
     }
@@ -910,7 +947,20 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
         output: args.output,
         timeout: args.timeout,
     };
-    let done: WaitResult = server.connect(None)?.call(Method::Wait, &params)?;
+    let started = shed_server::clock::now();
+    let done: WaitResult = again(server, |c| {
+        let gone = shed_server::clock::now()
+            .duration_since(started)
+            .as_secs_f64();
+        let timeout = params.timeout.map(|t| (t - gone).max(0.0));
+        c.call(
+            Method::Wait,
+            &WaitParams {
+                timeout,
+                ..params.clone()
+            },
+        )
+    })?;
     let t = &done.terminal;
     let state = t.reported.as_ref().map(|r| &r.state);
     print(json, &done, || match (done.outcome, t.exit) {
@@ -942,14 +992,43 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
     }))
 }
 
-fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
+fn again<T>(
+    server: &Server,
+    mut call: impl FnMut(&mut Client) -> Result<T, shed_server::Error>,
+) -> anyhow::Result<T> {
     let mut client = server.connect(None)?;
-    let _: Value = client.call(Method::Events, params)?;
+    for _ in 0..100 {
+        match call(&mut client) {
+            Err(shed_server::Error::BadResponse(_) | shed_server::Error::Io(_)) => {
+                shed_server::clock::sleep(Duration::from_millis(100));
+                client = server.connect(None).unwrap_or(client);
+            }
+            done => return Ok(done?),
+        }
+    }
+    Ok(call(&mut client)?)
+}
+
+fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
+    let mut params = params.clone();
+    let mut client = server.connect(None)?;
+    let _: Value = client.call(Method::Events, &params)?;
     let mut out = io::stdout().lock();
-    for line in client.split().0.lines() {
+    let mut lines = client.split().0.lines();
+    loop {
+        let Some(line) = lines.next() else {
+            let Some(Ok(mut client)) = server.on.is_none().then(|| server.connect(None)) else {
+                return Ok(());
+            };
+            let _: Value = client.call(Method::Events, &params)?;
+            lines = client.split().0.lines();
+            continue;
+        };
         let mut line = line?;
+        let event = serde_json::from_str::<Event>(&line).ok();
+        params.since = event.as_ref().map(|e| e.seq).or(params.since);
         if let Some(m) = &server.on
-            && let Ok(mut event) = serde_json::from_str::<Event>(&line)
+            && let Some(mut event) = event
         {
             let prefix = format!("{}/", m.name);
             if server.linked && !event.name.starts_with(&prefix) {
@@ -963,7 +1042,6 @@ fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
         writeln!(out, "{line}")?;
         out.flush()?;
     }
-    Ok(())
 }
 
 fn machine(server: &Server, json: bool, command: MachineCommand) -> anyhow::Result<ExitCode> {
@@ -1158,13 +1236,7 @@ fn serve_detached(paths: &Paths, dir: Option<&Path>, sample: Option<f64>) -> any
     if UnixStream::connect(&paths.socket).is_ok() {
         bail!("a shed server already runs on {}", paths.socket.display());
     }
-    let mut args = vec![OsString::from("serve")];
-    if let Some(dir) = dir {
-        args.extend(["--dir".into(), dir.into()]);
-    }
-    if let Some(sample) = sample {
-        args.extend(["--sample".into(), sample.to_string().into()]);
-    }
+    let args = serve_args(dir, sample);
     let mut child = shed_server::runner::detached(&std::env::current_exe()?, args)
         .context("starting shed serve")?;
     let stdout = child.stdout.take().context("shed serve stdout")?;

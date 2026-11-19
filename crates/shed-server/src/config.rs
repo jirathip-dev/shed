@@ -39,6 +39,14 @@ pub fn prune_after() -> u64 {
         .unwrap_or(86_400)
 }
 
+/// How long shed keeps a session after its last turn: `$SHED_SESSIONS_KEEP` days of `shed serve`, else 30,
+/// in seconds.
+#[must_use]
+pub fn sessions_keep() -> u64 {
+    let days = var("SHED_SESSIONS_KEEP").and_then(|s| s.parse().ok());
+    days.unwrap_or(30u64).saturating_mul(86_400)
+}
+
 /// How many of an agent's last sessions `agents` takes medians over: `$SHED_MEDIAN_OF`, else 20.
 #[must_use]
 pub fn median_of() -> usize {
@@ -78,4 +86,15 @@ pub fn mem_mb(s: &str) -> Option<u64> {
 #[must_use]
 pub fn mem_max() -> Option<u64> {
     var("SHED_MEM_MAX").as_deref().and_then(mem_mb)
+}
+
+/// Where `self-update` reads main's head and the releases: `$SHED_UPDATE_REPO` (a git remote) and
+/// `$SHED_UPDATE_RELEASES` (a URL whose `<tag>/<asset>` is a release asset), else shed's GitHub repo.
+#[must_use]
+pub fn update_source() -> (String, String) {
+    let repo = "https://github.com/jirathip-dev/shed";
+    let repo_var = var("SHED_UPDATE_REPO").unwrap_or_else(|| format!("{repo}.git"));
+    let releases =
+        var("SHED_UPDATE_RELEASES").unwrap_or_else(|| format!("{repo}/releases/download"));
+    (repo_var, releases)
 }

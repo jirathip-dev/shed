@@ -48,3 +48,54 @@ priority = 10
 region = 20
 any = ["Yes, I trust this folder"]
 version = "2.1.326"
+
+# The stream driver: `claude`'s own stream-json mode. Off until <config>/providers/claude.toml says driver = "stream".
+[stream]
+wire = "claude"
+command = [
+  "claude",
+  "-p",
+  "--input-format",
+  "stream-json",
+  "--output-format",
+  "stream-json",
+  "--include-partial-messages",
+  "--verbose",
+  "--replay-user-messages"
+]
+adapter = "claude-agent-acp"
+launchers = ["npx", "-y", "node"]
+new = ["--session-id", "{session}"]
+resume = ["--resume", "{session}"]
+model = ["--model", "{model}"]
+models = [["opus", "Opus"], ["fable", "Fable"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]]
+mcp = ["--mcp-config", "{file}"]
+plan = ["TodoWrite", "todos"]
+
+[stream.policy]
+allow = ["--permission-mode", "bypassPermissions", "--permission-prompts", "none"]
+deny = ["--permission-mode", "default", "--permission-prompts", "none"]
+
+[stream.meta]
+"systemPrompt" = "--system-prompt"
+"systemPrompt.append" = "--append-system-prompt"
+"systemPrompt.excludeDynamicSections" = "--exclude-dynamic-system-prompt-sections"
+"claudeCode.options.settingSources" = "--setting-sources"
+"claudeCode.options.settings" = "--settings"
+"claudeCode.options.strictMcpConfig" = "--strict-mcp-config"
+"claudeCode.options.tools" = "--tools"
+"claudeCode.options.allowedTools" = "--allowed-tools"
+"claudeCode.options.disallowedTools" = "--disallowed-tools"
+"claudeCode.options.model" = "--model"
+
+[stream.tools]
+Bash = ["execute", "command"]
+Read = ["read", "file_path"]
+Edit = ["edit", "file_path"]
+Write = ["edit", "file_path"]
+NotebookEdit = ["edit", "notebook_path"]
+Grep = ["search", "pattern"]
+Glob = ["search", "pattern"]
+WebFetch = ["fetch", "url"]
+WebSearch = ["fetch", "query"]
+Task = ["think", "description"]

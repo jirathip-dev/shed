@@ -10,14 +10,17 @@ screen text. ACP v1 only; v2 becomes an opt-in once it is stable (see [ACP v2](#
 shed agents add claude-acp      # or codex-acp, pi-acp, gemini, …
 shed agents                     # id, pinned version, distribution, command
 shed agents rm claude-acp
-shed agents sessions claude-acp # the agent's sessions: id, last activity, folder, title
+shed agents sessions claude-acp # shed's sessions of this agent: id, last turn (unix s), folder, title
 ```
 
 `add` reads the ACP registry (`--registry <url|file>`, default
 `https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`) and installs the version it lists now:
 this platform's `binary` entry (downloaded with `curl`, checked against its `sha256`, unpacked under
-`agents/<id>/<version>/` beside the state file), else `npx -y <package@version>`, else `uvx <package>`. The
-entry's `args` and `env` are kept. The result goes to `agents.json` beside the state file. Nothing upgrades an
+`agents/<id>/<version>/` beside the state file), else the `npx` package (installed once with
+`npm install --prefix agents/<id>/<version>` and run as `node <its bin>`, so no `npm exec` stays beside the
+adapter), else `uvx <package>`. The entry's `args` and `env` are kept. A failed `npm install`, or a package with
+no `bin`, fails `add` and records nothing; an agent recorded earlier as `npx -y …` runs as before until `rm` and
+`add` move it to the new form. The result goes to `agents.json` beside the state file. Nothing upgrades an
 agent: `rm` it and `add` it again.
 
 ## Run one
@@ -33,7 +36,7 @@ shed read t1 --events             # the same events drawn: › prompt, ✓ kind 
 shed read t1 --events --json      # each event with its seq; page with --before <seq> --lines <n>
 shed cancel t1                    # or: shed keys t1 esc
 shed model t1 opus                # one of `shed get t1`'s session.models
-shed run --acp claude-acp --resume <session id>   # load a past session (`agents sessions`, `shed get`'s session.id)
+shed run --acp claude-acp --resume <session id>   # continue a session (`agents sessions`, `shed get`'s session.id)
 shed run --acp claude-acp --mcp servers.json      # with MCP servers (below)
 shed run --acp claude-acp --meta '{"k": 1}'       # with session options (below)
 shed send t1 "/review src/"                       # a slash command is an ordinary prompt
@@ -69,11 +72,25 @@ follows others means the prompt cache was lost: a model switch, a changed system
 past the cache's lifetime (minutes) before a hibernated lane woke. The first turn of a session is always low,
 since it writes the cache. Codex reports cache reads but no cache writes, and has no `[quota]` record yet.
 
+shed owns sessions, whatever the agent offers. Each session shed runs has a record `sessions/<id>.json` (a
+`SessionRecord` in [protocol.md](protocol.md): `id`, `agent`, `cwd`, `title`, the first prompt's first line,
+`updated`, the last turn's end, and `turns`) and a transcript `sessions/<id>.jsonl`, beside the state file (0600
+in a 0700 folder; in a file name each byte of the id outside `[A-Za-z0-9._-]` is written `%XX`). `read` finds a
+terminal's transcript by its `session.id`, and `session.driver` says how the lane talks to its agent (`acp`, or
+`stream`: [The stream driver](#the-stream-driver)).
+`shed agents sessions <id>` lists shed's own sessions of that agent, newest first, from the records alone: it
+starts no agent and needs none installed; `--json` gives the records, each with its `transcript` path. It no
+longer asks the agent (`session/list`): a session shed never ran is not listed.
+
 `--resume <id>` (the `run` method's `resume`) needs an agent that advertises `loadSession`, else the terminal
-ends as `error`. `shed agents sessions <id>` lists the agent's sessions (`session/list`, every page; run in the
-current folder) when it advertises `sessionCapabilities.list`, and refuses otherwise; `--json` gives ACP's
-session objects. The agent replays the session's history first: those events carry `"replay": true` and rebuild
-the transcript, so `read` shows the whole conversation. The session id survives a server restart in the lost
+ends as `error`. shed replays its own transcript of the session first: those events carry `"replay": true`,
+so `read` shows the whole conversation, and then the agent loads the session (`session/load`); whatever the
+agent replays during the load is dropped. A session shed never ran resumes with no earlier history shown,
+gets its record then and is listed from then on. `shed rm` of the terminal deletes the session's record and
+transcript at once (and still sends `session/close` when the agent offers it); otherwise the server deletes a
+session `$SHED_SESSIONS_KEEP` days (default 30) after its last turn. Transcripts written by an older build as
+`acp/<name>.jsonl` are renamed to `sessions/<id>.jsonl` when the server loads its state, so a lane still
+running under the old bridge across a handover keeps writing the same file. The session id survives a server restart in the lost
 terminal's `shed get`; a running ACP terminal itself survives one, its `read` and state up to date. `shed model` (the `acp.model` method) sets the agent's `model` config option
 (`session/set_config_option`; the SDK shed uses has no `session/set_model`).
 
@@ -137,8 +154,8 @@ has had no turn yet) for `$SHED_ACP_HIBERNATE_AFTER` seconds in the environment 
 the record's prompt cache lifetime on this login when that is shorter; `0` never), the bridge stops the agent's process tree and reports the state `hibernated` (a `state` event). The
 terminal, its session id, model, models and slash commands stay; only the bridge (about 8 MB) is left. The next
 send (a prompt, `model`, …) starts the agent again with the same command, folder and environment, loads the
-session (`session/load`, its replayed events marked `"replay": true` but not added to the transcript again)
-and then delivers it; sends that arrive meanwhile follow in order. The MCP servers stay in the bridge's memory
+session (`session/load`, what the agent replays dropped: the history is shed's transcript already) and then
+delivers it; sends that arrive meanwhile follow in order. The MCP servers stay in the bridge's memory
 only. An agent without `loadSession`, or a `run --acp … --no-hibernate` (the `run` method's `no_hibernate`),
 never hibernates. Measured on 2026-11-07: ten idle fake agents took 197,248 KiB awake and 77,568 KiB
 hibernated (wake 76 ms); one claude-agent-acp 0.100.0 took 502,700 KiB in 7 processes awake and 8,064 KiB in 1
@@ -150,7 +167,8 @@ hibernated, and woke to its first update in 1,946 ms (`crates/shed/tests/acp_ben
 `shed run --acp … --warm` (the `run` method's `warm`) asks for a ready spare session. The recipe is the run's
 agent, command, folder, policy, MCP servers, meta and size; the name, labels and parent are not part of it.
 If a spare of that recipe is ready (its session answered `session/new`), the run takes it: the terminal is
-renamed to the run's name with its labels and parent, its transcript and output log move with it, its
+renamed to the run's name with its labels and parent, its output log moves with it (the transcript is the
+session's, so it stays), its
 `session.ready_ms` is 0 and the bridge reports under the new name from then on. Otherwise the run starts cold.
 Either way the server then starts the next spare, `.warm-N` in `ls`, unless the recipe has one already or
 `$SHED_WARM_MAX` (default 2) spares are running. A spare nobody takes for `$SHED_WARM_IDLE` seconds (default
@@ -218,6 +236,60 @@ bridge in its environment only, never the agent's command line, environment or a
 The agent's slash commands (`available_commands_update`) are the session's `commands`
 (`[name, description, input hint]`); each change emits a `session` event. Run one by sending `/name …`.
 
+### The stream driver
+
+A lane can skip the ACP adapter and run the agent's own JSON-lines mode instead: shed's bridge and `claude`,
+no Node process (#180; design in [the agent drivers ADR](architecture/agent-drivers/README.md)). The built-in
+`claude-acp` record carries the `[stream]` table (`crates/shed-server/src/providers/claude.toml`) and no
+`driver` key, so it is off. A host turns it on with one line in its own record, read at each `run`:
+
+```sh
+echo 'driver = "stream"' >> ~/.config/shed/providers/claude.toml   # macOS: ~/Library/Application Support/shed/providers/
+shed run --acp claude-acp --policy allow --name t1 --cwd /home/user/project   # as before
+shed get t1 --json | jq -c '.session | {id, driver}'                          # {"id":"…","driver":"stream"}
+```
+
+The lane goes to the driver only when it can be served whole: the record says `driver = "stream"`, the policy has
+flags (`allow`: `--permission-mode bypassPermissions --permission-prompts none`; `deny`: `--permission-mode
+default --permission-prompts none`; `ask` has none), the `run` command is absent or ends in the adapter
+(`…claude-agent-acp…` as its last word, after `npx -y` or `node`; that part is replaced by `claude` and the
+wrapper before it, drover's `sh -c '…' sh`, is kept), and every `--meta` option has a flag in the record's
+`[stream.meta]` (drover's `claudeCode.options.settingSources`, `settings` and `strictMcpConfig`, cooee's
+`tools` and `systemPrompt.*` have). Otherwise it runs on ACP as above, `session.driver` is `acp` and the bridge's
+`--why` names the reason. `claude` runs as `claude -p --input-format stream-json --output-format stream-json
+--include-partial-messages --verbose --replay-user-messages`, then `--session-id <id>` (an id shed made) or
+`--resume <id>`, `--model`, the policy's flags, `--mcp-config <file>` and the meta flags; shed writes it nothing
+but user messages. Policy `allow` is Claude's bypass mode: the guard is the lane's own hook (drover's
+`PreToolUse` blocks a call under it, as under the adapter), and a call that would still prompt is refused.
+
+What a client sees differently, from the ADR's map (everything else is as on ACP):
+
+- `session.model` is empty until the first turn (Claude's `init` line names it), and `session.models` is the
+  record's list; `shed model` passes any name on, and a wrong one fails the next turn.
+- `session.commands` are names only (no description or hint), from the first turn.
+- `session.ready_ms` is the process start only; the agent's own start is in `first_token_ms`.
+- `tool_call`: `pending` when the call starts streaming, `in_progress` with its `raw_input`, `completed` or
+  `failed` from its result. The title is the command, path or query (the record's `[stream.tools]`), else the
+  tool's name; `locations` is that path, without lines. Calls still open when a turn is cancelled end `failed`.
+- `plan` is `TodoWrite`'s `todos`: `content` and `status`, no `priority`.
+- `mode` is `init`'s `permissionMode`, seen when a turn starts.
+- No `approval_request` or `approved`, and never `waiting-approval`: the flags decide inside Claude. A refused
+  call is a `tool_call` `failed`.
+- `usage` comes once per turn, at its end: the last request's input and cache tokens of the model's
+  `contextWindow`, and `total_cost_usd` as `cost`; `usage.turn` and `usage.total` as before.
+- `rate-limited` also follows a `rate_limit_event` whose `status` is `rejected` (note: its `resetsAt`, unix
+  seconds), besides the limit pattern.
+- `shed cancel` stops the agent's process (it ends background commands the turn started too) and reports the
+  turn `cancelled`; `shed model` is kept for the next start. Either way the next send starts `claude` again
+  with `--resume` on the same session id and pays a wake (about 3 s to the first update). A model asked for in
+  a turn waits for the turn's end.
+- `--mcp` servers are written to `sessions/<id>.mcp.json` (0600) in Claude's `mcpServers` shape for the start
+  and removed at the agent's first line; `http` and `sse` are always taken.
+- `shed rm` deletes shed's files; Claude's own session file stays until Claude cleans it.
+
+Measured on 2026-11-19 (`scripts/measure-claude-direct.py --runs 3`, macOS arm64): an awake lane on the driver
+is 332,896 KiB (bridge and `claude`) against 457,648 KiB for the adapter run by `node` and 575,280 KiB by `npx`.
+
 ## How it works
 
 `run --acp` starts an ordinary terminal whose program is shed's bridge (`shed acp-bridge`, hidden). The
@@ -230,7 +302,8 @@ capabilities) and `session/new` (the terminal's cwd and MCP servers) or `session
   typed in `attach` is a prompt; `Esc` or `Ctrl+C` alone cancels;
 - reports its events with the `emit` method and its states with `state`, as notifications over the server
   socket, written in batches by a task of their own;
-- appends every event to `acp/<name>.jsonl` beside the state file, which `read` renders;
+- appends every event to its session's transcript `sessions/<id>.jsonl` beside the state file, which `read`
+  renders, and rewrites the session's record when the session starts and at each turn's end;
 - redraws its screen (what `attach` and `shed watch` show) from those events on each change: the prompt bold
   after `›`, each tool call as one dim line (`…` running, `✓` done, `✗` failed, ACP's `kind`, the title's first
   line), approvals in yellow, the plan as a checklist and the reply's markdown lightly styled, wrapped to the
