@@ -1,0 +1,6 @@
+Decided: raise line_cap from 12612 to 12850 in ci/cap.toml with a cap-history note
+Because: "Raise shed's line cap (`ci/cap.toml` `line_cap`) from 12,612 to 12,850"
+Because: q2159
+Rejected: a ci/cap.d/ file — the repo has no ci/cap.d/, the check reads ci/cap.toml
+Check: sh scripts/line-cap.sh prints 12112 / cap 12850 and exits 0
+Owner: The size limit goes to 12,850 lines so the agent-drivers track can merge.
