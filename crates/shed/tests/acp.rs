@@ -16,7 +16,7 @@ use std::process::{Command, Output};
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
 use shed_core::proctree::{self, ProcessTable as _};
-use shed_server::acp::Preview;
+use shed_server::lane::transcript::Preview;
 use shed_server::proto::{EventKind, EventsParams, Logged, Method, ReadResult};
 use shed_server::{Client, Paths};
 

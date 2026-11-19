@@ -432,7 +432,7 @@ fn spawn(
 }
 
 fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<Terminal> {
-    let lent = crate::acp::pty_socket(socket, &info.name);
+    let lent = crate::lane::pty_socket(socket, &info.name);
     let taken = UnixStream::connect(&lent).and_then(|bridge| {
         bridge.set_read_timeout(Some(GRACE))?;
         crate::handover::take_over(&bridge, 4096)
@@ -836,7 +836,7 @@ impl Registry {
                     state,
                     ..Report::default()
                 });
-                crate::acp::frame(&crate::acp::Input::Prompt(notes.join("\n")))
+                crate::lane::frame(&crate::lane::Input::Prompt(notes.join("\n")))
             } else {
                 notes.into_iter().map(|n| n + "\r").collect()
             };
@@ -1047,7 +1047,7 @@ impl Registry {
         if p.labels.keys().any(|k| k.is_empty() || k.contains('=')) {
             return Err(bad("label keys must be non-empty and have no '='"));
         }
-        crate::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
+        crate::drivers::acp::mcp_servers(&p.mcp_servers).map_err(|e| bad(&e))?;
         if let Some(parent) = &mut p.parent {
             parent.name = self.named(&parent.name);
         }
@@ -1148,7 +1148,7 @@ impl Registry {
             session.ready_ms = Some(0);
         }
         if let Some(term) = entry.term.clone() {
-            let text = crate::acp::frame(&crate::acp::Input::Name(name.clone()));
+            let text = crate::lane::frame(&crate::lane::Input::Name(name.clone()));
             std::thread::spawn(move || term.write(text.as_bytes()).ok());
         }
         self.events.emit(&entry.info, EventKind::Started);
@@ -1217,8 +1217,8 @@ impl Registry {
     }
 
     fn files(&self, name: &str) -> [Option<PathBuf>; 3] {
-        let transcript = Some(crate::acp::transcript(&self.path, name));
-        let lent = Some(crate::acp::pty_socket(&self.socket, name));
+        let transcript = Some(crate::lane::transcript(&self.path, name));
+        let lent = Some(crate::lane::pty_socket(&self.socket, name));
         [history(&self.path, name).log, transcript, lent]
     }
 
@@ -1266,9 +1266,11 @@ impl Registry {
         let acp = entry.info.acp.is_some();
         Ok(move || {
             let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
-            let file = || fs::read_to_string(crate::acp::transcript(&state, &p.name));
+            let file = || fs::read_to_string(crate::lane::transcript(&state, &p.name));
             let mut text = match &term {
-                _ if acp && !p.events => crate::acp::render(&file().unwrap_or_default()),
+                _ if acp && !p.events => {
+                    crate::lane::transcript::render(&file().unwrap_or_default())
+                }
                 _ if acp => {
                     let (file, before) = (file().unwrap_or_default(), p.before.unwrap_or(u64::MAX));
                     let lines = (file.lines().zip(1..)).take_while(|&(_, seq)| seq < before);
@@ -1369,7 +1371,7 @@ impl Registry {
 
     pub(crate) fn state(&mut self, mut p: StateParams) -> Result<TerminalInfo, RpcError> {
         p.name = self.named(&p.name);
-        let lane = crate::acp::LANE_STATES.contains(&p.report.state.as_str());
+        let lane = crate::lane::LANE_STATES.contains(&p.report.state.as_str());
         let acp = self.entry(&p.name)?.info.acp.is_some() && lane;
         if !acp && !STATES.contains(&p.report.state.as_str()) {
             return Err(RpcError::new(
@@ -1462,7 +1464,7 @@ impl Registry {
         let why = format!("{} is not an ACP terminal", p.name);
         let acp = self.entry(&p.name)?.info.acp.as_ref();
         acp.ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, why))?;
-        let text = crate::acp::frame(&crate::acp::Input::Model(p.model));
+        let text = crate::lane::frame(&crate::lane::Input::Model(p.model));
         Ok(Input::Now(
             Arc::clone(self.live(&p.name)?),
             text.into_bytes(),
