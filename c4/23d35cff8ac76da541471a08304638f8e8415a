@@ -1,0 +1,17 @@
+Decided: this PR ships the approved ADR only; the four slices are their own later issues
+Because: "No product code changes in this issue."
+Decided: status set to accepted with the owner's answers and the 12,850 cap target
+Because: q2159
+Decided: no arch.toml lines added; the ADR ends with none and the repo has no .drover/arch.toml
+Because: docs/architecture/agent-drivers/adr.md:229
+Rejected: editing ci/cap.toml to 12850 here — the orchestrator files the raise before slice 1
+Check: cap numbers in adr.md and README.md match staging 9799fe7 (12098 of 12612)
+Owner: The plan to run Claude without the adapter is recorded as approved; building it comes in four follow-up changes.
+
+Decided: no code change for the red macOS checks; merged origin/staging twice so CI runs on staging's exact code
+Because: "No product code changes in this issue."
+Decided: restated the ADR's cap lines on staging after the raise landed: 12,112 of 12,850
+Because: docs/architecture/agent-drivers/adr.md:119
+Rejected: changing handover.rs or machines.rs here — the failing tests differ each run and the diff is docs only
+Check: git diff --quiet origin/staging HEAD -- crates scripts ci exits 0; staging's macOS CI is green
+Owner: Unrelated tests failed by chance on the Mac runner; the approved plan is unchanged and only its cap figures were refreshed.
