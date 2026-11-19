@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Measure one awake Claude session three ways (#133): through claude-agent-acp started by npx, through the
-same adapter installed once and run by node, and through the `claude` binary's own stream-json mode.
+"""Measure one awake Claude session four ways (#133, #180): through claude-agent-acp started by npx, through
+the same adapter installed once and run by node, through the `claude` binary's own stream-json mode, and as a
+real `shed` lane on the stream driver (its own server in a scratch folder, `driver = "stream"` in its
+`providers/claude.toml`, policy `allow`; the tree is the bridge and `claude`).
 
 For each: time from process start to ready (ACP: the session/new reply; stream-json: the init message) and
 to the turn's first update, the process tree's RSS once the turn is done (every process, with its command),
@@ -10,6 +12,7 @@ turns on the account `claude` is logged in to. The agents run with only HOME, PA
 TMPDIR from the environment (as the plan smoke in docs/acp.md), so no API key or parent session leaks in.
 
     scripts/measure-claude-direct.py [--runs 3] [--adapter @agentclientprotocol/claude-agent-acp@0.107.0]
+                                     [--shed shed]
 """
 
 import argparse
@@ -185,6 +188,43 @@ def direct_run(claude, cwd):
     return ready, first, procs, wake
 
 
+def lane_run(shed, cwd, tmp, n):
+    sd = os.path.join(tmp, f"s{n}")
+    os.makedirs(os.path.join(sd, "providers"))
+    with open(os.path.join(sd, "providers", "claude.toml"), "w") as f:
+        f.write('driver = "stream"\n')
+    cli = lambda *a: subprocess.run([shed, "--dir", sd, *a], env=env(), capture_output=True, text=True, check=True)
+    server = subprocess.Popen([shed, "--dir", sd, "serve"], env={**env(), "SHED_ACP_HIBERNATE_AFTER": "5"},
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    while not os.path.exists(os.path.join(sd, "shed.sock")):
+        time.sleep(0.05)
+    events = Agent([shed, "--dir", sd, "events", "--json"], cwd)
+    try:
+        began = time.monotonic()
+        cli("run", "--acp", "claude-acp", "--policy", "allow", "--name", "lane", "--cwd", cwd)
+        cli("wait", "lane", "--output", "ACP session ready", "--timeout", "60")
+        ready = time.monotonic() - began
+
+        def turn(text, until):
+            mark, sent = len(events.lines), time.monotonic()
+            cli("send", "lane", text)
+            _, at, _ = events.until(lambda m: m.get("event") in ("text", "tool_call", "plan"), mark)
+            cli("wait", "lane", "--until", *until, "--timeout", "300")
+            return at + events.began - sent
+
+        first = turn(FIRST, ["done"])
+        time.sleep(2)
+        procs = tree(json.loads(cli("get", "lane", "--json").stdout)["pid"])
+        cli("wait", "lane", "--until", "hibernated", "--timeout", "120")
+        wake = turn(AGAIN, ["done"])
+        return ready, first, procs, wake
+    finally:
+        events.stop()
+        subprocess.run([shed, "--dir", sd, "kill", "lane"], env=env(), capture_output=True)
+        server.terminate()
+        server.wait()
+
+
 def short(cmd, tmp):
     for path, name in ((os.path.realpath(tmp), "$TMP"), (tmp, "$TMP"), (os.path.expanduser("~"), "~")):
         cmd = cmd.replace(path, name)
@@ -203,6 +243,7 @@ def main():
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--adapter", default=ADAPTER, help="the npm package@version of the ACP adapter")
     p.add_argument("--claude", help="the claude binary for stream-json (default: the one the adapter's SDK runs)")
+    p.add_argument("--shed", default="shed", help="the shed binary for the lane mode")
     args = p.parse_args()
     if not shutil.which("npx") or not shutil.which("npm"):
         sys.exit("needs node, npm and npx on the PATH")
@@ -228,9 +269,10 @@ def main():
         print(f"adapter: {args.adapter} (Claude Agent SDK {sdk}); claude: {version([claude, '--version'])}")
         modes = [("npx", lambda: acp_run(["npx", "-y", args.adapter], cwd)),
                  ("node", lambda: acp_run(["node", os.path.join(pkg, bin_)], cwd)),
-                 ("stream-json", lambda: direct_run(claude, cwd))]
+                 ("stream-json", lambda: direct_run(claude, cwd)),
+                 ("shed lane", lambda: lane_run(args.shed, cwd, tmp, n))]
         results = {m: [] for m, _ in modes}
-        for _ in range(args.runs):
+        for n in range(args.runs):
             for mode, run in modes:
                 results[mode].append(run())
         for mode, _ in modes:

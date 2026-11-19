@@ -11,7 +11,7 @@ first prints a turn end that is nobody's (an agent tidying up what its stopped p
 
 Each prompt line `{"prompt": P}` is echoed (`"prompted"`), then:
 - "tool": the tool call Build, in progress, then completed, and the reply "built".
-- "slow": the text "thinking", then nothing until it is stopped.
+- "slow": the tool call Sleep, in progress, the text "thinking", then nothing until it is stopped.
 - "mcp": the reply "<mode> <text>" of the MCP file.
 - "env": the reply "WRAPPED=<$WRAPPED>".
 - anything else: the reply "[<model>] you said: <P>".
@@ -61,6 +61,7 @@ while True:
         say({"tool": {"id": "t1", "status": "completed"}})
         reply = "built"
     elif prompt == "slow":
+        say({"tool": {"id": "t2", "title": "Sleep", "kind": "execute", "status": "in_progress"}})
         say({"text": "thinking"})
         time.sleep(600)
     elif prompt == "mcp":

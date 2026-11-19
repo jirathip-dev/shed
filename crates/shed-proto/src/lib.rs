@@ -1389,12 +1389,18 @@ pub struct Stream {
     pub resume: Vec<String>,
     /// The arguments that set the model (`{model}`).
     pub model: Vec<String>,
+    /// The models `shed model` offers: id and name.
+    pub models: Vec<[String; 2]>,
     /// The arguments that pass the MCP servers (`{file}`: a private file with the wire's text).
     pub mcp: Vec<String>,
     /// Each policy's arguments; a policy without an entry stays on ACP.
     pub policy: BTreeMap<String, Vec<String>>,
     /// Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.
     pub meta: BTreeMap<String, String>,
+    /// Each tool's ACP kind and the input key that is its title.
+    pub tools: BTreeMap<String, [String; 2]>,
+    /// The tool, and its input key, whose list is the plan.
+    pub plan: Option<[String; 2]>,
 }
 
 /// The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key.
