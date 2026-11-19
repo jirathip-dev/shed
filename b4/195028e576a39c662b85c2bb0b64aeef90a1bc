@@ -1,0 +1,20 @@
+Decided: the writer opens sessions/<id>.jsonl once the lane learns its id; on a resume it replays that file marked replay, then appends; a new session truncates it
+Because: "replays shed's own transcript (events marked `\"replay\": true`), then tells the agent to load the session"
+Decided: the ACP load's text, tool and plan updates are dropped; commands, models, mode and usage from the load are still heard
+Because: crates/shed-server/src/drivers/acp.rs:322
+Decided: old acp/<name>.jsonl files are renamed (same inode) to sessions/<id>.jsonl when the server loads its state, so a still-running old bridge keeps writing them
+Because: crates/shed-server/src/lane/sessions.rs:106
+Decided: the prune pass runs with each stats sample, outside the lock, and skips sessions of running terminals
+Because: crates/shed-server/src/registry.rs:993
+Decided: the fake agent gains --unique (sess-<pid>) for the warm test, whose spares run one recipe at once
+Because: crates/shed/tests/fake_acp.py:52
+Rejected: hard-linking the old transcript instead of renaming it — two names for one file, and the old one never cleaned up
+Rejected: keeping session/list as a fallback in agents sessions — the spec lists only shed's index and the ADR drops acp::sessions
+Check: machines' machine_stats test fails here and on clean staging 5ecbc78 (uptime_s 0 on this host), unrelated
+Owner: Sessions now belong to shed: their history and list come from shed's own files, rm deletes them, and they expire 30 days after the last turn.
+
+Decided: the replay bench seeds shed's sessions/sess-1.jsonl and resumes from it; the agent gets an empty history
+Because: "replays shed's own transcript (events marked `\"replay\": true`), then tells the agent to load the session"
+Rejected: keeping the agent-history replay bench — this PR drops the agent's replay, so it can only count 0
+Check: stable (macos) resume test saw exited vs running after a restart; staging c423d35 failed identically (job 135285333884), unchanged here
+Owner: The replay speed check now measures shed replaying its own saved history, which is what a resume does now.
