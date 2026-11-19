@@ -1,0 +1,13 @@
+Decided: add runs npm install --prefix agents/<id>/<version> and records node <the package's bin> plus the registry's args and env; distribution stays npx.
+Because: "records `node <path to the package's bin entry>` with the registry's `args` and `env`"
+Decided: the installed name comes from the prefix package.json's dependencies, not from parsing name@version, so local tarballs and scoped names both resolve.
+Because: crates/shed-server/src/agents.rs:157
+Decided: a string bin is used as is; for an object bin, its first entry.
+Because: crates/shed-server/src/agents.rs:165
+Decided: rm is unchanged; it already deletes agents/<id>/, the npm install included.
+Because: crates/shed-server/src/agents.rs:243
+Rejected: recording an absolute node path — the spec asks for node and the old npx was looked up on PATH too.
+Check: registry_installs_pinned_agents_from_a_fixture uses fake npm tarballs with no network: the recorded command, running the bin, npm-failure and no-bin errors that record nothing, and rm cleanup.
+Check: on this host the npx lane is 556336 KiB awake and the node lane 436016 KiB (measure-claude-direct.py --runs 1).
+Check: src/ net +14; line_cap was raised to 12612 by #173 (q2133), so line-cap.sh passes at 12112.
+Owner: npm-packaged agents now install once and run without a resident npx, about 120 MB less per lane; the cap raise it needed landed in #173.
