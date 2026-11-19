@@ -19,9 +19,9 @@ use shed_core::{Detached, History, Report, STATES, Size, Terminal};
 type Frozen = Vec<(String, Detached)>;
 
 use shed_proto::{
-    AcpSession, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged, LsParams,
-    MachineStats, ModelParams, PROTOCOL, Parent, Policy, ReadParams, ReadResult, Reported,
-    ResizeParams, Resources, RpcError, RunParams, Sample, SendParams, State, StateParams,
+    AcpSession, DriverKind, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged,
+    LsParams, MachineStats, ModelParams, PROTOCOL, Parent, Policy, ReadParams, ReadResult,
+    Reported, ResizeParams, Resources, RpcError, RunParams, Sample, SendParams, State, StateParams,
     TerminalInfo,
 };
 
@@ -909,16 +909,35 @@ impl Registry {
         ended
     }
 
-    fn bridge(
-        &self,
-        id: &str,
-        policy: Option<Policy>,
-        cmd: Vec<String>,
-    ) -> Result<Vec<String>, RpcError> {
-        let cmd = if cmd.is_empty() {
-            let installed = crate::agents::list(&self.path).map_err(internal)?;
-            let ids: Vec<_> = installed.iter().map(|a| a.id.as_str()).collect();
-            let Some(agent) = installed.iter().find(|a| a.id == id) else {
+    fn bridge(&self, p: &mut RunParams) -> Result<(), RpcError> {
+        let cmd = std::mem::take(&mut p.cmd);
+        let id = p.acp.as_deref().unwrap_or_default();
+        let policy = match p.policy.unwrap_or(Policy::Ask) {
+            Policy::Allow => "allow",
+            Policy::Deny => "deny",
+            Policy::Ask => "ask",
+        };
+        let installed = crate::agents::list(&self.path).map_err(internal)?;
+        let adapter = installed
+            .iter()
+            .find(|a| a.id == id)
+            .map(|a| a.cmd.as_slice());
+        let record = crate::providers::find(&self.providers, id);
+        let meta = p.meta.as_ref();
+        let chosen = crate::drivers::choose(&record, policy, &cmd, adapter, meta);
+        let driver = match &chosen {
+            Ok(_) => vec!["--stream".to_owned()],
+            Err(why) if record.driver == DriverKind::Stream => {
+                vec![format!("--why={why}")]
+            }
+            Err(_) => Vec::new(),
+        };
+        let cmd = match (chosen, adapter) {
+            (Ok(stream), _) => stream,
+            (Err(_), _) if !cmd.is_empty() => cmd,
+            (Err(_), Some(adapter)) => adapter.to_vec(),
+            (Err(_), None) => {
+                let ids: Vec<_> = installed.iter().map(|a| a.id.as_str()).collect();
                 let ids = if ids.is_empty() {
                     "none".to_owned()
                 } else {
@@ -928,17 +947,9 @@ impl Registry {
                     "ACP agent {id} is not installed; installed: {ids}; `shed agents add {id}`"
                 );
                 return Err(RpcError::new(ErrorCode::InvalidParams, e));
-            };
-            agent.cmd.clone()
-        } else {
-            cmd
+            }
         };
         let exe = std::env::current_exe().map_err(internal)?;
-        let policy = match policy.unwrap_or(Policy::Ask) {
-            Policy::Allow => "allow",
-            Policy::Deny => "deny",
-            Policy::Ask => "ask",
-        };
         let path = |p: &Path| p.to_string_lossy().into_owned();
         let bridge = [
             path(&exe),
@@ -953,9 +964,9 @@ impl Registry {
             id.to_owned(),
             "--providers".to_owned(),
             path(&self.providers),
-            "--".to_owned(),
         ];
-        Ok([bridge.to_vec(), cmd].concat())
+        p.cmd = [bridge.to_vec(), driver, vec!["--".to_owned()], cmd].concat();
+        Ok(())
     }
 
     pub(crate) fn dir(&self) -> PathBuf {
@@ -1044,8 +1055,8 @@ impl Registry {
             return Err(bad("warm needs acp and takes no resume"));
         }
         let recipe = p.warm.then(|| recipe(&p));
-        if let Some(id) = &p.acp {
-            p.cmd = self.bridge(id, p.policy, std::mem::take(&mut p.cmd))?;
+        if p.acp.is_some() {
+            self.bridge(&mut p)?;
         }
         if p.cmd.is_empty() {
             return Err(bad("empty cmd"));

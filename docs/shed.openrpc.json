@@ -3785,6 +3785,23 @@
             ],
             "description": "How long its prompt cache lives on each login.",
             "default": null
+          },
+          "driver": {
+            "$ref": "#/components/schemas/DriverKind",
+            "description": "Which driver runs its lanes.",
+            "default": "acp"
+          },
+          "stream": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The stream driver's data: the agent's own JSON-lines mode.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
@@ -3936,6 +3953,108 @@
           "api_vars"
         ],
         "description": "The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key."
+      },
+      "DriverKind": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "acp",
+            "description": "Its ACP adapter."
+          },
+          {
+            "type": "string",
+            "const": "stream",
+            "description": "Its own JSON-lines mode, by the record's `stream` table, when a lane can be served whole."
+          }
+        ],
+        "description": "The driver a provider's lanes run on."
+      },
+      "Stream": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "wire": {
+            "type": "string",
+            "description": "The provider's line format: `providers/<wire>.rs`.",
+            "default": ""
+          },
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The agent's command line, before the arguments of one start.",
+            "default": []
+          },
+          "adapter": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Text that names the ACP adapter when it is the last argument of a caller's own command.",
+            "default": null
+          },
+          "launchers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The words an adapter is started with; `command` replaces them and the adapter.",
+            "default": []
+          },
+          "new": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that start a session under the id shed made (`{session}`).",
+            "default": []
+          },
+          "resume": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that start the agent on a session it has (`{session}`).",
+            "default": []
+          },
+          "model": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that set the model (`{model}`).",
+            "default": []
+          },
+          "mcp": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The arguments that pass the MCP servers (`{file}`: a private file with the wire's text).",
+            "default": []
+          },
+          "policy": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Each policy's arguments; a policy without an entry stays on ACP.",
+            "default": {}
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.",
+            "default": {}
+          }
+        },
+        "description": "How the stream driver starts an agent in its own JSON-lines mode."
       },
       "Agent": {
         "type": "object",

@@ -2,9 +2,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, EmitParams, Event, EventKind,
-    EventsParams, Hooks, MatchParams, Matched, Medians, Method, ModelParams, Provider, Quota, Rule,
-    SessionRecord, State, Tokens,
+    AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, DriverKind, EmitParams, Event,
+    EventKind, EventsParams, Hooks, MatchParams, Matched, Medians, Method, ModelParams, Provider,
+    Quota, Rule, SessionRecord, State, Tokens,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -238,6 +238,8 @@ fn agent_info() -> AgentInfo {
             api: 300,
             api_vars: strings(&["FAKE_API_KEY"]),
         }),
+        driver: DriverKind::Acp,
+        stream: None,
     };
     AgentInfo {
         id: "fake-acp".into(),

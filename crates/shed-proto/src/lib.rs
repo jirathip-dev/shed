@@ -1352,6 +1352,49 @@ pub struct Provider {
     pub quota: Option<Quota>,
     /// How long its prompt cache lives on each login.
     pub cache: Option<Cache>,
+    /// Which driver runs its lanes.
+    pub driver: DriverKind,
+    /// The stream driver's data: the agent's own JSON-lines mode.
+    pub stream: Option<Stream>,
+}
+
+/// The driver a provider's lanes run on.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum DriverKind {
+    /// Its ACP adapter.
+    #[default]
+    Acp,
+    /// Its own JSON-lines mode, by the record's `stream` table, when a lane can be served whole.
+    Stream,
+}
+
+/// How the stream driver starts an agent in its own JSON-lines mode.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct Stream {
+    /// The provider's line format: `providers/<wire>.rs`.
+    pub wire: String,
+    /// The agent's command line, before the arguments of one start.
+    pub command: Vec<String>,
+    /// Text that names the ACP adapter when it is the last argument of a caller's own command.
+    pub adapter: Option<String>,
+    /// The words an adapter is started with; `command` replaces them and the adapter.
+    pub launchers: Vec<String>,
+    /// The arguments that start a session under the id shed made (`{session}`).
+    pub new: Vec<String>,
+    /// The arguments that start the agent on a session it has (`{session}`).
+    pub resume: Vec<String>,
+    /// The arguments that set the model (`{model}`).
+    pub model: Vec<String>,
+    /// The arguments that pass the MCP servers (`{file}`: a private file with the wire's text).
+    pub mcp: Vec<String>,
+    /// Each policy's arguments; a policy without an entry stays on ACP.
+    pub policy: BTreeMap<String, Vec<String>>,
+    /// Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.
+    pub meta: BTreeMap<String, String>,
 }
 
 /// The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key.

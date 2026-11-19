@@ -172,6 +172,10 @@ struct BridgeArgs {
     agent: String,
     #[arg(long)]
     providers: PathBuf,
+    #[arg(long)]
+    stream: bool,
+    #[arg(long)]
+    why: Option<String>,
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
 }
@@ -752,7 +756,8 @@ fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let _raw = attach::RawMode::enter(1, 0)?;
     let rules = shed_server::providers::find(&a.providers, &a.agent);
     let at = (a.socket.as_path(), a.state.as_path());
-    let code = lane::bridge(&a.cmd, &here, at, (&a.agent, a.policy, rules))?;
+    let driver = (a.stream, a.why.as_deref());
+    let code = lane::bridge(&a.cmd, &here, at, (&a.agent, a.policy, rules), driver)?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
