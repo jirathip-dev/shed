@@ -1,0 +1,13 @@
+Decided: Claude's wire gets the record (Wire::heard takes &Stream) and Stream gains models, tools and plan, as the ADR's record lists
+Because: docs/architecture/agent-drivers/README.md:137
+Decided: the turn's tokens go out as the record's [quota] shape (quota.token_count) so the core's existing tokens() sums them
+Because: crates/shed-server/src/providers/claude.rs:118
+Decided: Heard::Limit in the core for a rejected rate_limit_event; its note is resetsAt in unix seconds
+Because: docs/architecture/agent-drivers/README.md:401
+Decided: a cancel on the stream driver ends the turn's open tool calls as failed; the live smoke left one in_progress
+Because: crates/shed-server/src/lane.rs:351
+Rejected: hardcoding Claude's tool table in claude.rs — the ADR keeps every table that can age in the record
+Check: the smoke used drover's PreToolUse hook only (DROVER_LANE set to this lane); Stop and UserPromptSubmit were left out so it logged nothing to a real lane
+Check: machine_stats fails here (uptime_s 0) as on clean staging per #177; every other test passes
+Check: on macOS an installed node adapter path under Application Support has a space, so choose keeps such a lane on ACP; drover's npx command is served
+Owner: Claude lanes can drop the Node adapter (about 120 MB each) once a host adds one line; off until then.
