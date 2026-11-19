@@ -229,6 +229,10 @@ All notable changes to this project are documented here. The format follows
 - `shed agents add` installs an `npx` agent once under `agents/<id>/<version>/` with `npm install` and records
   `node <its bin>`, so no `npm exec` stays resident beside the adapter; `rm` removes the install. Agents
   recorded earlier as `npx -y …` keep working; `rm` and `add` move one to the new form.
+- shed owns ACP sessions: each has a record and a transcript in `sessions/` beside the state file.
+  `run --resume` replays shed's own transcript (the agent's replay is dropped), `agents sessions` lists shed's
+  sessions without starting the agent, `rm` deletes a session's files, and sessions go
+  `$SHED_SESSIONS_KEEP` days (default 30) after their last turn. `session.driver` is new (`acp`).
 
 ### Fixed
 

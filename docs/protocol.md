@@ -330,9 +330,10 @@ An ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridg
 (a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with
 `shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session
 is ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of
-the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, its
-events marked `"replay": true` so a client does not count them as new. An idle agent hibernates (state
-`hibernated`, its processes stopped); the next send wakes it, its history replayed the same way.
+the context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from
+shed's own transcript, its events marked `"replay": true` so a client does not count them as new; what the
+agent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next
+send wakes it on the same session.
 
 ```json
 {"seq":1,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"started"}
@@ -349,8 +350,19 @@ events marked `"replay": true` so a client does not count them as new. An idle a
 {"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","id":"7","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}],"call":{"toolCallId":"call_1","kind":"edit","locations":[{"path":"/work/src/lib.rs"}]}}
 {"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow"}
 {"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
-{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}},"turn_ended":1763337600,"cache_lifetime":3600,"cache_likely":"warm","ready_ms":2400,"first_token_ms":1800}
+{"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","driver":"acp","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}},"turn_ended":1763337600,"cache_lifetime":3600,"cache_likely":"warm","ready_ms":2400,"first_token_ms":1800}
 {"seq":16,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}}
+```
+
+## Session records
+
+A session shed ran, `sessions/<id>.json` beside the state file: `agents sessions` lists these, `run
+--resume <id>` continues one. Its transcript is `sessions/<id>.jsonl`; in a file name each byte of `id`
+outside `[A-Za-z0-9._-]` is `%XX`. Kept `$SHED_SESSIONS_KEEP` days (default 30) after its last turn; `rm`
+of its terminal deletes both at once.
+
+```json
+{"id":"sess_1","agent":"claude-acp","cwd":"/work","title":"Fix the failing test","updated":1763337600,"turns":3,"transcript":"/run/shed/sessions/sess_1.jsonl"}
 ```
 
 ## Screen updates

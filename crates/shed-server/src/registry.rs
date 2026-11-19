@@ -31,6 +31,7 @@ use tokio::sync::mpsc::Receiver;
 
 use crate::events::{Events, Subscriber};
 use crate::input::{DRAFT_WAIT, Draft, Input};
+use crate::lane::sessions;
 use crate::stats::Stats;
 
 pub(crate) const GRACE: Duration = Duration::from_secs(2);
@@ -620,9 +621,9 @@ impl Registry {
             }
             info.pid = term.as_ref().map(|t| t.pid());
             let exited_at = (info.state == State::Exited).then(|| exited_at.unwrap_or(now));
-            let name = info.name.clone();
+            sessions::carry_over(path, &info, now);
             entries.insert(
-                name,
+                info.name.clone(),
                 Entry {
                     exited_at,
                     notes,
@@ -976,10 +977,21 @@ impl Registry {
 
     pub(crate) fn record(&mut self, mut sample: Sample) -> impl FnOnce() + Send + use<> {
         self.refresh().ok();
-        self.prune(shed_core::clock::unix_now());
+        let now = shed_core::clock::unix_now();
+        self.prune(now);
         sample.terminals = self.counts();
         self.stats.push(sample);
-        self.stats.saving()
+        let saving = self.stats.saving();
+        let running = self
+            .entries
+            .values()
+            .filter(|e| e.info.state == State::Running);
+        let live = running.filter_map(|e| Some(e.info.session.as_ref()?.id.clone()));
+        let (state, live) = (self.path.clone(), live.collect());
+        move || {
+            saving();
+            sessions::prune(&state, now, crate::config::sessions_keep(), &live);
+        }
     }
 
     pub(crate) fn machine_stats(&self, mut now: Sample, since: Option<u64>) -> MachineStats {
@@ -1216,10 +1228,9 @@ impl Registry {
             .filter(|_| entry.info.state == State::Running)
     }
 
-    fn files(&self, name: &str) -> [Option<PathBuf>; 3] {
-        let transcript = Some(crate::lane::transcript(&self.path, name));
+    fn files(&self, name: &str) -> [Option<PathBuf>; 2] {
         let lent = Some(crate::lane::pty_socket(&self.socket, name));
-        [history(&self.path, name).log, transcript, lent]
+        [history(&self.path, name).log, lent]
     }
 
     fn rules(&self, agent: &str) -> Vec<shed_core::Rule> {
@@ -1264,9 +1275,10 @@ impl Registry {
         let entry = self.entry(&p.name)?;
         let (state, term) = (self.path.clone(), entry.term.clone());
         let acp = entry.info.acp.is_some();
+        let id = (entry.info.session.as_ref()).map_or_else(String::new, |s| s.id.clone());
         Ok(move || {
             let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
-            let file = || fs::read_to_string(crate::lane::transcript(&state, &p.name));
+            let file = || fs::read_to_string(sessions::transcript(&state, &id));
             let mut text = match &term {
                 _ if acp && !p.events => {
                     crate::lane::transcript::render(&file().unwrap_or_default())
@@ -1512,9 +1524,14 @@ impl Registry {
         }
         let entry = self.entries.remove(name).ok_or_else(|| not_found(name))?;
         let files = self.files(name);
+        let session = (entry.info.session.as_ref()).filter(|_| entry.info.acp.is_some());
+        let (state, session) = (self.path.clone(), session.map(|s| s.id.clone()));
         Ok((self.saved(entry.info), move || {
             for file in files.into_iter().flatten() {
                 fs::remove_file(file).ok();
+            }
+            if let Some(id) = session {
+                sessions::remove(&state, &id);
             }
         }))
     }
@@ -1523,6 +1540,7 @@ impl Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shed_proto::SessionRecord;
 
     fn dir(name: &str) -> PathBuf {
         crate::temp_dir(&format!("registry-{name}"))
@@ -1640,11 +1658,11 @@ mod tests {
     fn leftovers_go_on_load_and_a_removed_terminal_leaves_nothing() {
         let root = dir("leftovers");
         let path = root.join("state.json");
-        let file = r#"{"version":1,"terminals":[{"name":"kept.1","labels":{},"cwd":"/home/user","cmd":["make"],"keep":false,"state":"exited","exit":0,"pid":null}]}"#;
+        let file = r#"{"version":1,"terminals":[{"name":"kept.1","labels":{},"cwd":"/home/user","cmd":["make"],"keep":false,"state":"exited","exit":0,"pid":null,"acp":"fake","session":{"id":"s1"}}]}"#;
         fs::write(&path, file).unwrap();
         let files = [
             "history/kept.1.log",
-            "acp/kept.1.jsonl",
+            "sessions/s1.jsonl",
             "history/gone.log",
             "history/gone.log.tmp",
             "acp/gone.jsonl",
@@ -1838,6 +1856,76 @@ mod tests {
         for term in terms {
             term.kill(GRACE).unwrap();
         }
+    }
+
+    #[test]
+    fn a_running_old_bridge_s_transcript_is_carried_to_its_session_and_still_written() {
+        let root = dir("carry");
+        let path = root.join("state.json");
+        let terminal = r#"{"name":"a","labels":{},"cwd":"/work","cmd":["shed"],"keep":false,"state":"running","exit":null,"pid":null,"acp":"fake","session":{"id":"s/1"}}"#;
+        fs::write(
+            &path,
+            format!(r#"{{"version":1,"terminals":[{terminal}]}}"#),
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("acp")).unwrap();
+        let line = |prompt: &str, reply: &str| {
+            let turn = serde_json::json!({"event": "turn", "prompt": prompt});
+            let reply =
+                serde_json::json!({"event": "reply", "text": reply, "stop_reason": "end_turn"});
+            format!("{turn}\n{reply}\n")
+        };
+        fs::write(root.join("acp/a.jsonl"), line("fix it\nplease", "done")).unwrap();
+        let mut bridge = fs::OpenOptions::new()
+            .append(true)
+            .open(root.join("acp/a.jsonl"))
+            .unwrap();
+        let registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
+        bridge.write_all(line("more", "again").as_bytes()).unwrap();
+        assert!(!root.join("acp/a.jsonl").exists());
+        assert!(root.join("sessions/s%2F1.jsonl").exists());
+        let params = ReadParams {
+            name: "a".into(),
+            lines: None,
+            history: false,
+            events: false,
+            before: None,
+            n: None,
+        };
+        let read = registry.read(params).unwrap()().unwrap();
+        assert_eq!(read.text, "> fix it\nplease\ndone\n> more\nagain");
+        let record = sessions::read(&path, "s/1").unwrap();
+        assert_eq!(
+            (record.agent.as_str(), record.cwd),
+            ("fake", PathBuf::from("/work"))
+        );
+    }
+
+    #[test]
+    fn the_prune_pass_deletes_a_session_past_the_keep_time_and_leaves_a_younger_one() {
+        let root = dir("sessions-prune");
+        let path = root.join("state.json");
+        let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
+        let now = shed_core::clock::unix_now();
+        for (id, days) in [("old", 31), ("young", 29)] {
+            let updated = now - days * 86_400;
+            let record = SessionRecord {
+                id: id.into(),
+                updated,
+                ..SessionRecord::default()
+            };
+            sessions::write(&path, &record).unwrap();
+            fs::write(sessions::transcript(&path, id), "{}\n").unwrap();
+        }
+        registry.record(Sample::default())();
+        let left: Vec<String> = sessions::list(&path)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(left, ["young"]);
+        assert!(!sessions::transcript(&path, "old").exists());
+        assert!(sessions::transcript(&path, "young").exists());
     }
 
     #[test]

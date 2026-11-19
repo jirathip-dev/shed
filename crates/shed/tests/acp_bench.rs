@@ -1,6 +1,6 @@
 //! The ACP benches (`scripts/bench-acp.sh` runs them): `fake_acp.py` streams 1,000 `session/update`s
 //! through the bridge to a socket client, and 10,000 canned ones that time shed alone (both at a PR's
-//! base and head), and a 1,000-update `session/load` replay and the hibernation bench (at the head).
+//! base and head), and a 1,000-event replay of shed's transcript on a resume and the hibernation bench (at the head).
 #![cfg(test)]
 
 mod common;
@@ -13,7 +13,7 @@ use std::time::Instant;
 use common::{Server, temp_dir};
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessTable as _};
-use shed_server::lane::{Input, frame};
+use shed_server::lane::{Input, frame, sessions};
 use shed_server::proto::{EventsParams, Method};
 use shed_server::{Client, Paths};
 
@@ -141,9 +141,11 @@ fn shed_only() {
 fn replay() {
     let dir = temp_dir("acp-replay");
     let history = dir.join("history.jsonl");
-    let chunk =
-        r#"{"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "x"}}"#;
-    std::fs::write(&history, format!("{chunk}\n").repeat(UPDATES)).expect("the history");
+    std::fs::write(&history, "").expect("the agent's history");
+    let transcript = sessions::transcript(&Paths::in_dir(&dir).state, "sess-1");
+    std::fs::create_dir_all(transcript.parent().expect("a folder")).expect("the sessions folder");
+    let chunk = r#"{"event":"text","text":"x"}"#;
+    std::fs::write(&transcript, format!("{chunk}\n").repeat(UPDATES)).expect("the transcript");
     let _server = Server::start(&dir);
     let mut events = events(&dir, "r");
     let began = Instant::now();

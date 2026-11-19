@@ -1,21 +1,22 @@
 use std::fs::{self, File};
 use std::io::{self, BufWriter, Write as _};
 use std::os::fd::{AsFd as _, OwnedFd};
-use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use shed_proto::{EmitParams, EventKind, Method, Reported, StateParams};
+use shed_proto::{EmitParams, EventKind, Method, Reported, SessionRecord, StateParams};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use super::Input;
 use super::transcript::{Preview, stdout_style};
+use super::{Input, sessions};
 use crate::Client;
 
 pub(crate) enum Out {
-    Emit(EventKind, bool, bool),
+    Emit(EventKind),
+    Session(String, bool),
     State(Reported),
     Say(String),
     Name(String),
@@ -38,24 +39,10 @@ pub(super) fn lend(
     Ok(())
 }
 
-pub(super) fn open_transcript(state: &Path, name: &str) -> io::Result<File> {
-    let path = super::transcript(state, name);
-    if let Some(dir) = path.parent() {
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)?;
-    }
-    fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)
-}
-
 pub(super) struct Writer {
-    pub(super) transcript: BufWriter<File>,
+    pub(super) transcript: Option<BufWriter<File>>,
+    pub(super) state: PathBuf,
+    pub(super) record: SessionRecord,
     pub(super) tty: Option<File>,
     pub(super) reported: Arc<Mutex<Option<Reported>>>,
     pub(super) server: Option<tokio::net::UnixStream>,
@@ -81,19 +68,16 @@ impl Writer {
             for out in batch.drain(..) {
                 let name = self.name.clone();
                 let call = match out {
-                    Out::Emit(kind, replay, keep) => {
-                        if keep {
-                            let mut kept = kind.clone();
-                            if let EventKind::Turn { agent, .. } = &mut kept {
-                                agent.clear();
-                            }
-                            let line = serde_json::to_string(&kept).unwrap_or_default();
-                            writeln!(self.transcript, "{line}").ok();
-                            redraw |= self.preview.push(kept);
-                        }
-                        let params = EmitParams { name, kind, replay };
-                        crate::notification(Method::Emit, &params)
+                    Out::Emit(kind) => {
+                        redraw |= self.keep(&kind);
+                        let replay = false;
+                        crate::notification(Method::Emit, &EmitParams { name, kind, replay })
                     }
+                    Out::Session(id, resumed) if id != self.record.id => {
+                        redraw = true;
+                        Ok(self.open(&id, resumed))
+                    }
+                    Out::Session(..) => Ok(Vec::new()),
                     Out::State(report) => {
                         *crate::lock(&self.reported) = Some(report.clone());
                         let params = StateParams { name, report };
@@ -111,7 +95,9 @@ impl Writer {
                 };
                 calls.extend(call.unwrap_or_default());
             }
-            self.transcript.flush().ok();
+            if let Some(transcript) = &mut self.transcript {
+                transcript.flush().ok();
+            }
             self.send(&calls).await;
             if let Some(tty) = self.tty.as_mut().filter(|_| redraw) {
                 let (cols, rows, color) = stdout_style();
@@ -119,6 +105,52 @@ impl Writer {
                 write!(tty, "\x1b[H\x1b[2J{lines}\r\n").ok();
             }
         }
+    }
+
+    fn keep(&mut self, kind: &EventKind) -> bool {
+        let mut kept = kind.clone();
+        match &mut kept {
+            EventKind::Turn { agent, prompt } => {
+                agent.clear();
+                if self.record.title.is_empty() {
+                    self.record.title = sessions::title(prompt);
+                }
+            }
+            EventKind::Reply { .. } => {
+                (self.record.turns, self.record.updated) =
+                    (self.record.turns + 1, shed_core::clock::unix_now());
+                sessions::write(&self.state, &self.record).ok();
+            }
+            _ => {}
+        }
+        if let Some(transcript) = &mut self.transcript {
+            let line = serde_json::to_string(&kept).unwrap_or_default();
+            writeln!(transcript, "{line}").ok();
+        }
+        self.preview.push(kept)
+    }
+
+    fn open(&mut self, id: &str, resumed: bool) -> Vec<u8> {
+        let path = sessions::transcript(&self.state, id);
+        let had = (fs::read_to_string(&path).ok()).filter(|_| resumed);
+        let known = sessions::read(&self.state, id).filter(|_| resumed);
+        self.record = known.unwrap_or_else(|| SessionRecord {
+            id: id.to_owned(),
+            agent: std::mem::take(&mut self.record.agent),
+            cwd: std::mem::take(&mut self.record.cwd),
+            updated: shed_core::clock::unix_now(),
+            ..SessionRecord::default()
+        });
+        self.transcript = (sessions::create(&path, resumed).ok()).map(BufWriter::new);
+        sessions::write(&self.state, &self.record).ok();
+        let (mut calls, had) = (Vec::new(), had.unwrap_or_default());
+        for kind in had.lines().filter_map(|l| serde_json::from_str(l).ok()) {
+            self.preview.push(EventKind::clone(&kind));
+            let (name, replay) = (self.name.clone(), true);
+            let params = EmitParams { name, kind, replay };
+            calls.extend(crate::notification(Method::Emit, &params).unwrap_or_default());
+        }
+        calls
     }
 
     async fn send(&mut self, calls: &[u8]) {

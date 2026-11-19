@@ -7,14 +7,16 @@
 //!
 //! Its own tokio runtime runs the driver and the lane on this thread and, on one worker beside it, a
 //! task reading the PTY into [`Input`]s and one draining the lane's outputs into the transcript, the
-//! terminal and the server (as notifications), a batch at a time.
+//! terminal and the server (as notifications), a batch at a time. The transcript is the session's own
+//! (`sessions`), whatever terminal runs it.
 
+pub mod sessions;
 pub mod transcript;
 pub(crate) mod writer;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs::File;
-use std::io::{self, BufWriter};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,19 +78,12 @@ pub fn pty_socket(socket: &Path, name: &str) -> PathBuf {
     socket.with_file_name(format!("pty-{name}.sock"))
 }
 
-/// The transcript of terminal `name` of the server whose state file is `state`.
-#[must_use]
-pub fn transcript(state: &Path, name: &str) -> PathBuf {
-    state.with_file_name("acp").join(format!("{name}.jsonl"))
-}
-
 pub(crate) enum Heard {
     Session {
         model: Option<String>,
         models: Option<Vec<[String; 2]>>,
         commands: Option<Vec<[String; 3]>>,
     },
-    Replayed(String),
     Text(String),
     Tool(Tool),
     Plan(Vec<Value>),
@@ -133,12 +128,12 @@ pub(crate) struct Opened {
     pub resumable: bool,
     pub mcp: Vec<Value>,
     pub session: Heard,
-    pub replayed: Vec<Heard>,
     pub pid: Option<i32>,
     pub stirred: Arc<AtomicBool>,
 }
 
 pub(crate) trait Driver {
+    const NAME: &'static str;
     async fn open(&mut self, cwd: &Path, start: &Start) -> Result<Opened, String>;
     async fn heard(&mut self) -> Option<Heard>;
     fn gone(&self) -> impl Future<Output = ()> + 'static;
@@ -161,8 +156,6 @@ pub(crate) struct Lane {
     heard: Instant,
     stirred: Arc<AtomicBool>,
     idle: Duration,
-    replay: bool,
-    waking: bool,
     last: (String, Option<String>),
     shown: AcpSession,
     tokens: Option<(Tokens, Tokens)>,
@@ -193,8 +186,6 @@ impl Lane {
             heard: shed_core::clock::tokio_now(),
             stirred: Arc::default(),
             idle,
-            replay: false,
-            waking: false,
             last: ("idle".to_owned(), None),
             shown: AcpSession::default(),
             tokens: None,
@@ -213,7 +204,7 @@ impl Lane {
     }
 
     fn emit(&self, kind: EventKind) {
-        self.send(Out::Emit(kind, self.replay, !self.waking)).ok();
+        self.send(Out::Emit(kind)).ok();
     }
 
     fn state(&mut self, state: &str, note: Option<String>) {
@@ -353,12 +344,6 @@ impl Lane {
                     return self.fail(self.reply.clone(), driver);
                 }
             }
-            Heard::Replayed(prompt) if self.replay => {
-                self.end_replayed_turn();
-                let agent = Vec::new();
-                self.emit(EventKind::Turn { prompt, agent });
-            }
-            Heard::Replayed(_) => {}
             Heard::Tool(tool) => self.tool(tool),
             Heard::Plan(entries) => self.emit(EventKind::Plan { entries }),
             Heard::Mode(mode) => self.emit(EventKind::Mode { mode }),
@@ -412,7 +397,7 @@ impl Lane {
         let kind = tool.kind.or(kind);
         self.titles
             .insert(id.clone(), (title.clone(), kind.clone()));
-        let given = tool.status.is_some() && !self.replay;
+        let given = tool.status.is_some();
         let status = tool.status.unwrap_or_else(|| "pending".to_owned());
         if given {
             self.open.retain(|o| *o != id);
@@ -449,11 +434,8 @@ impl Lane {
         if let Some(models) = models {
             (self.shown.model, self.shown.models) = (model, models);
         }
-        self.send(Out::Emit(
-            EventKind::Session(Box::new(self.shown.clone())),
-            self.replay,
-            !self.waking,
-        ))
+        let shown = EventKind::Session(Box::new(self.shown.clone()));
+        self.send(Out::Emit(shown))
     }
 
     fn show_usage(&mut self) {
@@ -461,13 +443,6 @@ impl Lane {
             (usage.turn, usage.total) = (self.tokens.map(|t| t.0), self.tokens.map(|t| t.1));
             let usage = usage.clone();
             self.emit(EventKind::Usage(usage));
-        }
-    }
-
-    fn end_replayed_turn(&mut self) {
-        if !self.reply.is_empty() {
-            let (text, stop_reason) = (std::mem::take(&mut self.reply), "end_turn".to_owned());
-            self.emit(EventKind::Reply { text, stop_reason });
         }
     }
 
@@ -501,26 +476,20 @@ impl Lane {
         Ok(())
     }
 
-    pub(crate) async fn drive(
+    pub(crate) async fn drive<D: Driver>(
         &mut self,
-        driver: &mut impl Driver,
+        driver: &mut D,
         inputs: &mut UnboundedReceiver<Input>,
         cwd: &Path,
         start: Start,
     ) -> Result<bool, String> {
         let opened = driver.open(cwd, &start).await?;
         (self.pid, self.stirred) = (opened.pid, opened.stirred);
-        if start.resumed {
-            (self.replay, self.waking) = (true, start.deliver.is_some());
-            for heard in opened.replayed {
-                self.hear(heard, driver)?;
-            }
-            self.end_replayed_turn();
-            (self.replay, self.waking) = (false, false);
-        }
+        self.send(Out::Session(opened.id.clone(), start.resumed))?;
         let api = |v: &str| crate::config::var(v).is_some_and(|v| !v.is_empty());
         self.shown.cache_lifetime = self.rules.cache_lifetime(api);
         (self.shown.id, self.shown.mcp_servers) = (opened.id, opened.mcp);
+        D::NAME.clone_into(&mut self.shown.driver);
         self.hear(opened.session, driver)?;
         (self.ended, self.child) = (None, None);
         self.tree();
@@ -585,9 +554,9 @@ fn hibernate_after(set: Option<String>, cache_lifetime: Option<u64>) -> Option<D
 }
 
 /// Runs the ACP adapter `cmd` in `cwd` for terminal `$SHED` of the server on `socket` (state file
-/// `state`): `initialize`, then `session/load` of `$SHED_ACP_RESUME` (its history replayed) or
-/// `session/new`, both with the MCP servers in `$SHED_ACP_MCP` and the `_meta` in `$SHED_ACP_META`,
-/// then prompts, updates and permission requests until the agent exits, reading its limit and expired-login
+/// `state`) as agent `agent`: `initialize`, then `session/load` of `$SHED_ACP_RESUME` (shed's transcript of
+/// it replayed first, the agent's own replay dropped) or `session/new`, both with the MCP servers in
+/// `$SHED_ACP_MCP` and the `_meta` in `$SHED_ACP_META`, then prompts, updates and permission requests until the agent exits, reading its limit and expired-login
 /// lines by `rules`. Returns the agent's exit code.
 ///
 /// After `$SHED_ACP_HIBERNATE_AFTER` seconds `done` (default 600, or the record's shorter prompt cache
@@ -599,18 +568,16 @@ fn hibernate_after(set: Option<String>, cache_lifetime: Option<u64>) -> Option<D
 ///
 /// # Errors
 /// [`Error::Acp`] when `$SHED` is unset, the agent cannot start, or the handshake fails (including
-/// an agent that does not speak ACP v1, or a resume the agent cannot load); [`Error::Io`] when the
-/// transcript cannot be created.
+/// an agent that does not speak ACP v1, or a resume the agent cannot load); [`Error::Io`] when its
+/// runtime or terminal cannot be set up.
 pub fn bridge(
     cmd: &[String],
     cwd: &Path,
-    socket: &Path,
-    state: &Path,
-    policy: Policy,
-    rules: Provider,
+    (socket, state): (&Path, &Path),
+    (agent, policy, rules): (&str, Policy, Provider),
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
-    let result = run(cmd, cwd, socket, state, policy, rules, &name);
+    let result = run(cmd, cwd, (socket, state), (agent, policy, rules), &name);
     if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
         let report = Reported {
             state: "error".to_owned(),
@@ -635,10 +602,8 @@ pub(crate) fn stop(mut child: Child) {
 fn run(
     cmd: &[String],
     cwd: &Path,
-    socket: &Path,
-    state: &Path,
-    policy: Policy,
-    rules: Provider,
+    (socket, state): (&Path, &Path),
+    (agent, policy, rules): (&str, Policy, Provider),
     name: &str,
 ) -> Result<i32, Error> {
     let mut launch = acp::Launch::from_env()?;
@@ -653,7 +618,13 @@ fn run(
     let tty = tty.filter(|t| rustix::io::ioctl_fionbio(t, true).is_ok());
     let (out, outs) = unbounded_channel();
     let writer = Writer {
-        transcript: BufWriter::new(writer::open_transcript(state, name)?),
+        transcript: None,
+        state: state.to_owned(),
+        record: shed_proto::SessionRecord {
+            agent: agent.to_owned(),
+            cwd: cwd.to_owned(),
+            ..shed_proto::SessionRecord::default()
+        },
         tty,
         reported,
         server: None,

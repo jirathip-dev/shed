@@ -39,6 +39,14 @@ pub fn prune_after() -> u64 {
         .unwrap_or(86_400)
 }
 
+/// How long shed keeps a session after its last turn: `$SHED_SESSIONS_KEEP` days of `shed serve`, else 30,
+/// in seconds.
+#[must_use]
+pub fn sessions_keep() -> u64 {
+    let days = var("SHED_SESSIONS_KEEP").and_then(|s| s.parse().ok());
+    days.unwrap_or(30u64).saturating_mul(86_400)
+}
+
 /// How many of an agent's last sessions `agents` takes medians over: `$SHED_MEDIAN_OF`, else 20.
 #[must_use]
 pub fn median_of() -> usize {

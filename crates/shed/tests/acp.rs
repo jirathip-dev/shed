@@ -282,8 +282,32 @@ fn a_turn_with_an_approval_matches_the_golden_event_log() {
     });
     let events = events.join("\n");
     writeln!(log, "$ shed events --label run=golden --since 0\n{events}").expect("write");
-    let transcript = std::fs::read_to_string(dir.join("acp/a.jsonl")).expect("the transcript");
+    let transcript = std::fs::read_to_string(dir.join("sessions/sess-1.jsonl"));
+    let transcript = transcript.expect("the transcript, by session id");
     assert_eq!(transcript.lines().count(), 14, "{transcript}");
+    let record: Value = serde_json::from_slice(
+        &std::fs::read(dir.join("sessions/sess-1.json")).expect("the record"),
+    )
+    .expect("JSON");
+    assert_eq!(
+        (&record["agent"], &record["title"], &record["turns"]),
+        (&json!("fake"), &json!("tool"), &json!(2))
+    );
+    let mode = |p: &str| {
+        std::fs::metadata(dir.join(p))
+            .expect(p)
+            .permissions()
+            .mode()
+            & 0o777
+    };
+    assert_eq!(
+        [
+            mode("sessions"),
+            mode("sessions/sess-1.json"),
+            mode("sessions/sess-1.jsonl")
+        ],
+        [0o700, 0o600, 0o600]
+    );
 
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/acp.txt");
     if std::env::var_os("SHED_BLESS").is_some() {
@@ -598,6 +622,11 @@ fn resume_replays_the_history_once_marked_replay() {
         (&json!("running"), &json!("sess-1"))
     );
     ok(&dir, &["kill", "r1"]);
+    let agent_only = json!({"sessionUpdate": "user_message_chunk",
+        "content": {"type": "text", "text": "only the agent kept this"}});
+    let mut kept = std::fs::read_to_string(&history).expect("the agent's history");
+    writeln!(kept, "{agent_only}").expect("append");
+    std::fs::write(&history, kept).expect("write the agent's history");
 
     start_with_history(&dir, "r2", &history, &["--resume", "sess-1"]);
     ok(
@@ -1012,61 +1041,69 @@ fn top_and_ls_show_a_hibernated_agent_as_hibernated() {
 }
 
 #[test]
-fn agents_sessions_lists_every_page_and_resume_takes_one() {
+fn agents_sessions_lists_shed_s_own_sessions_and_one_shed_never_ran_resumes_without_history() {
     let dir = temp_dir("acp-sessions");
     let _server = Server::start(&dir);
-    let reg = registry(&dir);
-    for id in ["lister", "fake"] {
-        ok(
-            &dir,
-            &[
-                "agents",
-                "add",
-                id,
-                "--registry",
-                reg.to_str().expect("utf-8"),
-            ],
-        );
-    }
     assert_eq!(
-        ok(&dir, &["agents", "sessions", "lister"]),
-        "sess-1  2026-11-01T10:00:00Z  /work  First\nsess-2  -  /work  Second\n"
+        ok(&dir, &["agents", "sessions", "fake"]),
+        "",
+        "no agent installed or started"
     );
-    let listed: Value =
-        serde_json::from_str(&ok(&dir, &["--json", "agents", "sessions", "lister"])).expect("JSON");
-    assert_eq!(listed[1]["sessionId"], "sess-2");
-    let refused = shed(&dir, &["agents", "sessions", "fake"]);
-    let err = String::from_utf8_lossy(&refused.stderr);
-    assert!(!refused.status.success(), "{refused:?}");
-    assert!(
-        err.contains("the agent cannot list sessions (no sessionCapabilities.list)"),
-        "{err}"
-    );
-    let missing = shed(&dir, &["agents", "sessions", "nope"]);
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("ACP agent nope is not installed"));
-
-    ok(
-        &dir,
-        &[
-            "run", "--name", "s2", "--acp", "lister", "--resume", "sess-2",
-        ],
-    );
-    ok(
-        &dir,
-        &[
-            "wait",
-            "s2",
-            "--output",
-            "ACP session ready",
-            "--timeout",
-            "10",
-        ],
+    let agent = fake_agent();
+    let fake = ["python3", agent.to_str().expect("utf-8"), "--sessions"];
+    let run = [
+        "run", "--name", "s2", "--acp", "fake", "--resume", "sess-2", "--",
+    ];
+    ok(&dir, &[&run[..], &fake].concat());
+    let ready = [
+        "wait",
+        "s2",
+        "--output",
+        "ACP session ready",
+        "--timeout",
+        "10",
+    ];
+    ok(&dir, &ready);
+    assert_eq!(ok(&dir, &["read", "s2"]), "", "no earlier history");
+    let listed = |dir: &Path| -> Value {
+        serde_json::from_str(&ok(dir, &["--json", "agents", "sessions", "fake"])).expect("JSON")
+    };
+    assert_eq!(
+        (&listed(&dir)[0]["id"], &listed(&dir)[0]["turns"]),
+        (&json!("sess-2"), &json!(0)),
+        "listed from its start"
     );
     ok(&dir, &["send", "s2", "hi"]);
     ok(&dir, &["wait", "s2", "--until", "done", "--timeout", "10"]);
     let info: Value = serde_json::from_str(&ok(&dir, &["get", "s2"])).expect("JSON");
     assert_eq!(info["session"]["id"], "sess-2");
     assert_eq!(ok(&dir, &["read", "s2"]), "> hi\nyou said: hi\n");
+    ok(&dir, &["kill", "s2"]);
+    let listed = listed(&dir);
+    let record = &listed[0];
+    let transcript = dir.join("sessions/sess-2.jsonl");
+    assert_eq!(
+        (
+            &record["agent"],
+            &record["title"],
+            &record["turns"],
+            &record["cwd"]
+        ),
+        (
+            &json!("fake"),
+            &json!("hi"),
+            &json!(1),
+            &json!(std::env::current_dir().expect("cwd"))
+        )
+    );
+    assert_eq!(record["transcript"], json!(transcript));
+    let updated = record["updated"].as_u64().expect("updated");
+    let cwd = std::env::current_dir().expect("cwd");
+    assert_eq!(
+        ok(&dir, &["agents", "sessions", "fake"]),
+        format!("sess-2  {updated}  {}  hi\n", cwd.display())
+    );
+    assert_eq!(ok(&dir, &["agents", "sessions", "other"]), "");
 }
 
 #[test]
@@ -1103,7 +1140,13 @@ fn rm_closes_the_session_once_and_only_when_the_agent_can() {
         ok(&dir, &["wait", name, "--until", "done", "--timeout", "10"]);
         ok(&dir, &["kill", name]);
         assert!(!closed.exists(), "{name}: closed before rm");
+        let files = ["sessions/sess-1.json", "sessions/sess-1.jsonl"].map(|f| dir.join(f));
+        assert!(
+            files.iter().all(|f| f.exists()),
+            "{name}: the session's files"
+        );
         assert_eq!(ok(&dir, &["rm", name]), format!("{name} removed\n"));
+        assert!(!files.iter().any(|f| f.exists()), "{name}: rm deletes them");
         assert_eq!(
             std::fs::read_to_string(&closed).ok().as_deref(),
             want,
@@ -1148,7 +1191,7 @@ fn a_model_switch_is_reported_and_the_next_turn_uses_it() {
         info["session"].clone()
     };
     let models = json!([["fast", "Fast"], ["smart", "Smart"]]);
-    let first = json!({"id": "sess-1", "model": "fast", "models": models});
+    let first = json!({"id": "sess-1", "driver": "acp", "model": "fast", "models": models});
     common::eventually("the session", || {
         let mut s = session();
         let ready = s.as_object_mut().and_then(|s| s.remove("ready_ms"));
@@ -1539,8 +1582,6 @@ fn a_prompt_wakes_the_agent_and_its_history_is_not_repeated() {
         [
             json!(["turn", "hi", null]),
             json!(["reply", "you said: hi", null]),
-            json!(["turn", "hi", true]),
-            json!(["reply", "you said: hi", true]),
             json!(["turn", "more", null]),
             json!(["reply", "you said: more", null]),
         ]
@@ -1639,7 +1680,12 @@ fn start_warm(dir: &Path, name: &str, cwd: &Path, history: &Path) {
     let run = ["run", "--name", name, "--label", &label, "--cwd", cwd];
     let cmd = ["--acp", "fake", "--warm", "--", "python3"];
     let history = history.to_str().expect("utf-8");
-    let fake = [agent.to_str().expect("utf-8"), "--history", history];
+    let fake = [
+        agent.to_str().expect("utf-8"),
+        "--history",
+        history,
+        "--unique",
+    ];
     ok(dir, &[&run[..], &cmd, &fake].concat());
 }
 
@@ -1672,6 +1718,8 @@ fn a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_a
     start_warm(&dir, "b", &dir, &history);
     let b: Value = serde_json::from_str(&ok(&dir, &["get", "b"])).expect("JSON");
     assert_eq!(b["pid"], pid, "b is the spare");
+    let id = b["session"]["id"].clone();
+    assert!(id.as_str().is_some_and(|id| id.starts_with("sess-")), "{b}");
     assert_eq!(
         (&b["labels"]["run"], &b["session"]["ready_ms"]),
         (&json!("b"), &json!(0))
@@ -1690,7 +1738,7 @@ fn a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_a
     ok(&dir, &["send", "b", "more"]);
     until(&dir, "b", "done");
     let b: Value = serde_json::from_str(&ok(&dir, &["get", "b"])).expect("JSON");
-    assert_eq!(b["session"]["id"], "sess-1");
+    assert_eq!(b["session"]["id"], id);
     assert_eq!(
         ok(&dir, &["read", "b"]),
         "> hi\nyou said: hi\n> more\nyou said: more\n"

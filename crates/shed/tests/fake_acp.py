@@ -33,7 +33,8 @@ loadSession is off.
 `--sessions` advertises sessionCapabilities list and close and loadSession: session/list returns
 sess-1 and sess-2 (one per page) and session/load takes either. `--closed FILE` appends each
 session/close's sessionId to FILE, advertised or not (so a test sees a close that should not come).
-`--v2` answers initialize with protocolVersion 2.
+`--v2` answers initialize with protocolVersion 2. `--unique` names each new session `sess-<pid>` instead
+of sess-1 (lanes sharing a folder then have their own transcripts), and session/load takes any id.
 
 `--mcp FILE` is the JSON list of MCP servers session/new and session/load must get (default none);
 each entry is checked against ACP's stdio, http and sse shapes. `--mcp-caps http,sse` advertises
@@ -43,11 +44,13 @@ those `mcpCapabilities`.
 must carry no `_meta` and no key shed did not send before.
 """
 import json
+import os
 import subprocess
 import sys
 import time
 
-SESSION = "sess-1"
+UNIQUE = "--unique" in sys.argv
+SESSION = f"sess-{os.getpid()}" if UNIQUE else "sess-1"
 HISTORY = sys.argv[sys.argv.index("--history") + 1] if "--history" in sys.argv else None
 MODEL = "fast"
 
@@ -238,7 +241,7 @@ def main():
         elif method == "session/load":
             check(HISTORY is not None or SESSIONS, "session/load without loadSession")
             ids = [s["sessionId"] for s in LISTED] if SESSIONS else [SESSION]
-            check(params.get("sessionId") in ids, "session/load: sessionId")
+            check(UNIQUE or params.get("sessionId") in ids, "session/load: sessionId")
             SESSION = params["sessionId"]
             check(str(params.get("cwd", "")).startswith("/"), "session/load: absolute cwd")
             check_mcp("session/load", params.get("mcpServers"))

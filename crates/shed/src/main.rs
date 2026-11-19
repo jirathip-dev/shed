@@ -29,8 +29,8 @@ use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
     Children, Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState,
     LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported,
-    RunParams, SendParams, State, StateParams, StatsParams, Target, TerminalInfo, WaitOutcome,
-    WaitParams, WaitResult,
+    RunParams, SendParams, SessionRecord, State, StateParams, StatsParams, Target, TerminalInfo,
+    WaitOutcome, WaitParams, WaitResult,
 };
 use shed_server::{Client, Paths};
 
@@ -751,7 +751,8 @@ fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
     let rules = shed_server::providers::find(&a.providers, &a.agent);
-    let code = lane::bridge(&a.cmd, &here, &a.socket, &a.state, a.policy, rules)?;
+    let at = (a.socket.as_path(), a.state.as_path());
+    let code = lane::bridge(&a.cmd, &here, at, (&a.agent, a.policy, rules))?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
@@ -801,15 +802,14 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
             print(json, &agent, || format!("removed {}", line(&agent)))
         }
         Some(AgentsCommand::Sessions { id }) => {
-            let agents = agents::list(&paths.state)?;
-            let agent = agents.iter().find(|a| a.id == id);
-            let agent = agent.with_context(|| format!("ACP agent {id} is not installed"))?;
-            let here = std::env::current_dir().context("current directory")?;
-            let list = shed_server::drivers::acp::sessions(&agent.cmd, &here)?;
+            let mut list = lane::sessions::list(&paths.state)?;
+            list.retain(|s| s.agent == id);
             print(json, &list, || {
-                let field = |s: &Value, k: &str| s[k].as_str().unwrap_or("-").to_owned();
-                let row = |s| ["sessionId", "updatedAt", "cwd", "title"].map(|k| field(s, k));
-                list.iter().map(|s| row(s).join("  ") + "\n").collect()
+                let row = |s: &SessionRecord| {
+                    let (id, updated, cwd) = (&s.id, s.updated, s.cwd.display());
+                    format!("{id}  {updated}  {cwd}  {}\n", s.title)
+                };
+                list.iter().map(row).collect()
             })
         }
     }
