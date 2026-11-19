@@ -148,12 +148,31 @@ fn install_binary(entry: &Value, dir: &Path) -> Result<Vec<String>, Error> {
         .collect())
 }
 
+fn install_npx(package: &str, dir: &Path) -> Result<String, Error> {
+    let prefix = format!("--prefix={}", dir.display());
+    let args = ["install", "--no-audit", "--no-fund", &prefix, package];
+    run("npm", &args.map(Path::new))?;
+    let read = |p: PathBuf| serde_json::from_slice::<Value>(&fs::read(p).ok()?).ok();
+    let program = read(dir.join("package.json")).and_then(|deps| {
+        let name = deps.get("dependencies")?.as_object()?.keys().next()?;
+        let at = dir.join("node_modules").join(name);
+        let manifest = read(at.join("package.json"))?;
+        let b = manifest.get("bin")?;
+        let b = b.as_object().map_or(Some(b), |o| o.values().next())?;
+        Some(at.join(b.as_str()?.trim_start_matches("./")))
+    });
+    let program =
+        program.ok_or_else(|| fail(format!("{package}: no bin to run in its package.json")))?;
+    Ok(program.to_string_lossy().into_owned())
+}
+
 /// Installs agent `id` at the version the registry at `source` (a URL or a file) lists: this platform's
-/// binary (unpacked under `agents/<id>/<version>/` beside the state file), else `npx`, else `uvx`.
+/// binary (unpacked under `agents/<id>/<version>/` beside the state file), else `npx` (npm installs it
+/// there, `node` runs it), else `uvx`.
 ///
 /// # Errors
 /// [`Error::Agents`] when it is installed already, the registry has no such agent or no distribution
-/// shed runs here, or a download, checksum or unpack fails.
+/// shed runs here, or a download, checksum, unpack or `npm install` fails.
 pub fn add(state: &Path, id: &str, source: &str) -> Result<Agent, Error> {
     if !safe(id) {
         return Err(fail(format!("bad agent id {id:?}")));
@@ -179,17 +198,13 @@ pub fn add(state: &Path, id: &str, source: &str) -> Result<Agent, Error> {
     }
     let dist = &entry["distribution"];
     let binary = dist.get("binary").and_then(|b| b.get(platform()));
+    let dir = state.with_file_name("agents").join(id).join(&version);
     let (distribution, cmd) = if let Some(binary) = binary.filter(|b| b.is_object()) {
-        let dir = state.with_file_name("agents").join(id).join(&version);
         ("binary", with_env(binary, install_binary(binary, &dir)?))
     } else if let Some(package) = dist.pointer("/npx/package").and_then(Value::as_str) {
-        let cmd = ["npx", "-y", package].map(str::to_owned).to_vec();
-        let cmd = [
-            cmd,
-            strings(dist.pointer("/npx/args").unwrap_or(&Value::Null)),
-        ]
-        .concat();
-        ("npx", with_env(&dist["npx"], cmd))
+        let args = strings(dist.pointer("/npx/args").unwrap_or(&Value::Null));
+        let cmd = [vec!["node".to_owned(), install_npx(package, &dir)?], args];
+        ("npx", with_env(&dist["npx"], cmd.concat()))
     } else if let Some(package) = dist.pointer("/uvx/package").and_then(Value::as_str) {
         let cmd = [
             vec!["uvx".to_owned(), package.to_owned()],
