@@ -54,3 +54,6 @@ let_underscore_must_use = "deny"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[profile.dev.package.shed-script]
+opt-level = 1

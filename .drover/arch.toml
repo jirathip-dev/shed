@@ -31,7 +31,7 @@ may_use = ["pattern", "proto"]
 name = "script"
 paths = ["crates/shed-script/src/**"]
 mods = ["shed_script"]
-may_use = ["pattern"]
+may_use = ["proto", "pattern"]
 
 [[layer]]
 name = "server"
