@@ -195,7 +195,7 @@ def main():
     for f, line, col, text in bad:
         print(f"{os.path.normpath(os.path.join(root, f))}:{line}:{col + 1}: {text.splitlines()[0]}")
     if bad:
-        print("comments break the rule (.herdsman/rules.md): no // or /* */ but // SAFETY: and // TODO(#N); /// only on public API")
+        print("comments break the rule (.drover/rules.md): no // or /* */ but // SAFETY: and // TODO(#N); /// only on public API")
         return 1
     print("comments follow the rule")
     return 0

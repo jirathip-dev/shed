@@ -228,11 +228,10 @@ ID", exit 1) and starts with `--session-id` again; and SIGINT mid tool call ends
 Turn 5 is the model switch: `init.model` is `claude-haiku-5-5` and the conversation is written to the
 cache again, as Claude's docs say of any model switch. It costs the same under the adapter.
 
-## `.herdsman/arch.toml`
+## `.drover/arch.toml`
 
 No lines to add. The one list this design could have grown, the table of parsers by name, is collected by
 the build step that already collects the records (`crates/shed-server/build.rs` globs
 `src/providers/*.toml`; slice 3 makes it glob `src/providers/*.rs` too), so a new provider adds two files
 and edits none. `acp.rs`, 127 lines under the size limit, becomes four files by concern. The registration
-lines in `registry.rs`, `main.rs` and `shed-proto/src/lib.rs` are a handful each. (The repo's arch file is
-`.herdsman/arch.toml`; there is no `.drover/arch.toml`.)
+lines in `registry.rs`, `main.rs` and `shed-proto/src/lib.rs` are a handful each.

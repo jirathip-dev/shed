@@ -126,9 +126,8 @@ Order and undo:
   `cargo install`.
 - **The cap** has 490 lines of headroom and this is about +530 (README, Slices).
 
-## `.herdsman/arch.toml`
+## `.drover/arch.toml`
 
 No lines to add. This issue turns no shared list into a folder and adds no generated file. The two
 protocol docs it changes are already under `generated`, and `runner.rs` is already the one file where
-`std::process` is allowed, which is where `replace` goes. (The repo's arch file is `.herdsman/arch.toml`;
-there is no `.drover/arch.toml`.)
+`std::process` is allowed, which is where `replace` goes.
