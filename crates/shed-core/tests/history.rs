@@ -61,6 +61,6 @@ fn a_terminal_starts_from_its_log() {
         assert!(Instant::now() < deadline, "the log never got the output");
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert_eq!(t.history(usize::MAX), "before\n\nafter");
+    assert_eq!(t.with_screen(|s| s.history(usize::MAX)), "before\n\nafter");
     std::fs::remove_dir_all(dir).expect("clean");
 }

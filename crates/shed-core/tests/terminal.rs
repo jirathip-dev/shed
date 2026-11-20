@@ -68,11 +68,11 @@ fn scrollback_is_bounded() {
         Size { rows: 5, cols: 20 },
     );
     eventually("all lines", || t.screen().ends_with("line5049"));
-    let history = t.history(usize::MAX);
+    let history = t.with_screen(|s| s.history(usize::MAX));
     let lines: Vec<&str> = history.lines().collect();
     assert_eq!(lines.len(), shed_core::history::LINES + 4);
     assert_eq!(lines.first(), Some(&"line46"));
-    assert_eq!(t.history(2), "line5048\nline5049");
+    assert_eq!(t.with_screen(|s| s.history(2)), "line5048\nline5049");
 }
 
 #[test]

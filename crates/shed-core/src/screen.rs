@@ -180,20 +180,29 @@ impl Screen {
     /// The last `n` lines of scrollback followed by the visible screen, as plain text.
     #[must_use]
     pub fn history(&self, n: usize) -> String {
-        let g = &self.grid;
-        let mut at = 0;
-        let mut lines: Vec<String> = (g.lens.iter())
-            .map(|&len| {
-                let line: Vec<u8> = g.history.range(at..at + len).copied().collect();
-                at += len;
-                String::from_utf8_lossy(&line).into_owned()
-            })
-            .collect();
-        lines.extend(g.visible());
+        let mut lines = self.grid.scrollback();
+        lines.extend(self.grid.visible());
         trim_blank_tail(&mut lines);
         let skip = lines.len().saturating_sub(n);
         lines.drain(..skip);
         lines.join("\n")
+    }
+
+    /// How many lines have scrolled off the top so far, kept or not.
+    #[must_use]
+    pub fn scrolled(&self) -> u64 {
+        self.grid.scrolled
+    }
+
+    /// The kept lines that scrolled off after the first `seq`, and how many after it are no longer kept.
+    #[must_use]
+    pub fn scrolled_since(&self, seq: u64) -> (Vec<String>, u64) {
+        let mut lines = self.grid.scrollback();
+        let new = self.grid.scrolled.saturating_sub(seq);
+        let fresh = usize::try_from(new).unwrap_or(usize::MAX);
+        let lost = new.saturating_sub(u64::try_from(lines.len()).unwrap_or(u64::MAX));
+        lines.drain(..lines.len().saturating_sub(fresh));
+        (lines, lost)
     }
 
     /// The visible screen as runs, with the cursor and the scrollback length.
@@ -370,6 +379,7 @@ struct Grid {
     saved: (usize, usize),
     history: VecDeque<u8>,
     lens: VecDeque<usize>,
+    scrolled: u64,
     line: String,
     limit: (usize, usize),
     primary: Option<(Cells, (usize, usize))>,
@@ -395,6 +405,7 @@ impl Grid {
             saved: (0, 0),
             history: VecDeque::new(),
             lens: VecDeque::new(),
+            scrolled: 0,
             line: String::new(),
             limit,
             primary: None,
@@ -412,6 +423,16 @@ impl Grid {
             rows: clamp(self.rows),
             cols: clamp(self.cols),
         }
+    }
+
+    fn scrollback(&self) -> Vec<String> {
+        let mut at = 0;
+        let line = |len: &usize| {
+            let line: Vec<u8> = self.history.range(at..at + len).copied().collect();
+            at += len;
+            String::from_utf8_lossy(&line).into_owned()
+        };
+        self.lens.iter().map(line).collect()
     }
 
     fn visible(&self) -> Vec<String> {
@@ -432,6 +453,7 @@ impl Grid {
             self.cells.get(row).map_or(&[], Vec::as_slice),
         );
         let len = self.line.len();
+        self.scrolled = self.scrolled.saturating_add(1);
         if len > bytes {
             return;
         }
@@ -1001,6 +1023,21 @@ mod tests {
         assert_eq!(s.text(), "5\n6");
         assert_eq!(s.history(100), "2\n3\n4\n5\n6");
         assert_eq!(s.history(2), "5\n6");
+    }
+
+    #[test]
+    fn scrolled_since_counts_the_lines_trimmed_unread() {
+        let mut s = screen(2, 10, 3, "1\r\n2\r\n");
+        assert_eq!(
+            (s.scrolled(), s.scrolled_since(0)),
+            (1, (vec!["1".into()], 0))
+        );
+        s.feed(b"3\r\n4\r\n5\r\n6\r\n");
+        assert_eq!(
+            s.scrolled_since(1),
+            (vec!["3".into(), "4".into(), "5".into()], 1)
+        );
+        assert_eq!(s.scrolled_since(s.scrolled()), (Vec::new(), 0));
     }
 
     #[test]

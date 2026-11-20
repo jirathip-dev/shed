@@ -14,13 +14,13 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use crate::handover::Control;
 use serde::{Deserialize, Serialize};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
-use shed_core::{Detached, History, Report, STATES, Size, Terminal};
+use shed_core::{Detached, History, Report, STATES, Screen, Size, Terminal};
 
 type Frozen = Vec<(String, Detached)>;
 
 use shed_proto::{
-    AcpSession, DriverKind, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged,
-    LsParams, MachineStats, ModelParams, PROTOCOL, Parent, Policy, ReadParams, ReadResult,
+    AcpSession, Cursor, DriverKind, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams,
+    Logged, LsParams, MachineStats, ModelParams, PROTOCOL, Parent, Policy, ReadParams, ReadResult,
     Reported, ResizeParams, Resources, RpcError, RunParams, Sample, SendParams, State, StateParams,
     TerminalInfo,
 };
@@ -1288,42 +1288,26 @@ impl Registry {
         let acp = entry.info.acp.is_some();
         let id = (entry.info.session.as_ref()).map_or_else(String::new, |s| s.id.clone());
         Ok(move || {
-            let (n, mut events) = (p.lines.unwrap_or(usize::MAX), Vec::new());
-            let file = || fs::read_to_string(sessions::transcript(&state, &id));
-            let mut text = match &term {
-                _ if acp && !p.events => {
-                    crate::lane::transcript::render(&file().unwrap_or_default())
-                }
-                _ if acp => {
-                    let (file, before) = (file().unwrap_or_default(), p.before.unwrap_or(u64::MAX));
-                    let lines = (file.lines().zip(1..)).take_while(|&(_, seq)| seq < before);
-                    let parsed =
-                        lines.filter_map(|(l, seq)| Some((seq, serde_json::from_str(l).ok()?)));
-                    events = parsed.map(|(seq, kind)| Logged { seq, kind }).collect();
-                    events.drain(..events.len().saturating_sub(p.n.unwrap_or(usize::MAX)));
-                    String::new()
-                }
-                Some(term) if p.history => term.history(n),
-                Some(term) => term.screen(),
-                None => {
-                    let screen = history(&state, &p.name)
-                        .restore(size(None, None), None)
-                        .map_err(internal)?;
-                    if p.history {
-                        screen.history(n)
-                    } else {
-                        screen.text()
-                    }
-                }
-            };
-            if acp || !p.history {
-                let lines: Vec<&str> = text.lines().collect();
-                text = lines
-                    .get(lines.len().saturating_sub(n)..)
-                    .unwrap_or_default()
-                    .join("\n");
+            let dead = || history(&state, &p.name).restore(size(None, None), None);
+            match &term {
+                Some(term) if !acp => return Ok(term.with_screen(|s| read_screen(s, &p))),
+                None if !acp => return Ok(read_screen(&dead().map_err(internal)?, &p)),
+                _ => {}
             }
-            Ok(ReadResult { text, events })
+            let file = fs::read_to_string(sessions::transcript(&state, &id)).unwrap_or_default();
+            let mut read = ReadResult::default();
+            read.cursor.seq = u64::try_from(file.lines().count()).unwrap_or(u64::MAX);
+            if !p.events {
+                let all = crate::lane::transcript::render(&file);
+                read.text = last_lines(&all, p.lines.unwrap_or(usize::MAX));
+                return Ok(read);
+            }
+            let (before, after) = (p.before.unwrap_or(u64::MAX), p.since.map_or(0, |c| c.seq));
+            let lines = (file.lines().zip(1..)).filter(|&(_, seq)| after < seq && seq < before);
+            let parsed = lines.filter_map(|(l, seq)| Some((seq, serde_json::from_str(l).ok()?)));
+            read.events = parsed.map(|(seq, kind)| Logged { seq, kind }).collect();
+            (read.events).drain(..read.events.len().saturating_sub(p.n.unwrap_or(usize::MAX)));
+            Ok(read)
         })
     }
 
@@ -1546,6 +1530,32 @@ impl Registry {
             }
         }))
     }
+}
+
+fn read_screen(s: &Screen, p: &ReadParams) -> ReadResult {
+    let (visible, n, seq) = (s.text(), p.lines.unwrap_or(usize::MAX), s.scrolled());
+    let screen = (visible.bytes()).fold(0x811c_9dc5, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    });
+    let mut read = ReadResult::default();
+    read.cursor = Cursor { seq, screen };
+    read.text = match p.since {
+        Some(since) => {
+            let (mut lines, lost) = s.scrolled_since(since.seq);
+            read.changed = since.screen != screen;
+            lines.extend(read.changed.then_some(visible));
+            read.lost = (lost > 0).then_some(lost);
+            lines.join("\n")
+        }
+        None if p.history => s.history(n),
+        None => last_lines(&visible, n),
+    };
+    read
+}
+
+fn last_lines(text: &str, n: usize) -> String {
+    let skip = text.lines().count().saturating_sub(n);
+    text.lines().skip(skip).collect::<Vec<_>>().join("\n")
 }
 
 #[cfg(test)]
@@ -1902,6 +1912,7 @@ mod tests {
             events: false,
             before: None,
             n: None,
+            since: None,
         };
         let read = registry.read(params).unwrap()().unwrap();
         assert_eq!(read.text, "> fix it\nplease\ndone\n> more\nagain");
