@@ -824,7 +824,7 @@
               "string",
               "null"
             ],
-            "description": "A pattern (`.`, `[…]`, `\\d \\w \\s`, `* + ?`, `^ $`) that ends the wait when a screen line matches."
+            "description": "A pattern (`.`, `[…]`, `\\d \\w \\s`, `( | )`, `* + ? {n,m}`, `\\b`, `^ $`) that ends the wait when a screen line matches."
           }
         },
         {

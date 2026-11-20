@@ -238,7 +238,7 @@ The globals are exactly these; any other name is a `ReferenceError` (with a hint
 
 | on | methods |
 |---|---|
-| a string | `length at charAt slice substring split trim trimStart trimEnd startsWith endsWith includes indexOf lastIndexOf toLowerCase toUpperCase replace replaceAll padStart padEnd repeat concat localeCompare`, and shed's two: `matches(pattern)` (the pattern of `wait --output`: `.`, `[…]`, `\d \w \s`, `* + ?`, `^ $`) and `toBytes()` |
+| a string | `length at charAt slice substring split trim trimStart trimEnd startsWith endsWith includes indexOf lastIndexOf toLowerCase toUpperCase replace replaceAll padStart padEnd repeat concat localeCompare`, and shed's two: `matches(pattern)` (the pattern of `wait --output`, from `shed-pattern`) and `toBytes()` |
 | an array | `length at push pop shift unshift slice concat join includes indexOf lastIndexOf reverse flat entries`, and with a callback `map filter forEach find findIndex some every reduce flatMap sort` |
 
 Where it differs from JavaScript it refuses rather than guesses: no implicit conversion (`"5" * 2`,

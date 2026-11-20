@@ -6,14 +6,12 @@
 pub mod clock;
 pub mod history;
 pub mod keys;
-pub mod pattern;
 pub mod proctree;
 pub mod runner;
 pub mod screen;
 pub mod terminal;
 
 pub use history::History;
-pub use pattern::Pattern;
 pub use proctree::Usage;
 pub use screen::{Color, Pen, Report, Run, STATES, Screen, Size, Snapshot};
 pub use terminal::{Detached, Rule, Terminal, Wake};
@@ -27,9 +25,6 @@ pub enum Error {
     /// A key name that is not in the key table.
     #[error("unknown key: {0:?}")]
     UnknownKey(String),
-    /// A `wait --output` pattern that does not compile.
-    #[error("bad pattern {0}")]
-    Pattern(String),
     /// Opening, sizing or spawning on the PTY failed.
     #[error("pty: {0}")]
     Pty(#[from] pty_process::Error),
