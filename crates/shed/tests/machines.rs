@@ -797,6 +797,26 @@ fn outline_and_lines(dir: &Path, shed: &dyn Fn(&[&str], &[u8]) -> Output) {
             .stdout
             .is_empty()
     );
+    let dir_path = dir.to_str().expect("utf-8 path");
+    let found = shed(
+        &["code", "grep", "-F", "fn run", "-g", "*.rs", dir_path],
+        b"",
+    );
+    let want = "job.rs\n  impl Job > fn run [6-6]\n    6:     fn run(&self) {}\n1 match in 1 file, 1 file searched\n";
+    assert_eq!(String::from_utf8_lossy(&found.stdout), want, "{found:?}");
+    let json = shed(&["--json", "code", "grep", "-w", "id", dir_path], b"").stdout;
+    let json: Value = serde_json::from_slice(&json).expect("json");
+    assert_eq!(
+        json["files"][0]["groups"][0],
+        json!({"scope": [{"kind": "struct", "name": "Job", "start": 1, "end": 3, "depth": 0}],
+               "lines": [{"n": 2, "text": "    id: u64,"}]})
+    );
+    let bad = shed(&["code", "grep", "a(?=b)", dir_path], b"");
+    let stderr = String::from_utf8_lossy(&bad.stderr);
+    assert!(
+        !bad.status.success() && stderr.contains("INVALID_PARAMS"),
+        "{stderr}"
+    );
     let missing = shed(&["code", "outline", &format!("{path}.gone")], b"");
     let stderr = String::from_utf8_lossy(&missing.stderr);
     assert!(

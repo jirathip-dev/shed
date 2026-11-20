@@ -101,6 +101,93 @@ pub struct OutlineResult {
     pub symbols: Vec<Symbol>,
 }
 
+/// `code.grep` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the wire shape: one flag per grep option"
+)]
+pub struct GrepParams {
+    /// A folder or one file.
+    pub root: PathBuf,
+    /// shed's pattern syntax, or plain text with `fixed`.
+    pub pattern: String,
+    /// The pattern is plain text.
+    #[serde(default)]
+    pub fixed: bool,
+    /// Letters match in either case.
+    #[serde(default)]
+    pub ignore_case: bool,
+    /// A match starts and ends at a word boundary.
+    #[serde(default)]
+    pub word: bool,
+    /// Per-file counts only: no lines, no outline.
+    #[serde(default)]
+    pub count: bool,
+    /// Also dot files and dot folders, never `.git`.
+    #[serde(default)]
+    pub hidden: bool,
+    /// `*.rs` keeps, `!tests/` drops, in `.gitignore` syntax.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glob: Vec<String>,
+    /// The machine it is on, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// `code.grep` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct GrepResult {
+    /// The files with a match, in name order, paths relative to `root` with `/`.
+    pub files: Vec<FileMatches>,
+    /// Matched lines in all.
+    pub matches: usize,
+    /// Files read.
+    pub searched: usize,
+}
+
+/// One file's matches.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FileMatches {
+    /// Relative to `root`, with `/`.
+    pub path: String,
+    /// Its language.
+    pub lang: Lang,
+    /// Its matched lines.
+    pub count: usize,
+    /// The lines by the symbol that holds them; empty with `count`.
+    pub groups: Vec<Group>,
+}
+
+/// Matched lines under one symbol.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Group {
+    /// The symbols around the lines, outermost first; empty at top level.
+    pub scope: Vec<Symbol>,
+    /// The lines, in file order.
+    pub lines: Vec<GrepLine>,
+}
+
+/// One matched line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct GrepLine {
+    /// 1-based.
+    pub n: usize,
+    /// The line as it is in the file, without its line end.
+    pub text: String,
+    /// `text` is only the line's first 4,096 bytes.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub clipped: bool,
+    /// With `clipped`, the line's full length in bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<usize>,
+}
+
 /// A span of lines, 1-based and inclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]

@@ -351,6 +351,20 @@ fn needles(node: &Node) -> Vec<String> {
     }
 }
 
+fn plain(node: &Node) -> bool {
+    let mut seq = Vec::new();
+    flatten(node, &mut seq);
+    seq.iter().all(|n| matches!(n, Node::Char(_)))
+}
+
+fn folds(c: char) -> impl Iterator<Item = char> {
+    c.to_lowercase().chain(c.to_uppercase())
+}
+
+fn same_folded(a: char, b: char) -> bool {
+    a.to_lowercase().eq(b.to_lowercase())
+}
+
 fn is_word(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '_'
 }
@@ -376,11 +390,24 @@ impl Threads {
     }
 }
 
+/// How a pattern reads its text and what counts as a match.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Flags {
+    /// Letters match in either case.
+    pub ignore_case: bool,
+    /// A match starts and ends at a word boundary.
+    pub word: bool,
+    /// The pattern is plain text, every character itself.
+    pub fixed: bool,
+}
+
 /// A compiled pattern; it matches a line when it matches anywhere in it.
 #[derive(Debug, Clone)]
 pub struct Pattern {
     prog: Vec<Inst>,
     needles: Vec<String>,
+    literal: bool,
+    fold: bool,
 }
 
 impl Pattern {
@@ -390,15 +417,32 @@ impl Pattern {
     /// [`Error`] for a pattern that does not parse, a count over 1,000, a program over 4,000 steps, or a
     /// construct shed lacks (backreferences, lookaround, inline flags, named groups), named.
     pub fn new(re: &str) -> Result<Self, Error> {
+        Self::with(re, Flags::default())
+    }
+
+    /// Compiles `re` read by `flags`.
+    ///
+    /// # Errors
+    /// As [`Pattern::new`]; with `fixed` only for a program over 4,000 steps.
+    pub fn with(re: &str, flags: Flags) -> Result<Self, Error> {
         let mut parser = Parser {
             re,
             chars: re.chars().collect(),
             at: 0,
             depth: 0,
         };
-        let node = parser.alt()?;
-        if parser.peek().is_some() {
+        let mut node = if flags.fixed {
+            Node::Cat(parser.chars.iter().map(|&c| Node::Char(c)).collect())
+        } else {
+            parser.alt()?
+        };
+        if parser.peek().is_some() && !flags.fixed {
             return parser.bad("unmatched )");
+        }
+        let needles = needles(&node);
+        let literal = needles.len() == 1 && plain(&node);
+        if flags.word {
+            node = Node::Cat(vec![Node::Word, node, Node::Word]);
         }
         let mut prog = Vec::new();
         emit(&node, &mut prog);
@@ -408,8 +452,16 @@ impl Pattern {
         }
         Ok(Self {
             prog,
-            needles: needles(&node),
+            needles,
+            literal,
+            fold: flags.ignore_case,
         })
+    }
+
+    /// Whether the pattern is its one needle and nothing else, so a line holding it matches.
+    #[must_use]
+    pub fn is_literal(&self) -> bool {
+        self.literal
     }
 
     /// The fixed text every match holds one of; empty when none is known.
@@ -439,9 +491,11 @@ impl Pattern {
             for &pc in &now.pcs {
                 let step = match self.prog.get(pc) {
                     Some(Inst::Any) => true,
-                    Some(Inst::Char(want)) => c == *want,
+                    Some(Inst::Char(want)) => c == *want || (self.fold && same_folded(c, *want)),
                     Some(Inst::Class(ranges, negated)) => {
-                        ranges.iter().any(|&(a, b)| (a..=b).contains(&c)) != *negated
+                        let has = |c: char| ranges.iter().any(|&(a, b)| (a..=b).contains(&c));
+                        let folded = || folds(c).any(has);
+                        (has(c) || (self.fold && folded())) != *negated
                     }
                     _ => false,
                 };
@@ -487,7 +541,7 @@ impl Pattern {
 
 #[cfg(test)]
 mod tests {
-    use super::Pattern;
+    use super::{Flags, Pattern};
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -591,5 +645,41 @@ mod tests {
             let p = Pattern::new(re).expect("valid pattern");
             assert_eq!(p.needles(), want, "{re}");
         }
+    }
+
+    #[test]
+    fn flags_fold_case_bound_words_and_read_plain_text() {
+        let m = |re: &str, ignore_case, word, fixed, text: &str| {
+            let flags = Flags {
+                ignore_case,
+                word,
+                fixed,
+            };
+            Pattern::with(re, flags).expect("valid").is_match(text)
+        };
+        assert!(m(
+            "handover_refused",
+            true,
+            false,
+            false,
+            "HANDOVER_REFUSED"
+        ));
+        assert!(m("[a-c]x", true, false, false, "BX") && !m("[a-c]x", false, false, false, "BX"));
+        assert!(
+            m("wait", false, true, false, "a wait(") && !m("wait", false, true, false, "waits")
+        );
+        assert!(m("a(b", false, false, true, "xa(by") && !m("a.b", false, false, true, "axb"));
+        let fixed = Flags {
+            fixed: true,
+            ..Flags::default()
+        };
+        let p = Pattern::with("a(b|c", fixed).expect("plain text");
+        assert_eq!(
+            (p.needles(), p.is_literal()),
+            (&["a(b|c".to_owned()][..], true)
+        );
+        assert!(Pattern::new("ab").expect("valid").is_literal());
+        assert!(!Pattern::new("a.b").expect("valid").is_literal());
+        assert!(!Pattern::new("a|b").expect("valid").is_literal());
     }
 }

@@ -1780,6 +1780,102 @@
       }
     },
     {
+      "name": "code.grep",
+      "description": "The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "root",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "A folder or one file."
+          }
+        },
+        {
+          "name": "pattern",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "shed's pattern syntax, or plain text with `fixed`."
+          }
+        },
+        {
+          "name": "fixed",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "The pattern is plain text.",
+            "default": false
+          }
+        },
+        {
+          "name": "ignore_case",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Letters match in either case.",
+            "default": false
+          }
+        },
+        {
+          "name": "word",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "A match starts and ends at a word boundary.",
+            "default": false
+          }
+        },
+        {
+          "name": "count",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Per-file counts only: no lines, no outline.",
+            "default": false
+          }
+        },
+        {
+          "name": "hidden",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Also dot files and dot folders, never `.git`.",
+            "default": false
+          }
+        },
+        {
+          "name": "glob",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`*.rs` keeps, `!tests/` drops, in `.gitignore` syntax."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/GrepResult"
+        }
+      }
+    },
+    {
       "name": "heartbeat",
       "description": "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection.",
       "paramStructure": "by-name",
@@ -3915,6 +4011,126 @@
           }
         ],
         "description": "A symbol's kind."
+      },
+      "GrepResult": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileMatches"
+            },
+            "description": "The files with a match, in name order, paths relative to `root` with `/`."
+          },
+          "matches": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Matched lines in all."
+          },
+          "searched": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Files read."
+          }
+        },
+        "required": [
+          "files",
+          "matches",
+          "searched"
+        ],
+        "description": "`code.grep` result."
+      },
+      "FileMatches": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative to `root`, with `/`."
+          },
+          "lang": {
+            "$ref": "#/components/schemas/Lang",
+            "description": "Its language."
+          },
+          "count": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Its matched lines."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "description": "The lines by the symbol that holds them; empty with `count`."
+          }
+        },
+        "required": [
+          "path",
+          "lang",
+          "count",
+          "groups"
+        ],
+        "description": "One file's matches."
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Symbol"
+            },
+            "description": "The symbols around the lines, outermost first; empty at top level."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrepLine"
+            },
+            "description": "The lines, in file order."
+          }
+        },
+        "required": [
+          "scope",
+          "lines"
+        ],
+        "description": "Matched lines under one symbol."
+      },
+      "GrepLine": {
+        "type": "object",
+        "properties": {
+          "n": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "1-based."
+          },
+          "text": {
+            "type": "string",
+            "description": "The line as it is in the file, without its line end."
+          },
+          "clipped": {
+            "type": "boolean",
+            "description": "`text` is only the line's first 4,096 bytes."
+          },
+          "length": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0,
+            "description": "With `clipped`, the line's full length in bytes."
+          }
+        },
+        "required": [
+          "n",
+          "text"
+        ],
+        "description": "One matched line."
       },
       "AgentInfo": {
         "type": "object",

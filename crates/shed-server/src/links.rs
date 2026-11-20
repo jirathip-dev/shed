@@ -36,9 +36,12 @@ impl Held {
 
 pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value)> {
     let field = match method {
-        Method::Run | Method::Exec | Method::FileRead | Method::FileWrite | Method::CodeOutline => {
-            "machine"
-        }
+        Method::Run
+        | Method::Exec
+        | Method::FileRead
+        | Method::FileWrite
+        | Method::CodeOutline
+        | Method::CodeGrep => "machine",
         Method::Get
         | Method::Read
         | Method::Send
