@@ -86,6 +86,9 @@ arch:
     cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-pattern && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-search-fs && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-search-net && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-search-layer && ! drover arch-check --config ../../../.drover/arch.toml
 
 # The lesson checks in .drover/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:

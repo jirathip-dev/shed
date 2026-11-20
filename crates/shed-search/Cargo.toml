@@ -1,0 +1,15 @@
+[package]
+name = "shed-search"
+description = "shed's code search: outlines by line rules, on shed-proto's types."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+shed-proto.workspace = true
+
+[lints]
+workspace = true

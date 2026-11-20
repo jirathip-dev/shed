@@ -1615,7 +1615,7 @@
     },
     {
       "name": "file.read",
-      "description": "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.",
+      "description": "A file's bytes, or with `lines` only that span's; over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1641,6 +1641,21 @@
               "maximum": 255
             },
             "description": "`file.write`: its new bytes."
+          }
+        },
+        {
+          "name": "lines",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Span"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`file.read`: only these lines."
           }
         },
         {
@@ -1699,6 +1714,21 @@
           }
         },
         {
+          "name": "lines",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Span"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`file.read`: only these lines."
+          }
+        },
+        {
           "name": "machine",
           "required": false,
           "schema": {
@@ -1714,6 +1744,38 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "code.outline",
+      "description": "A file's functions, types, sections and blocks in file order, each with its kind, name, lines and depth, by line rules for Rust, TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or 256 MiB is `LIMIT`. `machine` reads it there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The file."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/OutlineResult"
         }
       }
     },
@@ -3650,6 +3712,210 @@
         ],
         "description": "`exec` result."
       },
+      "Span": {
+        "type": "object",
+        "properties": {
+          "start": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "The first line."
+          },
+          "end": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "The last line."
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "description": "A span of lines, 1-based and inclusive."
+      },
+      "OutlineResult": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "The file, as asked for."
+          },
+          "lang": {
+            "$ref": "#/components/schemas/Lang",
+            "description": "Its language."
+          },
+          "lines": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Its lines."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Symbol"
+            },
+            "description": "Its symbols in file order."
+          }
+        },
+        "required": [
+          "path",
+          "lang",
+          "lines",
+          "symbols"
+        ],
+        "description": "`code.outline` result."
+      },
+      "Lang": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "rust",
+            "description": "`rs`."
+          },
+          {
+            "type": "string",
+            "const": "typescript",
+            "description": "`ts tsx mts cts`."
+          },
+          {
+            "type": "string",
+            "const": "javascript",
+            "description": "`js jsx mjs cjs`."
+          },
+          {
+            "type": "string",
+            "const": "python",
+            "description": "`py pyi`."
+          },
+          {
+            "type": "string",
+            "const": "markdown",
+            "description": "`md markdown`."
+          },
+          {
+            "type": "string",
+            "const": "toml",
+            "description": "`toml`."
+          },
+          {
+            "type": "string",
+            "const": "text",
+            "description": "Anything else: blocks by indentation."
+          }
+        ],
+        "description": "A file's language, by its extension."
+      },
+      "Symbol": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/Kind",
+            "description": "What it is."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name: an identifier, an impl's `Trait for Type`, a heading's or table's text."
+          },
+          "start": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Its first line."
+          },
+          "end": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Its last line."
+          },
+          "depth": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "How many symbols hold it."
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "start",
+          "end",
+          "depth"
+        ],
+        "description": "One symbol of an outline: lines are 1-based and inclusive, `start` the first comment or attribute above it."
+      },
+      "Kind": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "fn",
+            "description": "A function or method."
+          },
+          {
+            "type": "string",
+            "const": "struct",
+            "description": "A struct or union."
+          },
+          {
+            "type": "string",
+            "const": "enum",
+            "description": "An enum."
+          },
+          {
+            "type": "string",
+            "const": "trait",
+            "description": "A trait."
+          },
+          {
+            "type": "string",
+            "const": "impl",
+            "description": "An impl block."
+          },
+          {
+            "type": "string",
+            "const": "mod",
+            "description": "A module or namespace."
+          },
+          {
+            "type": "string",
+            "const": "const",
+            "description": "A constant or static."
+          },
+          {
+            "type": "string",
+            "const": "type",
+            "description": "A type alias."
+          },
+          {
+            "type": "string",
+            "const": "macro",
+            "description": "A macro."
+          },
+          {
+            "type": "string",
+            "const": "class",
+            "description": "A class."
+          },
+          {
+            "type": "string",
+            "const": "interface",
+            "description": "An interface."
+          },
+          {
+            "type": "string",
+            "const": "section",
+            "description": "A Markdown heading or a TOML table."
+          },
+          {
+            "type": "string",
+            "const": "block",
+            "description": "A line at column 0 with deeper lines under it, in a language shed has no rules for."
+          }
+        ],
+        "description": "A symbol's kind."
+      },
       "AgentInfo": {
         "type": "object",
         "properties": {
@@ -4377,6 +4643,10 @@
       "HANDOVER_REFUSED": {
         "code": -32010,
         "message": "HANDOVER_REFUSED"
+      },
+      "LIMIT": {
+        "code": -32011,
+        "message": "LIMIT"
       }
     }
   }

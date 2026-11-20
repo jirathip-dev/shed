@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Link,
-    LinkState, MachineStats, Method, Sample, StatsParams,
+    LinkState, MachineStats, Method, Sample, Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -68,17 +68,19 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
         ),
         Method::FileRead => (
             to_value(FileParams {
-                path: PathBuf::from("/home/user/project/VERSION"),
+                path: PathBuf::from("/home/user/project/CHANGELOG.md"),
                 data: None,
+                lines: Some(Span { start: 3, end: 3 }),
                 machine: None,
             })
             .unwrap(),
-            json!(b"1.2.0\n"),
+            json!(b"## 1.2.0\n"),
         ),
         Method::FileWrite => (
             to_value(FileParams {
                 path: PathBuf::from("/home/user/project/VERSION"),
                 data: Some(b"1.3.0\n".to_vec()),
+                lines: None,
                 machine: None,
             })
             .unwrap(),
