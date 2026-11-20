@@ -20,8 +20,7 @@ clippy:
 banned:
     scripts/banned.sh
 
-# The tests get a private, empty temp dir (target/test-tmp links to it), so temp-left sees only what they
-# leave; it sits in /tmp because a test's socket path must stay under 104 bytes on macOS.
+# The tests, in a fresh private temp dir that target/test-tmp links to, so temp-left sees only what they leave.
 test:
     #!/bin/sh
     set -eu
