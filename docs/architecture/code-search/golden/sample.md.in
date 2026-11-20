@@ -1,0 +1,22 @@
+# Job queue
+
+Jobs wait here until they run.
+
+## Retries
+
+A job is retried three times.
+
+```sh
+# not a heading: this is a comment inside a code fence
+queue retries --max 3
+```
+
+### Backoff
+
+Each retry waits twice as long.
+
+## Limits
+
+The queue holds 100 jobs.
+
+#hashtag is not a heading

@@ -1,0 +1,4 @@
+sample.go (text, 27 lines, 3 symbols)
+  block type Queue struct [10-13]
+  block func (q *Queue) Push(job Job) error [15-21]
+  block func retries [23-27]
