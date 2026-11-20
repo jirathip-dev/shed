@@ -69,11 +69,11 @@ One terminal.
 
 ### `read`
 
-The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`.
+The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. Every read returns a `cursor`; with `since: <cursor>` only what is new: the lines that scrolled off since (`lost: N` when scrollback dropped N of them first), then the screen only when it changed (`changed`), so nothing new is an empty `text`. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`, or with `since` only those after its `seq`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"read","params":{"history":false,"lines":2,"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"text":"ok 12 tests\n$"}}
+{"jsonrpc":"2.0","id":1,"method":"read","params":{"history":false,"lines":2,"name":"build","since":{"screen":2166136261,"seq":40}}}
+{"jsonrpc":"2.0","id":1,"result":{"changed":true,"cursor":{"screen":3735928559,"seq":41},"text":"ok 12 tests\n$"}}
 ```
 
 ### `send`

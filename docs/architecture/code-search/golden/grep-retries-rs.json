@@ -1,0 +1,156 @@
+{
+    "files": [
+        {
+            "path": "sample.rs",
+            "lang": "rust",
+            "count": 8,
+            "groups": [
+                {
+                    "scope": [
+                        {
+                            "kind": "struct",
+                            "name": "Job",
+                            "start": 9,
+                            "end": 14,
+                            "depth": 0
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "n": 13,
+                            "text": "    pub retries: usize,"
+                        }
+                    ]
+                },
+                {
+                    "scope": [
+                        {
+                            "kind": "enum",
+                            "name": "QueueError",
+                            "start": 16,
+                            "end": 19,
+                            "depth": 0
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "n": 18,
+                            "text": "    Closed { retries: usize },"
+                        }
+                    ]
+                },
+                {
+                    "scope": [],
+                    "lines": [
+                        {
+                            "n": 26,
+                            "text": "// fn old_push() was removed with the retries rework."
+                        }
+                    ]
+                },
+                {
+                    "scope": [
+                        {
+                            "kind": "impl",
+                            "name": "fmt::Display for Wrapper<T>",
+                            "start": 28,
+                            "end": 35,
+                            "depth": 0
+                        },
+                        {
+                            "kind": "fn",
+                            "name": "fmt",
+                            "start": 32,
+                            "end": 34,
+                            "depth": 1
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "n": 33,
+                            "text": "        write!(f, \"{} jobs, {RETRIES} retries\", self.0.len())"
+                        }
+                    ]
+                },
+                {
+                    "scope": [
+                        {
+                            "kind": "impl",
+                            "name": "Job",
+                            "start": 37,
+                            "end": 49,
+                            "depth": 0
+                        },
+                        {
+                            "kind": "fn",
+                            "name": "run",
+                            "start": 38,
+                            "end": 44,
+                            "depth": 1
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "n": 42,
+                            "text": "        let retries = self.retries.min(budget);"
+                        },
+                        {
+                            "n": 43,
+                            "text": "        retry(retries).await"
+                        }
+                    ]
+                },
+                {
+                    "scope": [
+                        {
+                            "kind": "impl",
+                            "name": "Job",
+                            "start": 37,
+                            "end": 49,
+                            "depth": 0
+                        },
+                        {
+                            "kind": "fn",
+                            "name": "fresh",
+                            "start": 46,
+                            "end": 48,
+                            "depth": 1
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "n": 47,
+                            "text": "        Self { id, retries: 0 }"
+                        }
+                    ]
+                },
+                {
+                    "scope": [
+                        {
+                            "kind": "mod",
+                            "name": "tests",
+                            "start": 66,
+                            "end": 74,
+                            "depth": 0
+                        },
+                        {
+                            "kind": "fn",
+                            "name": "fresh_has_no_retries",
+                            "start": 70,
+                            "end": 73,
+                            "depth": 1
+                        }
+                    ],
+                    "lines": [
+                        {
+                            "n": 72,
+                            "text": "        assert_eq!(job!(1).retries, 0);"
+                        }
+                    ]
+                }
+            ]
+        }
+    ],
+    "matches": 8,
+    "searched": 1
+}

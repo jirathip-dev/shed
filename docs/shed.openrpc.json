@@ -348,7 +348,7 @@
     },
     {
       "name": "read",
-      "description": "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`.",
+      "description": "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. Every read returns a `cursor`; with `since: <cursor>` only what is new: the lines that scrolled off since (`lost: N` when scrollback dropped N of them first), then the screen only when it changed (`changed`), so nothing new is an empty `text`. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`, or with `since` only those after its `seq`.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -413,6 +413,21 @@
             "format": "uint",
             "minimum": 0,
             "description": "With `events`: only the last N."
+          }
+        },
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Only what came after this `cursor` of an earlier `read` (ACP: the events after its `seq`)."
           }
         }
       ],
@@ -2366,6 +2381,28 @@
         ],
         "description": "Tokens a turn or a session spent, as the agent's prompt responses report them."
       },
+      "Cursor": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The lines that have scrolled off the screen so far (ACP: the transcript's last `seq`)."
+          },
+          "screen": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "A hash of the visible screen's text (ACP: 0)."
+          }
+        },
+        "required": [
+          "seq",
+          "screen"
+        ],
+        "description": "A place in a terminal's output, as `read` returns it."
+      },
       "ReadResult": {
         "type": "object",
         "properties": {
@@ -2379,10 +2416,28 @@
               "$ref": "#/components/schemas/Logged"
             },
             "description": "With `events`: the transcript's events, in order."
+          },
+          "cursor": {
+            "$ref": "#/components/schemas/Cursor",
+            "description": "Where this read ends: the next `read`'s `since`."
+          },
+          "lost": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "With `since`: lines that scrolled off after it but are no longer kept."
+          },
+          "changed": {
+            "type": "boolean",
+            "description": "With `since`: the screen changed, and `text` ends with it."
           }
         },
         "required": [
-          "text"
+          "text",
+          "cursor"
         ],
         "description": "`read` result."
       },

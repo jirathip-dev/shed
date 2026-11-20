@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    KeysParams, LsParams, Method, Parent, ReadParams, ReadResult, Reported, ResizeParams,
+    Cursor, KeysParams, LsParams, Method, Parent, ReadParams, ReadResult, Reported, ResizeParams,
     Resources, RunParams, SendParams, State, StateParams, Target, TerminalInfo, WaitOutcome,
     WaitParams, WaitResult,
 };
@@ -112,11 +112,20 @@ fn read_example() -> (Value, Value) {
             events: false,
             before: None,
             n: None,
+            since: Some(Cursor {
+                seq: 40,
+                screen: 2_166_136_261,
+            }),
         })
         .unwrap(),
         to_value(ReadResult {
             text: "ok 12 tests\n$".into(),
-            events: Vec::new(),
+            cursor: Cursor {
+                seq: 41,
+                screen: 3_735_928_559,
+            },
+            changed: true,
+            ..ReadResult::default()
         })
         .unwrap(),
     )

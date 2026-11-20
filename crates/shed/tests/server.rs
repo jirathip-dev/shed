@@ -377,6 +377,54 @@ fn a_kept_terminal_comes_back_as_a_shell_in_its_cwd() {
 }
 
 #[test]
+fn read_since_a_cursor_returns_only_what_is_new_and_matches_the_goldens() {
+    let dir = temp_dir("since");
+    let _server = Server::start(&dir);
+    let mut goldens = Goldens {
+        dir: dir.clone(),
+        files: Vec::new(),
+    };
+    let mut c = Conn::open(&dir);
+    c.result("hello", &ours());
+    let script = "stty -echo; printf 'a\\n'; read x; printf 'b\\nc\\nd\\ne\\n'; read x; seq 5003; \
+        read x; printf '\\033[?1049h\\033[H\\033[2Jtop 1'; read x; printf '\\033[Htop 1'; \
+        touch redrawn; exec sleep 100";
+    let run =
+        json!({"name": "pager", "cwd": dir, "rows": 3, "cols": 20, "cmd": ["sh", "-c", script]});
+    c.result("run", &run);
+    let pager = json!({"name": "pager"});
+    eventually("a", || c.result("read", &pager)["text"] == "a");
+    let mut cursor = c.result("read", &pager)["cursor"].clone();
+    let mut since = |c: &mut Conn, id: u64| {
+        let read = c.call(id, "read", &json!({"name": "pager", "since": cursor}));
+        goldens.record("read-since", &read);
+        cursor = read.2["result"]["cursor"].clone();
+        read.2["result"].clone()
+    };
+    let nothing = since(&mut c, 1);
+    assert_eq!(
+        (&nothing["text"], &nothing["changed"]),
+        (&json!(""), &Value::Null)
+    );
+    for (id, screen) in [(2, "d\ne"), (3, "5002\n5003"), (4, "top 1")] {
+        c.result("keys", &json!({"name": "pager", "keys": ["enter"]}));
+        eventually(screen, || c.result("read", &pager)["text"] == screen);
+        let new = since(&mut c, id);
+        assert_eq!(new["changed"], true);
+        assert_eq!(new["lost"], if id == 3 { json!(3) } else { Value::Null });
+        assert!(new["text"].as_str().is_some_and(|t| t.ends_with(screen)));
+    }
+    c.result("keys", &json!({"name": "pager", "keys": ["enter"]}));
+    eventually("the redraw", || dir.join("redrawn").exists());
+    let same = since(&mut c, 5);
+    assert_eq!(
+        (&same["text"], &same["changed"]),
+        (&json!(""), &Value::Null)
+    );
+    goldens.check();
+}
+
+#[test]
 fn a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest() {
     let dir = temp_dir("version");
     let _server = Server::start(&dir);

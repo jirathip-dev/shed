@@ -381,10 +381,9 @@ impl Terminal {
         lock(&self.screen).bracketed_paste()
     }
 
-    /// The last `n` lines of scrollback and screen as plain text.
-    #[must_use]
-    pub fn history(&self, n: usize) -> String {
-        lock(&self.screen).history(n)
+    /// `f` of the screen, locked while it runs.
+    pub fn with_screen<T>(&self, f: impl FnOnce(&Screen) -> T) -> T {
+        f(&lock(&self.screen))
     }
 
     /// The state the program last reported (`shed state`, the OSC 7501 escape or another agent's), unless a

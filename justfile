@@ -20,8 +20,15 @@ clippy:
 banned:
     scripts/banned.sh
 
+# The tests, in a fresh private temp dir that target/test-tmp links to, so temp-left sees only what they leave.
 test:
-    cargo test --workspace --locked
+    #!/bin/sh
+    set -eu
+    if old=$(readlink target/test-tmp); then rm -rf "${old:?}"; fi
+    mkdir -p target
+    dir=$(mktemp -d /tmp/shed-test.XXXXXX)
+    ln -sfn "$dir" target/test-tmp
+    TMPDIR="$dir" cargo test --workspace --locked
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
@@ -29,8 +36,11 @@ doc:
 deny:
     cargo deny --locked check
 
+# The cap is the newest ci/cap.d/ raise by name, else ci/cap.toml; the fixtures prove both.
 cap:
     scripts/line-cap.sh
+    ! scripts/line-cap.sh ci/fixtures/cap-toml
+    scripts/line-cap.sh ci/fixtures/cap-raise
 
 deps:
     scripts/dep-direction.sh

@@ -1,0 +1,4 @@
+sample.toml (toml, 13 lines, 3 symbols)
+  section limits [4-6]
+  section limits.backoff [8-10]
+  section notify [12-13]

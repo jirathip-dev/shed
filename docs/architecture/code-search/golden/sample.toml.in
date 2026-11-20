@@ -1,0 +1,13 @@
+# The queue's settings.
+name = "queue"
+
+[limits]
+jobs = 100
+retries = 3
+
+[limits.backoff]
+first_ms = 200
+factor = 2
+
+[[notify]]
+url = "https://example.com/hook"
