@@ -4,9 +4,10 @@
 
 Decision: shed gets two crates beside shed-proto. shed-client is the one socket client, blocking and with no async runtime: connect and version check, typed calls for terminals, ACP sessions, streams, agents and machines, one error type. shed-catalog holds the agent records (program, commands, models, model and effort words, limit and sign-in lines), built in and overridable per host and per app. shed's own CLI and server use both first; cooee and drover then delete their copies. One minimum protocol lives in the client, and from protocol 3 a server refuses a request field it does not know, so an old server fails loudly instead of dropping it.
 Slices: (1) the client crate, with shed's CLI and server moved onto it; (2) protocol 3 and the one minimum; (3) the catalog crate and the records' new keys; (4) run takes a model, an effort and an environment; (5) a test server and the skill. Then four adoption issues: cooee client, cooee catalog, drover client, drover catalog. About +690 lines in shed; about 1,050 fewer in cooee and drover, and 424 fewer test lines.
-Open questions: (1) may run take a model, an effort and an environment, so shed builds the agent's command (recommended), or do the apps keep building it from catalog data? (2) Raise shed's line cap from 13,250 to 13,950 before slice 1 (recommended)? (3) Set the shed fleet's done check to the one command CI runs, just check (recommended)?
+Open questions, answered by the owner in q2648 (approved, with the 2026-11-20 amendment): (1) run takes a model, an effort and an environment, so shed builds the agent's command, and the environment's values never leave the server's memory (not in get, agents, events, logs or a hibernated session, each proven by a test). (2) One cap raise to 14,300, in its own cap issue, sized for these slices and the open PR already over. (3) The shed fleet's done check becomes just check.
 
-**Status:** proposed. Usage, shapes, boundaries, the statechart, the inventory, the agent-speed mechanisms
+**Status:** accepted by the owner (q2648: open questions 1, 2 and 3 accepted as recommended, the cap at 14,300
+by the amendment). Usage, shapes, boundaries, the statechart, the inventory, the agent-speed mechanisms
 and the slices: [README.md](README.md).
 
 ## The question
@@ -102,8 +103,8 @@ So: what is the one client, what is the one catalog, where does each sit, and wh
    What an app does with an agent stays in the app, keyed by the record's id: cooee's persona setup and its
    status and usage readers, drover's hook dialects, profile sync, sandbox needs and token proxy. A fact
    moves into the record when a second repo needs it.
-7. **`run` takes `model`, `effort` and `env`** (open question 1). The server applies `pick` for the driver
-   it chose and gives `env` to the program; `env` stays in memory, like `mcp_servers`. `cmd` stays for a
+7. **`run` takes `model`, `effort` and `env`** (open question 1, accepted). The server applies `pick` for the driver
+   it chose and gives `env` to the program; `env` stays in memory, like `mcp_servers`: its values are in no `get`, `agents`, `events`, log or hibernated session, and slice 4 proves each with a test. `cmd` stays for a
    caller that needs a wrapper.
 8. **Every params type derives `Default`**, so a caller names the fields it sets and a new field breaks no
    build.
@@ -114,12 +115,12 @@ So: what is the one client, what is the one catalog, where does each sit, and wh
 
 - **A protocol change is one lane in one repo.** The typed call, the server and the CLI change together and
   shed's own tests drive the real server through the client. An app sees it when it moves its pin.
-- **Every host's shed is on protocol 3 before an app adopts.** shed updates itself, so the order is: shed's
+- **Every host's shed reports protocol 3 before an app adopts.** shed updates itself, so the order is: shed's
   slices, a release, then the adoption issues. An app on the client refuses an older server with one line
   and the fix.
 - **Both apps start ACP lanes over the socket.** MCP servers and secrets no longer touch a temp file or a
   command line; cooee's secrets file and its `sh -c` reader go with slice 4.
-- **The records settle the disagreements.** The adoption lanes pick one login command, one id and one
+- **The records settle the disagreements.** The adoption lanes pick, by what the real program does and stated in their PR, one login command, one id and one
   install command per agent; an app that wants another writes one row, in its own config.
 - **A compiled-in record can be older than the host's.** An app checks its config against `built_in()` and
   launches by `served()`. With slice 4 it does not read the launch keys at all.
@@ -131,8 +132,8 @@ So: what is the one client, what is the one catalog, where does each sit, and wh
   input framing to `input.rs`, and slice 4's launch code goes to `drivers/launch.rs`.
 - **The server's `lib.rs` loses 95 lines**, which replaces the `client.rs` row of the hotspots ADR's
   slice 4.
-- **The cap.** shed is at 13,215 of 13,250. The slices add about 690 (README), so one raise to 13,950
-  before slice 1 (open question 2). The fake server is 150 of those; it is test support that ships in
+- **The cap.** shed is at 13,215 of 13,250. The slices add about 690 (README), so one raise to 14,300
+  before slice 1, in its own cap issue, also covering the open PR already over (open question 2, as amended). The fake server is 150 of those; it is test support that ships in
   `src/` because two repos link it.
 - **Left to the apps, each its own issue later:** drover's lane prologue (its variables can go to `env`,
   its two file copies to `exec`, and then it needs no wrapper and no adapter lookup); a `[terminal]` table

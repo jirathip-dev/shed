@@ -4,7 +4,7 @@
 
 Decision: shed gets two crates beside shed-proto. shed-client is the one socket client, blocking and with no async runtime: connect and version check, typed calls for terminals, ACP sessions, streams, agents and machines, one error type. shed-catalog holds the agent records (program, commands, models, model and effort words, limit and sign-in lines), built in and overridable per host and per app. shed's own CLI and server use both first; cooee and drover then delete their copies. One minimum protocol lives in the client, and from protocol 3 a server refuses a request field it does not know, so an old server fails loudly instead of dropping it.
 Slices: (1) the client crate, with shed's CLI and server moved onto it; (2) protocol 3 and the one minimum; (3) the catalog crate and the records' new keys; (4) run takes a model, an effort and an environment; (5) a test server and the skill. Then four adoption issues: cooee client, cooee catalog, drover client, drover catalog. About +690 lines in shed; about 1,050 fewer in cooee and drover, and 424 fewer test lines.
-Open questions: (1) may run take a model, an effort and an environment, so shed builds the agent's command (recommended), or do the apps keep building it from catalog data? (2) Raise shed's line cap from 13,250 to 13,950 before slice 1 (recommended)? (3) Set the shed fleet's done check to the one command CI runs, just check (recommended)?
+Open questions, answered by the owner in q2648 (approved, with the 2026-11-20 amendment): (1) run takes a model, an effort and an environment, so shed builds the agent's command, and the environment's values never leave the server's memory (not in get, agents, events, logs or a hibernated session, each proven by a test). (2) One cap raise to 14,300, in its own cap issue, sized for these slices and the open PR already over. (3) The shed fleet's done check becomes just check.
 
 The question, the options, the decision and its consequences are in [adr.md](adr.md). This file has how the
 callers read, the shapes, the version contract, the boundaries, the statechart, the inventory, the
@@ -255,7 +255,7 @@ pub env: BTreeMap<String, String>,
 ```
 
 A record after slice 3, the new keys only (`crates/shed-catalog/providers/claude.toml`; the values are
-today's from the two apps, and where they differ the adoption lane picks):
+today's from the two apps, and where they differ the adoption lane picks what the real program does and says so in its PR):
 
 ```toml
 install = "curl -fsSL https://claude.ai/install.sh | bash"
@@ -418,7 +418,7 @@ pause between tries needs a clock.
 
 | # | criterion | mechanism |
 |---|---|---|
-| 1 | one gate, same everywhere | `just check` is the gate. CI's gate job becomes one step, `just check`, so the two lists cannot drift; the shed fleet's `done_checks` is `just check` (open question 3). Both crates join through `[lints] workspace = true`, the layers and bans in `arch.toml`, the cap and `deny`, so they are under every gate from their first commit. What stays CI-only is named: the other OS's test leg and the base-against-head benches. |
+| 1 | one gate, same everywhere | `just check` is the gate. CI's gate job becomes one step, `just check`, so the two lists cannot drift; the shed fleet's `done_checks` is `just check` (open question 3, accepted). Both crates join through `[lints] workspace = true`, the layers and bans in `arch.toml`, the cap and `deny`, so they are under every gate from their first commit. What stays CI-only is named: the other OS's test leg and the base-against-head benches. |
 | 2 | a skill | `skill/shed-client/`: `SKILL.md` (connect, the calls by domain, errors, the version contract, the catalog's layers) and `examples/` (`lane.rs`, `events.rs`, `catalog.rs`, `fake.rs`). `shed skill --to <dir>` writes it from the binary (collected by the build script, as the records are). The examples are `shed-client`'s cargo examples, so `just clippy` and `just test` compile them and the skill cannot go stale. |
 | 3 | fix once | The inventory above; shed's own CLI and server run on the same client, so a client bug shows in shed's tests first. Each adoption PR adds a `Hello::ours` ban to its repo's `arch.toml`, so a second client cannot come back. |
 | 4 | smaller blast radius | cooee about −800 lines, drover about −250 and −424 of tests. In shed: two crates on their own layers; the typed calls one file per domain; one file per record; the server's `lib.rs` 95 lines shorter; a new `RunParams` field breaks no app (`Default`). |
@@ -436,14 +436,14 @@ fixture for `Hello::ours`; one fixture each for `just protocol` and `just budget
 | 1 | The client; shed's CLI and server on it; `Default` on params; `Input` to proto; CI's gate is `just check`; `just budget` | `crates/shed-client/`, `shed-proto/src/input.rs`, `shed-server/src/{lib,links,machines,lane}.rs`, `shed/src/`, `justfile`, `ci.yml`, `arch.toml` | about +335 |
 | 2 | Protocol 3: unknown request fields refused; `MIN_PROTOCOL`; `just protocol` | `shed-server/src/lib.rs` (dispatch), `shed-client/src/conn.rs`, `scripts/protocol.py` | about +40 |
 | 3 | The catalog; the records move; new keys and `pick`; the gemini record | `crates/shed-catalog/`, `shed-proto/src/agents.rs`, `shed-server/src/providers.rs` | about +85 |
-| 4 | `run` takes `model`, `effort`, `env` (open question 1) | `shed-proto` (`RunParams`), `shed-server/src/drivers/launch.rs`, `shed/src/main.rs` (`--model`, `--effort`, `--env`) | about +50 |
+| 4 | `run` takes `model`, `effort`, `env` (open question 1); one test each that `env`'s values are in no `get`, `agents`, `events`, log or hibernated session | `shed-proto` (`RunParams`), `shed-server/src/drivers/launch.rs`, `shed/src/main.rs` (`--model`, `--effort`, `--env`) | about +50 |
 | 5 | The fake server; the skill; `shed skill --to` | `shed-client/src/fake.rs`, `skill/shed-client/`, `shed/src/main.rs` | about +180 |
 
 Each slice is one PR, serial, in this order; 1 and 3 are moves plus a typed surface, reviewed with
 `git diff --color-moved`. The numbers are estimates from the code that moves and the copies it replaces.
 
 Adoption, filed after this ADR is approved and started once a shed release with slices 1 to 5 is on every
-host:
+host and every host's shed reports protocol 3:
 
 1. **cooee, the client.** First, because `Shed` is cooee's pooled design made general, so it proves the API
    with the least change. Deletes `shed/` but `Agent`, `Launch` and `run_on`.
