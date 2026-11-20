@@ -15,6 +15,7 @@ shed-proto = { path = "crates/shed-proto" }
 shed-client = { path = "crates/shed-client" }
 shed-core = { path = "crates/shed-core" }
 shed-pattern = { path = "crates/shed-pattern" }
+shed-search = { path = "crates/shed-search" }
 shed-server = { path = "crates/shed-server" }
 agent-client-protocol = "=5.0.0"
 anyhow = "=1.0.104"
@@ -54,3 +55,6 @@ let_underscore_must_use = "deny"
 lto = "fat"
 codegen-units = 1
 strip = true
+
+[profile.dev.package.shed-script]
+opt-level = 1

@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod attach;
+mod code;
 mod out;
 mod service;
 mod update;
@@ -29,7 +30,7 @@ use shed_server::machines::{self, Machine};
 use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
     Children, Event, EventsParams, ExecParams, FileParams, KeysParams, Link, LinkState, LsParams,
-    MachineStats, Method, Parent, ReadParams, Reported, RunParams, SendParams, SessionRecord,
+    MachineStats, Method, Parent, ReadParams, Reported, RunParams, SendParams, SessionRecord, Span,
     State, StatsParams, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
 };
 use shed_server::{Paths, config};
@@ -133,11 +134,9 @@ enum Command {
     #[command(subcommand)]
     Machine(MachineCommand),
     Exec(ExecArgs),
-    File {
-        #[arg(value_parser = ["read", "write"])]
-        action: String,
-        path: PathBuf,
-    },
+    File(FileArgs),
+    #[command(subcommand)]
+    Code(code::CodeCommand),
     Install {
         #[arg(long)]
         force: bool,
@@ -146,6 +145,15 @@ enum Command {
     Doctor,
     Setup(SetupArgs),
     SelfUpdate(update::Args),
+}
+
+#[derive(Args)]
+struct FileArgs {
+    #[arg(value_parser = ["read", "write"])]
+    action: String,
+    path: PathBuf,
+    #[arg(long, value_name = "N-M", value_parser = code::span)]
+    lines: Option<Span>,
 }
 
 #[derive(Args)]
@@ -297,7 +305,8 @@ impl Server<'_> {
                 | Command::Events { .. }
                 | Command::Wait(_)
                 | Command::Exec(_)
-                | Command::File { .. }
+                | Command::File(_)
+                | Command::Code(_)
         );
         let up = |m: &Machine| links(paths).get(&m.name).map(|l| l.state) == Some(LinkState::Up);
         let linked = linkable && on.as_ref().is_some_and(up);
@@ -589,19 +598,14 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Attach { name } => attach::attach(server.connect(None)?, &name)?,
         Command::State { args, note } => state(&server, json, args, note)?,
         Command::Wait(args) => return wait(&server, json, args),
-        Command::Events { labels, since } => {
-            let params = EventsParams {
-                labels: labels.into_iter().collect(),
-                since,
-            };
-            events(&server, &params)?;
-        }
+        Command::Events { labels, since } => events(&server, labels, since)?,
         Command::Top { name, full } => top(&server, json, name, full)?,
         Command::Watch { labels } => watch::watch(&server, labels.into_iter().collect())?,
         Command::Connect { autostart } => relay(&paths, cli.dir.as_deref(), autostart)?,
         Command::Machine(command) => return machine(&server, json, command),
         Command::Exec(args) => return exec(&server, json, args),
-        Command::File { action, path } => file(&server, json, &action, path)?,
+        Command::File(args) => file(&server, json, args)?,
+        Command::Code(command) => code::code(&server, json, command)?,
         Command::Install { force } => service::install(force)?,
         Command::Uninstall => service::uninstall()?,
         Command::Doctor => return service::doctor(&paths),
@@ -1005,8 +1009,13 @@ fn again<T>(
     Ok(call(&client)?)
 }
 
-fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
-    let mut params = params.clone();
+fn events(
+    server: &Server,
+    labels: Vec<(String, String)>,
+    since: Option<u64>,
+) -> anyhow::Result<()> {
+    let labels = labels.into_iter().collect();
+    let mut params = EventsParams { labels, since };
     let mut client = server.connect(None)?;
     let _: Value = client.call(Method::Events, &params)?;
     let mut out = io::stdout().lock();
@@ -1156,10 +1165,15 @@ fn exec(server: &Server, json: bool, args: ExecArgs) -> anyhow::Result<ExitCode>
     Ok(ExitCode::from(u8::try_from(done.code).unwrap_or(1)))
 }
 
-fn file(server: &Server, json: bool, action: &str, path: PathBuf) -> anyhow::Result<()> {
+fn file(server: &Server, json: bool, args: FileArgs) -> anyhow::Result<()> {
+    let write = args.action == "write";
+    if write && args.lines.is_some() {
+        bail!("--lines is for file read");
+    }
     let params = FileParams {
-        path: server.resolve(path)?,
-        data: (action == "write").then(stdin_bytes).transpose()?,
+        path: server.resolve(args.path)?,
+        data: write.then(stdin_bytes).transpose()?,
+        lines: args.lines,
         machine: server.machine(),
     };
     let method = match params.data {

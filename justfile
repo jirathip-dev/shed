@@ -91,6 +91,10 @@ arch:
     cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-pattern && ! drover arch-check --config ../../../.drover/arch.toml
+    for d in ci/fixtures/arch-script-pure/*/; do (cd "$d" && ! drover arch-check --config ../../../../.drover/arch.toml) || exit 1; done
+    cd ci/fixtures/arch-search-fs && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-search-net && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-search-layer && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-client && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-hello && ! drover arch-check --config ../../../.drover/arch.toml
 

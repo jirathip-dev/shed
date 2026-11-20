@@ -249,11 +249,11 @@ Run a program without a terminal in a process group of its own, `stdin` fed to i
 
 ### `file.read`
 
-A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.
+A file's bytes, or with `lines` only that span's; over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"file.read","params":{"path":"/home/user/project/VERSION"}}
-{"jsonrpc":"2.0","id":1,"result":[49,46,50,46,48,10]}
+{"jsonrpc":"2.0","id":1,"method":"file.read","params":{"lines":{"end":3,"start":3},"path":"/home/user/project/CHANGELOG.md"}}
+{"jsonrpc":"2.0","id":1,"result":[35,35,32,49,46,50,46,48,10]}
 ```
 
 ### `file.write`
@@ -263,6 +263,15 @@ Replace a file with `data`: written to a temp file beside it, then renamed over 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"path":"/home/user/project/VERSION"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `code.outline`
+
+A file's functions, types, sections and blocks in file order, each with its kind, name, lines and depth, by line rules for Rust, TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or 256 MiB is `LIMIT`. `machine` reads it there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"code.outline","params":{"machine":"box","path":"/home/user/project/src/job.rs"}}
+{"jsonrpc":"2.0","id":1,"result":{"lang":"rust","lines":49,"path":"/home/user/project/src/job.rs","symbols":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9},{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}}
 ```
 
 ### `heartbeat`
@@ -400,6 +409,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32008 | `IO` |
 | -32009 | `DRAFT_HELD` |
 | -32010 | `HANDOVER_REFUSED` |
+| -32011 | `LIMIT` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 3-4 / server 56de739 protocol 1-2; update the server and restart shed serve"}}

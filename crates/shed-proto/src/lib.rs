@@ -18,6 +18,8 @@ use serde_json::Value;
 #[cfg(feature = "schema")]
 use serde_json::json;
 
+pub mod code;
+pub use code::{Kind, Lang, OutlineParams, OutlineResult, Span, Symbol};
 pub mod input;
 pub use input::{Input, frame};
 
@@ -192,11 +194,13 @@ pub enum ErrorCode {
     DraftHeld,
     /// The server will not hand over (`handover.check`, `handover`); the message says why, and nothing changed.
     HandoverRefused,
+    /// A `code.*` query went over one of its fixed limits; the message names it, its value and where it stood.
+    Limit,
 }
 
 impl ErrorCode {
     /// Every code, in documentation order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::Parse,
         Self::InvalidRequest,
         Self::MethodNotFound,
@@ -213,6 +217,7 @@ impl ErrorCode {
         Self::Io,
         Self::DraftHeld,
         Self::HandoverRefused,
+        Self::Limit,
     ];
 
     /// The numeric JSON-RPC code.
@@ -235,6 +240,7 @@ impl ErrorCode {
             Self::Io => -32008,
             Self::DraftHeld => -32009,
             Self::HandoverRefused => -32010,
+            Self::Limit => -32011,
         }
     }
 
@@ -258,6 +264,7 @@ impl ErrorCode {
             Self::Io => "IO",
             Self::DraftHeld => "DRAFT_HELD",
             Self::HandoverRefused => "HANDOVER_REFUSED",
+            Self::Limit => "LIMIT",
         }
     }
 }
@@ -317,6 +324,8 @@ pub enum Method {
     FileRead,
     /// Write a file: [`FileParams`] with `data` → `{}`.
     FileWrite,
+    /// A file's symbols: [`OutlineParams`] → [`OutlineResult`].
+    CodeOutline,
     /// Keep the connection alive: `{}` → `{}`, usually as a notification.
     Heartbeat,
     /// The agents shed knows: `{}` → `[AgentInfo]`.
@@ -333,7 +342,7 @@ pub enum Method {
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 32] = [
+    pub const ALL: [Self; 33] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -360,6 +369,7 @@ impl Method {
         Self::Exec,
         Self::FileRead,
         Self::FileWrite,
+        Self::CodeOutline,
         Self::Heartbeat,
         Self::Agents,
         Self::AgentsMatch,
@@ -398,6 +408,7 @@ impl Method {
             Self::Exec => "exec",
             Self::FileRead => "file.read",
             Self::FileWrite => "file.write",
+            Self::CodeOutline => "code.outline",
             Self::Heartbeat => "heartbeat",
             Self::Agents => "agents",
             Self::AgentsMatch => "agents.match",
@@ -484,10 +495,13 @@ impl Method {
                 "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link."
             }
             Self::FileRead => {
-                "A file's bytes; one over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there."
+                "A file's bytes, or with `lines` only that span's; over `REPLY_LIMIT` bytes is `IO`. `machine` reads it there."
             }
             Self::FileWrite => {
                 "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there."
+            }
+            Self::CodeOutline => {
+                "A file's functions, types, sections and blocks in file order, each with its kind, name, lines and depth, by line rules for Rust, TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or 256 MiB is `LIMIT`. `machine` reads it there."
             }
             Self::Heartbeat => {
                 "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection."
@@ -1277,6 +1291,9 @@ pub struct FileParams {
     /// `file.write`: its new bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<Vec<u8>>,
+    /// `file.read`: only these lines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines: Option<Span>,
     /// The machine it is on, over its held link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
@@ -1860,6 +1877,7 @@ impl Method {
             Self::Exec => pair::<ExecParams, ExecResult>(g),
             Self::FileRead => pair::<FileParams, Vec<u8>>(g),
             Self::FileWrite => pair::<FileParams, Empty>(g),
+            Self::CodeOutline => pair::<OutlineParams, OutlineResult>(g),
             Self::Heartbeat => pair::<Empty, Empty>(g),
             Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
             Self::AgentsMatch => pair::<MatchParams, Matched>(g),

@@ -1,0 +1,15 @@
+[package]
+name = "shed-script"
+description = "shed's script engine: a JavaScript subset, pure, reaching the outside only through its host."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[package.metadata.gate]
+test_secs = 5
+
+[lints]
+workspace = true

@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 pub mod agents;
+mod code;
 pub mod config;
 pub mod drivers;
 mod events;
@@ -23,7 +24,7 @@ mod stats;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Read as _, Write as _};
+use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::os::unix::net::UnixStream;
@@ -34,9 +35,9 @@ use std::time::Duration;
 
 use proto::{
     Children, ErrorCode, Event, EventKind, EventsParams, ExecParams, ExecResult, FileParams, Hello,
-    LONG_VERSION, Method, Request, ResizeParams, Response, RpcError, State, StatsParams, Target,
-    TerminalInfo, TerminalParams, TerminalResizeParams, WaitOutcome, WaitParams, WaitResult,
-    WatchParams,
+    LONG_VERSION, Method, Request, ResizeParams, Response, RpcError, Span, State, StatsParams,
+    Target, TerminalInfo, TerminalParams, TerminalResizeParams, WaitOutcome, WaitParams,
+    WaitResult, WatchParams,
 };
 use registry::{Registry, Stream};
 use rustix::process::{Resource, Rlimit, Signal, getrlimit, setrlimit};
@@ -48,6 +49,7 @@ use shed_core::{STATES, Terminal, Wake};
 pub use shed_core::{clock, proctree, runner};
 use shed_pattern::Pattern;
 pub use shed_proto as proto;
+pub use shed_search as search;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
 /// Errors from the server and the client.
@@ -586,7 +588,12 @@ async fn linked(
     if let Some((machine, params)) = links::remote(method, request) {
         return Some(links.call(&machine, method, params).await);
     }
-    if let Method::MachineStats | Method::Exec | Method::FileRead | Method::FileWrite = method {
+    if let Method::MachineStats
+    | Method::Exec
+    | Method::FileRead
+    | Method::FileWrite
+    | Method::CodeOutline = method
+    {
         return Some(here(registry, method, request).await);
     }
     if method == Method::MachineLinks {
@@ -779,6 +786,7 @@ async fn here(registry: &Shared, method: Method, request: &Request) -> Result<Va
     match method {
         Method::MachineStats => machine_stats(registry, params(request)?).await,
         Method::Exec => exec(params(request)?).await,
+        Method::CodeOutline => code::outline(params(request)?).await,
         _ => {
             let p: FileParams = params(request)?;
             let path = p.path.display().to_string();
@@ -808,9 +816,15 @@ async fn exec(p: ExecParams) -> Result<Value, RpcError> {
 
 fn file(p: FileParams) -> io::Result<Value> {
     let Some(data) = p.data else {
-        let mut bytes = Vec::new();
-        let mut file = fs::File::open(&p.path)?.take(proto::REPLY_LIMIT.saturating_add(1));
-        file.read_to_end(&mut bytes)?;
+        let file = fs::File::open(&p.path)?;
+        let bytes = if let Some(span) = p.lines {
+            lines(file, span)?
+        } else {
+            let mut bytes = Vec::new();
+            let mut file = file.take(proto::REPLY_LIMIT.saturating_add(1));
+            file.read_to_end(&mut bytes)?;
+            bytes
+        };
         within_limit(bytes.len())?;
         return serde_json::to_value(bytes).map_err(io::Error::other);
     };
@@ -822,6 +836,22 @@ fn file(p: FileParams) -> io::Result<Value> {
         .and_then(|()| fs::rename(&temp, &p.path))
         .inspect_err(|_| _ = fs::remove_file(&temp))?;
     Ok(empty())
+}
+
+fn lines(file: fs::File, span: Span) -> io::Result<Vec<u8>> {
+    let mut reader = BufReader::new(file);
+    let (mut bytes, mut line) = (Vec::new(), Vec::new());
+    for n in 1..=span.end {
+        if reader.read_until(b'\n', &mut line)? == 0 {
+            break;
+        }
+        if n >= span.start {
+            bytes.append(&mut line);
+            within_limit(bytes.len())?;
+        }
+        line.clear();
+    }
+    Ok(bytes)
 }
 
 fn within_limit(len: usize) -> io::Result<()> {
