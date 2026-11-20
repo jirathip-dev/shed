@@ -2,13 +2,15 @@
 
 ## Summary
 
-Decision: shed gets a `script` method. A caller sends one program in a JavaScript subset and the server runs it beside the terminals, in a new pure crate that shed builds itself (lexer, parser, compiler, a small virtual machine; no third-party engine, no new dependency). The program calls shed's methods through the same path a socket request takes; a call that acts is first shown to a guard command named in the server's config file, and is refused when there is none. Steps, memory, calls, logs and a deadline bound every run, and a failed run still returns its logs, with the error's line and column.
-Slices: (1) parser, +1,700; (2) values and heap, +510; (3) compiler and virtual machine, +1,650; (4) built-ins, +950; (5) promises and the host interface, +400; (6) the server's `script` method and the guard, +460; (7) the command, `--on`, cancelling across machines, the skill doc, +160. About +5,830 lines on 13,215: one cap raise from 13,250 to 19,500 before slice 1.
-Open questions: (1) the subset costs about 5,800 lines where a JSON plan costs about 1,400: accept (recommended)? (2) should reading a file from a script need the guard too (recommended: yes)? (3) a caller can only say who it is, shed cannot prove it, so the guard may use it to refuse more, never to allow more: accept (recommended)? (4) one cap raise to 19,500 up front (recommended), or one per slice?
+Decision: shed gets a `script` method. A caller sends one program in a JavaScript subset and the server runs it beside the terminals, in a new pure crate that shed builds itself (lexer, parser, compiler, a small virtual machine; no third-party engine, no new dependency). The program calls shed's methods through the same path a socket request takes. A call that acts is first shown to a guard: one process for the whole run, named in the server's config file, which answers each call in well under a millisecond; with no guard named the call is refused. Steps, memory, calls, logs and a deadline bound every run. Speed has six targets, each with its measurement, and a gate: CI compares fixed scripts' step counts and peak memory with a committed baseline, and the reviewer of slices 3 to 7 reports before and after times.
+Slices: (1) parser, +1,700; (2) values and heap, +550; (3) compiler and virtual machine, +1,680; (4) built-ins, +950; (5) promises and the host interface, +400; (6) the server's `script` method and the guard, +620; (7) the command, `--on`, cancelling across machines, the skill doc and the numbers from a real remote host, +160. About +6,060 lines, 230 more than before this revision (the guard as one process, the collector taken in slices, the counters the gate reads). With the other queued work that is about 20,045 of the 20,300 in PR #205.
+Open questions: none. The first three are decided as recommended and the cap by PR #205.
 
-**Status:** proposed, for the owner. Read on staging `ce4424e`.
+**Status:** proposed, for the owner; revised after the owner's note of 2026-11-20 (q2649: the guard as
+one process, the Performance section, the gate; the open questions closed). Read on staging `ce4424e`,
+lines counted again on `48d5312`.
 Usage with the worked examples, the grammar, the value model, the shapes, the boundaries, the statecharts,
-the errors, the guard's tables, the limits, the tests and the slices: [README.md](README.md).
+the errors, the guard's tables, the limits, the measuring, the tests and the slices: [README.md](README.md).
 
 ## The question
 
@@ -25,17 +27,17 @@ no guard means those calls are refused.
 
 ## Options
 
-Lines are non-test Rust under `crates/*/src`. Every option also needs the same 620 lines outside the
-engine (the wire shapes, the server's method, the guard, the CLI); the last column includes them.
+Lines are non-test Rust under `crates/*/src`. Every option also needs the same 780 lines outside the
+engine (the wire shapes, the server's method and loop, the guard, the CLI); the last column includes them.
 
 | | option | engine | in all | verdict |
 |---|---|---|---|---|
-| a | **A JavaScript subset, compiled to instructions for a small machine** | 5,210 | 5,830 | chosen |
-| a′ | The same subset, walked as a tree by async Rust | about 4,500 | 5,100 | 700 lines cheaper, and rejected for them: see "Inside the choice" |
-| b | A JSON plan: steps, references to earlier results, map and filter with simple predicates | about 750 | 1,370 | can express the three worked examples and little past them |
-| c1 | A small language of shed's own | about 3,300 | 3,900 | every caller learns it from the skill doc |
-| c2 | A Rust-syntax subset, interpreted | about 5,700 | 6,300 | the largest, and Rust without its compiler |
-| c3 | A Python subset (added here) | about 5,400 | 6,000 | no gain over (a) |
+| a | **A JavaScript subset, compiled to instructions for a small machine** | 5,280 | 6,060 | chosen |
+| a′ | The same subset, walked as a tree by async Rust | about 4,550 | 5,330 | 700 lines cheaper, and rejected for them: see "Inside the choice" |
+| b | A JSON plan: steps, references to earlier results, map and filter with simple predicates | about 750 | 1,530 | can express the three worked examples and little past them |
+| c1 | A small language of shed's own | about 3,300 | 4,080 | every caller learns it from the skill doc |
+| c2 | A Rust-syntax subset, interpreted | about 5,700 | 6,480 | the largest, and Rust without its compiler |
+| c3 | A Python subset (added here) | about 5,400 | 6,180 | no gain over (a) |
 | | Compiled Rust | | | rejected |
 | | An embedded engine (QuickJS, Boa, Rhai, Lua) | | | ruled out by the owner |
 
@@ -70,8 +72,19 @@ engine (the wire shapes, the server's method, the guard, the CLI); the last colu
 - **Memory is what is live.** Counting allocations would refuse a loop that reads 2,000 screens and keeps
   ten lines. Reference counts leak every closure that can see itself. An arena with a mark and sweep, in
   safe Rust, counts exactly what a script still holds.
+- **A collection is a state of the run, not a pause of the server.** Marking 64 MiB of small cells in one
+  go could hold a server thread for tens of milliseconds. The mark stack and the sweep position are data,
+  so a collection is taken in the same 10,000-unit slices as steps, with the thread handed back between
+  them. The script's own code waits meanwhile, so there is no write barrier and nothing concurrent.
+- **Handing the thread back is the server's, and scripts never hold every worker.** The engine has no
+  runtime, and a task that only wakes itself is polled again before tokio looks at its sockets: with 8
+  such tasks on 4 workers another client's read took 18.6 ms at p99 (measured below). So the loop is the
+  server's: a slice, then `yield_now`, which lets the reactor and the other clients go first (0.6 to
+  2.9 ms). A built-in is not sliced (a `split` of 8 MiB is one hold), so a run steps only while it holds
+  a permit, and there is one fewer than the worker threads: with 50 ms holds in every script the read
+  stays at 0.1 to 0.5 ms, against 98 ms without the permits.
 - **Built-ins never call back.** `map`, `filter`, `sort`, `then` and the like are written in the subset
-  (`prelude.js`, 120 lines) and compiled with each program. Fuel, depth and `await` work inside a callback
+  (`prelude.js`, 120 lines), compiled once per process. Fuel, depth and `await` work inside a callback
   with no special case, and the machine never recurses natively at run time.
 - **A script's failure is a result, not an RPC error.** `RpcError` carries a code and a message. As
   `exec` answers with an exit code, `script` answers `{error, logs, calls, ms}`: the logs, which are how a
@@ -85,6 +98,15 @@ engine (the wire shapes, the server's method, the guard, the CLI); the last colu
   read when a run starts, as `machine.links` reads `[machines]` again.
 - **What the guard is given** is shed's own JSON (method, params, machine, caller), not an agent's hook
   format: shed names no agent outside `providers/`. drover adapts its lane hook to it.
+- **One guard process for a run, not one for a call.** A process a call is tens of milliseconds (46 ms for
+  a Python hook here), so a script of a few hundred guarded calls would spend its deadline in the guard.
+  The guard is started at the run's first guarded call and answers one line for each call's line (0.02 ms
+  measured). It is per run, not per server: a config change takes effect at the next run and no guard
+  outlives the work it judged. One call is asked at a time and the answer carries the call's id, so a
+  guard that printed a stray line or lost its place fails closed instead of allowing the wrong call.
+- **A process a call stays, as a setting, never as a silent fallback.** A guard that is a plain hook (read
+  the call, exit 0 or not) is set `guard_per = "call"`. The server never falls back by itself: a per-run
+  guard that fails refuses, and each kind under the other's setting refuses too.
 - **What cancels a run.** Not the end of input: drover's remote call runs `shed connect` with the request
   on stdin, which stops writing at once and then reads the reply. The signal is the peer closing its whole
   socket, which the server can tell apart (below) and asks for once a second while a script runs.
@@ -106,31 +128,44 @@ engine (the wire shapes, the server's method, the guard, the CLI); the last colu
 5. **Every method has a class** in shed-proto (`read`, `guarded`, `refused`), a `match` that does not
    compile without a new method's arm. `shed.methods()` and `shed.describe(name)` come from the OpenRPC
    document.
-6. **The guard** runs before every call of a guarded method: a command from `[script]` in the server's
-   config file, the call as JSON on its stdin, through `runner::exec` with a 10 s timeout. Exit 0 allows.
-   Any other exit, a failure to start, a timeout or no guard at all is a `GuardError` thrown at the call.
+6. **The guard** is asked before every call of a guarded method: a command from `[script]` in the
+   server's config file, started once per run through `runner::held`, given each call as one JSON line and
+   answering one line with the call's id, within 10 s. Only `"allow":true` allows. A no, a guard that
+   cannot start, ends, answers out of turn or takes too long, or no guard at all is a `GuardError` thrown
+   at the call. `guard_per = "call"` is the fallback for a plain hook: a process per call through
+   `runner::exec`, its exit status the answer.
 7. **The limits** are counted in the engine (50,000,000 steps, 64 MiB live, 200 frames, 2,000 calls, 32 in
    flight, 64 KiB of logs) except the deadline (60 s, at most 600), which the server adds with tokio. Eight
-   scripts run at once per server.
+   scripts run at once per server, and the worker threads less one step at once.
 8. **The reply** is `{result, logs, calls, ms}` or `{error, logs, calls, ms}`, within `REPLY_LIMIT`; over
    it, it is an error that says to return less.
 9. **The surface**: the `script` method (`code`, `timeout`, `machine`, `caller`); `shed script -f <file>`,
    `shed script -`, `shed --on <machine> script`; `skill/script/` for lanes.
+10. **Speed is specified and gated**: the six targets and the three-level gate of "Performance" below.
 
 ## Consequences
 
-- **Size.** shed's source grows by 44%. All but 620 lines are in one crate that the layer rule keeps away
+- **Size.** shed's source grows by 46%. All but 780 lines are in one crate that the layer rule keeps away
   from everything else, that is deterministic (no clock: the same program and answers give the same steps
   everywhere) and that is tested alone.
 - **The server stays safe by construction, not by care**: no native recursion at run time; the workspace
-  lints already forbid `unwrap`, indexing, `as` and `panic!`; a script hands its thread back every 10,000
-  steps; the worst case is 8 runs of 64 MiB.
+  lints already forbid `unwrap`, indexing, `as` and `panic!`; a run hands its thread back every 10,000
+  steps, collecting included, and one worker is always free of script steps; the worst case is 8 runs of
+  64 MiB.
+  On a host with one core there is one worker, and only the slices protect the other clients.
 - **The guard is a policy check, not a sandbox.** Guard, config file and server belong to one user, as an
   agent's own hook settings do. Text sent into a shell is a command, and the guard sees the text, not what
   the shell makes of it. Reads are not guarded: a script can read any terminal's screen and history, as
   `shed read` can.
-- **A guarded call costs a process** (tens of milliseconds); reads cost none. A script of hundreds of
-  guarded calls spends its deadline on the guard.
+- **A run that acts costs one process**, started at its first guarded call (the guard's own start: 40 ms
+  for Python here, less for a compiled one), then well under a millisecond a call; reads cost none. Only a
+  `guard_per = "call"` guard still costs a process a call.
+- **A guard is a loop now, not a hook.** It must answer every line with that line's id and keep nothing on
+  stdout but answers. drover's guard command is written to that; an existing hook is used with
+  `guard_per = "call"`, slowly.
+- **An engine change that moves a count shows in the PR.** `counts.json` is generated and CI fails when it
+  is stale, so the cost of every fixed script is reviewed like code. The times are a reviewer's, on a fleet
+  host: CI never fails on a clock.
 - **Fail closed is the default everywhere.** Until a host's config names a guard, scripts there read and
   cannot act. That already covers two of the three examples. Writing the `[script]` line on each host is a
   host change, the owner's or drover's.
@@ -149,11 +184,42 @@ engine (the wire shapes, the server's method, the guard, the CLI); the last colu
 - **Later, each its own issue:** drover's guard command and generated scripts; arguments passed beside the
   code; `finally` and `switch` if lanes keep reaching for them.
 
+## Performance
+
+What makes it fast is above: one round trip, one guard process, plain instructions, and a collector and a
+loop that never hold a server thread. What keeps it fast is below. Times are for a release build on a
+fleet host; the report prints the host's cores beside them.
+
+| | what | target | measured by | first given by |
+|---|---|---|---|---|
+| 1 | The blocked-lanes example on a real remote host, 8 blocked lanes | 1 SSH session where today's per-call path opens 9. Wall time at most 1.5 times one remote `ls`, and at most a quarter of the per-call path's | `scripts/script-remote.sh <machine>`: both ways 10 times, the sessions counted by an `ssh` shim | slice 7's PR |
+| 2 | The guard | under 1 ms added to a guarded call once the guard is up | the server's report: 2,000 `shed.state` calls through a guard that parses and answers each line, the whole run under 2 s; 200 of them with a process a call beside it | slice 6; the model below gives 0.02 ms against 46 ms |
+| 3 | Engine speed | at least 25 million steps a second, so the whole fuel is at most 2 s of one core and a slice at most 0.4 ms | `spin.js` and `shapes.js`: their exact steps over the wall time | slices 3 and 4 |
+| 4 | Parse and compile of a 10 KB script | at most 2 ms, so at most 50 ms at the 256 KiB limit | `ten-kb.js` through `Program::parse` 1,000 times, the median | slice 3 |
+| 5 | The worst collector pause | for the server, none: no slice over 1 ms, with or without a collection. For the script itself: a 60 MiB heap of small cells collected in at most 150 ms, start to end | `hold.js`: the longest `step`, the longest collection; the largest collection's work is also a count in CI | slice 3 |
+| 6 | Another client's `read` while 8 scripts run | p99 at most 3 ms, the idle p99 of the same run beside it | the server's report: 8 connections spinning to their fuel, a ninth doing 2,000 reads of a 24 by 80 screen | slice 6; the model below gives 0.6 to 1.0 ms |
+
+Targets 3 to 5 are set before the engine exists, from what a machine of this shape in safe Rust should do;
+slice 3's `baseline:` commit gives the first real numbers. A missed target is a FAIL for its slice and a
+question for the owner, never a number a lane moves.
+
+The gate has three levels; the files and commands are in README.md, "Measuring and the gate".
+
+- **Exact, in CI.** The engine reads no clock, so a fixed script's steps, peak bytes and collections are
+  the same on every machine. They are in a generated `counts.json`: CI fails when it is stale, and a
+  regenerated one shows every count that moved as a line of the PR's diff. No timing, so no noise.
+- **A ceiling, in CI.** Each fixed script carries a hand-written ceiling on its steps and peak bytes, its
+  first counts plus 10%. Regenerating cannot raise it; a person does, with the reason in the PR body.
+- **Times, in review.** Slices 3 to 7 are queued `--perf`: the first commit is the baseline, and rev's
+  `Perf:` block gives before and after by `just script-bench` with the range of 5 runs. Slice 7's PR gives
+  the end-to-end numbers from a real remote host.
+
 ## Checked by running
 
 **The worked examples are valid and their replies exact.** [check.mjs](check.mjs) takes the four
-programs from README.md, runs them in Node against a fixture host with a guard and a virtual clock, and
-compares each reply with the one shown (Node 24.22.2):
+programs from README.md, runs them in Node against a fixture host with a guard (one process for the run:
+20 ms to start, then nothing on its whole-millisecond clock) and a virtual clock, and compares each reply
+with the one shown (Node 24.22.2):
 
 ```console
 $ node docs/architecture/script/check.mjs | grep -E '^(ok|DIFF)'; echo $?
@@ -183,19 +249,45 @@ it closed its socket:  ['write closed', 'read closed']
 (`closing_the_connection_cancels_the_calls_in_flight`, `a_peer_that_only_stops_writing_gets_its_reply`) run
 on Linux and macOS; where a platform did not report it, a run would end at its deadline instead.
 
+**One guard process answers a call in a fiftieth of a millisecond; a process a call costs 46 ms.**
+[guard-trip.py](guard-trip.py) asks a guard that parses each call and answers with its id, both ways
+(macOS 27.2, Python 3.9.6, 12 cores, the host busy with other lanes at a load of 12 to 30):
+
+```console
+$ python3 -I docs/architecture/script/guard-trip.py
+a process for each call            median   47.010 ms   p99   58.207 ms   (100 calls)
+one process for the run: its start          42.965 ms   (with its first answer)
+one process for the run: a call    median    0.019 ms   p99    0.040 ms   (1999 calls)
+```
+
+**Another client's read stays fast only when the server yields, and stays fast under long holds only with
+the permits.** [pacing/](pacing/main.rs) is tokio 1.54.1 with the server's 4 workers: 8 tasks stand in for
+scripts, and a thread outside the runtime sends 1,500 lines to an echo task, as another client's `read`:
+
+```console
+$ cargo run --release --manifest-path docs/architecture/script/pacing/Cargo.toml
+4 workers, 1500 reads by another client, 1 ms apart
+no script                                                  p50   0.014 ms   p99   0.126 ms   max   1.961 ms
+8 scripts, 0.4 ms slices, wake itself                      p50   4.130 ms   p99  18.586 ms   max  22.788 ms
+8 scripts, 0.4 ms slices, yield_now                        p50   0.231 ms   p99   0.643 ms   max   1.718 ms
+8 scripts, 0.4 ms slices, yield_now, 3 step at once        p50   0.013 ms   p99   0.631 ms   max   4.545 ms
+8 scripts, 50 ms holds, yield_now                          p50  47.919 ms   p99  98.501 ms   max 148.520 ms
+8 scripts, 50 ms holds, yield_now, 3 step at once          p50   0.013 ms   p99   0.132 ms   max   1.195 ms
+```
+
+A second run on the same busy host gave p99s of 0.064, 18.706, 2.916, 1.046, 97.927 and 0.548 ms. These
+two are models, made before the engine exists; targets 2 and 6 are measured on the real server in slice 6.
+
 ## Open questions
 
-1. **Size.** (a) is about 5,830 lines; (b), the JSON plan, about 1,370 and done in two slices.
-   Recommended: (a). Lanes are the first users and the plan's limits show at the first `if`.
-2. **Is `file.read` guarded?** It changes nothing, so by the letter it is a read. But it reads any file the
-   server's user can, and a lane's own `cat` passes its hook. Recommended: guarded, so on a server with no
-   guard a script reads terminals and nothing else.
-3. **The caller is only what it says.** Over a Unix socket of one user, and through `ssh`, shed cannot
-   prove which terminal sent a script; `shed script` sends `$SHED` and its folder, and the guard gets them.
-   Recommended: accept, with the rule that a guard uses `caller` to refuse more (a reviewer's script may
-   not act), never to allow more.
-4. **The cap.** Recommended: one owner-approved raise to 19,500 before slice 1 (5,830 plus 455 of margin),
-   as #175 did; else the per-slice totals in the README's table.
+None. Decided by the owner on 2026-11-20 (q2649, and the amendment in the issue):
+
+1. **Size.** The JavaScript subset, at its full size, not the JSON plan.
+2. **`file.read` is guarded.** On a server with no guard a script reads terminals and nothing else.
+3. **The caller is only what it says.** The guard gets it and may use it to refuse more (a reviewer's
+   script may not act), never to allow more.
+4. **The cap.** 20,300, in PR #205. This revision's 230 more lines leave 255 of its 485 to spare; the sum
+   is in README.md, "Slices".
 
 ## `.drover/arch.toml`
 
@@ -229,12 +321,16 @@ reason = "the script engine is pure: it reaches the outside only through Host"
 ```
 
 `scripts/dep-direction.sh` (`just deps`) gains one check: shed-script's dependencies are shed-proto and
-serde_json, nothing else. Slice 7 adds the generated skill page, which `just generate` writes:
+serde_json, nothing else. Two generated files join the list, each written by `just generate`: the gate's
+counts in slice 3 (`just generate` gains `SHED_BLESS=1 cargo test -p shed-script --locked --test perf
+counts`) and the skill's method page in slice 7:
 
 ```toml
-generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "skill/script/methods.md"]
+generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crates/shed-script/tests/perf/counts.json", "skill/script/methods.md"]
 ```
 
-No central list grows. New code is new files (`shed-proto/src/script.rs` and `pattern.rs`,
-`shed-server/src/script.rs` and `script/guard.rs`, `shed/src/script.rs`); the files many PRs edit get one
-line each: a `Method` variant and its arms, one `dispatch` arm, one `Command` variant.
+No central list grows. The fixed scripts are a folder, one file each with its own ceiling, collected by
+the test that reads the folder. New code is new files (`shed-proto/src/script.rs` and `pattern.rs`,
+`shed-server/src/script.rs` and `script/guard.rs`, `shed/src/script.rs`); the files many PRs edit get a
+few lines each: a `Method` variant and its arms, one `dispatch` arm, one `Command` variant, one function
+in `runner.rs`, two recipes' lines in the `justfile`.

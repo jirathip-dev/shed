@@ -27,7 +27,8 @@ history[411] = "error[E0308]: mismatched types";
 history[1840] = "  error[E0599]: no method named `settle` found for struct `Machine`";
 history[2912] = "test result: FAILED. 212 passed; 1 failed; 0 ignored";
 
-// One fixture call: [latency in ms, result]. A guarded method pays the guard's 20 ms first.
+// One fixture call: [latency in ms, result]. The guard is one process for the run: the first guarded call
+// pays its start, 20 ms; it answers the later ones in under a millisecond, 0 on this clock.
 const guarded = new Set(["run", "send", "keys", "kill", "rm", "resize", "state", "acp.model", "exec", "file.write", "file.read"]);
 const methods = {
   ls: (p) => [1, lanes.filter((t) => Object.entries(p.labels ?? {}).every(([k, v]) => t.labels[k] === v))],
@@ -41,7 +42,7 @@ const methods = {
 const guard = (method) => (method === "kill" ? "lanes are stopped with drover kill" : null);
 
 async function run(code) {
-  let [now, calls, pending] = [0, 0, []];
+  let [now, calls, pending, guardUp] = [0, 0, [], false];
   const logs = [];
   const tick = () => {
     pending.sort((a, b) => a.at - b.at);
@@ -59,7 +60,9 @@ async function run(code) {
       const settle = () => refused === null
         ? resolve(structuredClone(result))
         : reject({ name: "GuardError", message: `${method} refused by the guard: ${refused}`, ...at, code: "GUARD_REFUSED", method });
-      pending.push({ at: now + ms + (guarded.has(method) ? 20 : 0), settle });
+      const start = guarded.has(method) && !guardUp ? 20 : 0;
+      guardUp ||= guarded.has(method);
+      pending.push({ at: now + ms + start, settle });
     });
   };
   const path = (name) => new Proxy(() => {}, {
