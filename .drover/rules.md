@@ -3,13 +3,14 @@
 - Don't leave a clippy warning (pedantic), or add an `allow` past the workspace's 10, or one without a reason. Enforcer: `just clippy`.
 - Don't `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `dbg!`, index or slice, cast with `as`, or `let _ =` a must-use value outside tests, and don't write `unsafe`. Enforcer: `just clippy` (`[workspace.lints]`, clippy.toml), `just banned` (ci/fixtures/banned).
 - Don't `print!` or `eprint!` outside crates/shed/src/out.rs. Enforcer: `just clippy` (print_stdout, print_stderr), `just banned`.
-- Don't push a failing test. Enforcer: `just test`.
+- Don't push a failing test, or one whose crate runs past its `test_secs`. Enforcer: `just budget` (scripts/budget.py).
 - Don't let a test leave a temp folder behind, pass or fail. Enforcer: `just temp-left` (scripts/temp-left.sh) after `just test`.
 - Don't break the rustdoc build. Enforcer: `just doc`.
 - Don't add a dependency with a disallowed licence, an advisory or a duplicate version. Enforcer: `just deny` (deny.toml).
 - Don't grow the non-test Rust lines in crates/*/src past `line_cap`. Enforcer: `just cap` (ci/cap.toml).
 - Don't make shed-core depend on another workspace crate. Enforcer: `just deps` (scripts/dep-direction.sh).
-- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, script uses pattern, server uses core, proto, pattern and script, cli uses server; shed-pattern reads no file). Enforcer: `just arch` (.drover/arch.toml).
+- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, client uses proto, script uses pattern, server uses core, proto, client, pattern and script, cli uses server and client; shed-pattern reads no file). Enforcer: `just arch` (.drover/arch.toml).
+- Don't shake hands (`Hello::ours`) outside shed-client, shed-proto and the server's dispatch in crates/shed-server/src/lib.rs. Enforcer: `just arch` (.drover/arch.toml).
 - Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.drover/arch.toml).
 - Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.drover/arch.toml).
 - Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.drover/arch.toml).

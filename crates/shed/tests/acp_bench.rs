@@ -12,10 +12,12 @@ use std::time::Instant;
 
 use common::{Server, temp_dir};
 use serde_json::Value;
+use shed_client::Conn;
 use shed_core::proctree::{self, ProcessTable as _};
-use shed_server::lane::{Input, frame, sessions};
+use shed_server::Paths;
+use shed_server::lane::sessions;
 use shed_server::proto::{EventsParams, Method};
-use shed_server::{Client, Paths};
+use shed_server::proto::{Input, frame};
 
 const UPDATES: usize = 1_000;
 
@@ -38,7 +40,7 @@ fn start(dir: &Path, name: &str, extra: &[&str], fake: &[&str]) {
 }
 
 fn events(dir: &Path, name: &str) -> impl Iterator<Item = Value> + use<> {
-    let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
+    let mut client = Conn::connect(&Paths::in_dir(dir).socket).expect("connect");
     let params = EventsParams {
         labels: [("run".to_owned(), name.to_owned())].into(),
         since: None,
@@ -78,7 +80,7 @@ fn best_turn<E>(
         "10",
     ];
     shed(&dir, &ready);
-    let mut client = Client::connect(&Paths::in_dir(&dir).socket).expect("connect");
+    let mut client = Conn::connect(&Paths::in_dir(&dir).socket).expect("connect");
     (0..3)
         .map(|_| {
             let mut events = events(&dir);
@@ -107,7 +109,7 @@ fn throughput() {
 fn shed_only() {
     const CANNED: usize = 10_000;
     let lines = |dir: &Path| {
-        let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
+        let mut client = Conn::connect(&Paths::in_dir(dir).socket).expect("connect");
         let labels = [("run".to_owned(), "c".to_owned())].into();
         let params = EventsParams {
             labels,

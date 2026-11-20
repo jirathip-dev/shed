@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
+use shed_client::Conn;
+use shed_server::Paths;
 use shed_server::proto::{LsParams, Method, TerminalInfo};
-use shed_server::{Client, Paths};
 
 struct Made(RefCell<Vec<PathBuf>>);
 
@@ -71,7 +72,7 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
-        let lanes: Vec<TerminalInfo> = Client::connect(&self.1)
+        let lanes: Vec<TerminalInfo> = Conn::connect(&self.1)
             .and_then(|mut c| c.call(Method::Ls, &LsParams::default()))
             .unwrap_or_default();
         for pid in lanes

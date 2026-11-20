@@ -581,8 +581,9 @@ mod tests {
 
     use super::*;
     use crate::lane::writer::Out;
-    use crate::lane::{Input, Lane, turn_idle_timeout};
+    use crate::lane::{Lane, turn_idle_timeout};
     use crate::providers::tests::fake;
+    use shed_proto::Input;
 
     #[test]
     fn a_text_chunk_skips_the_sdk_parse_and_matches_it() {

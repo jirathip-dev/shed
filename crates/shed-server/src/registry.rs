@@ -837,7 +837,7 @@ impl Registry {
                     state,
                     ..Report::default()
                 });
-                crate::lane::frame(&crate::lane::Input::Prompt(notes.join("\n")))
+                shed_proto::frame(&shed_proto::Input::Prompt(notes.join("\n")))
             } else {
                 notes.into_iter().map(|n| n + "\r").collect()
             };
@@ -1171,7 +1171,7 @@ impl Registry {
             session.ready_ms = Some(0);
         }
         if let Some(term) = entry.term.clone() {
-            let text = crate::lane::frame(&crate::lane::Input::Name(name.clone()));
+            let text = shed_proto::frame(&shed_proto::Input::Name(name.clone()));
             std::thread::spawn(move || term.write(text.as_bytes()).ok());
         }
         self.events.emit(&entry.info, EventKind::Started);
@@ -1471,7 +1471,7 @@ impl Registry {
         let why = format!("{} is not an ACP terminal", p.name);
         let acp = self.entry(&p.name)?.info.acp.as_ref();
         acp.ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, why))?;
-        let text = crate::lane::frame(&crate::lane::Input::Model(p.model));
+        let text = shed_proto::frame(&shed_proto::Input::Model(p.model));
         Ok(Input::Now(
             Arc::clone(self.live(&p.name)?),
             text.into_bytes(),

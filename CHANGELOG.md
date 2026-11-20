@@ -210,6 +210,10 @@ All notable changes to this project are documented here. The format follows
 - `read` returns a `cursor`, and `read` with `since: <cursor>` returns only what is new: the lines that
   scrolled off since, then the screen only when it changed (`changed`). Lines scrollback dropped before
   they were read are counted in `lost`. ACP terminals take `since` for their events by `seq`.
+- `shed-client`, the one client for shed's socket: the handshake, a pool of idle connections with a call
+  timeout, the typed calls and the streams, blocking and with no async runtime. shed's own CLI, machine
+  links and ACP bridge run on it. A server shed cannot speak to is named in one `SHED_VERSION` line that
+  says which side to update.
 
 ### Changed
 

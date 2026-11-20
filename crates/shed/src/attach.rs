@@ -6,8 +6,8 @@ use std::time::Duration;
 use rustix::termios::{
     OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcgetwinsize, tcsetattr,
 };
-use shed_server::proto::{Method, ResizeParams, SendParams, Target, TerminalInfo};
-use shed_server::{Client, notification};
+use shed_client::{Conn, notification};
+use shed_server::proto::{Method, ResizeParams, SendParams};
 
 const DETACH: u8 = 0x1c;
 const RESIZE_POLL: Duration = Duration::from_millis(100);
@@ -36,12 +36,8 @@ impl Drop for RawMode {
     }
 }
 
-pub(crate) fn attach(mut client: Client, name: &str) -> anyhow::Result<()> {
-    let target = Target {
-        name: name.to_owned(),
-    };
-    let _: TerminalInfo = client.call(Method::Attach, &target)?;
-    let (mut reader, writer) = client.split();
+pub(crate) fn attach(client: Conn, name: &str) -> anyhow::Result<()> {
+    let (mut reader, writer) = client.attach(name)?;
     let raw = RawMode::enter(1, 0)?;
     let (resizes, input) = (writer.try_clone()?, writer);
     let owned = name.to_owned();

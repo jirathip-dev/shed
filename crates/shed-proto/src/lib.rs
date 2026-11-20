@@ -18,6 +18,9 @@ use serde_json::Value;
 #[cfg(feature = "schema")]
 use serde_json::json;
 
+pub mod input;
+pub use input::{Input, frame};
+
 /// The shed version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -595,7 +598,7 @@ pub enum Policy {
 }
 
 /// `run` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RunParams {
     /// The terminal's name, unique per server; `[A-Za-z0-9._-]+`.
@@ -684,7 +687,7 @@ pub struct LsParams {
 }
 
 /// `get`, `kill` and `rm` params: the terminal's name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Target {
     /// The terminal's name.
@@ -778,7 +781,7 @@ pub struct SendParams {
 }
 
 /// `keys` and `terminal.keys` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct KeysParams {
     /// The terminal's name (`terminal` in `terminal.keys`).
@@ -789,7 +792,7 @@ pub struct KeysParams {
 }
 
 /// `resize` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ResizeParams {
     /// The terminal's name.
@@ -801,7 +804,7 @@ pub struct ResizeParams {
 }
 
 /// `state` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct StateParams {
     /// The terminal's name.
@@ -847,7 +850,7 @@ pub struct Reported {
 }
 
 /// `wait` params.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WaitParams {
     /// The terminal's name; with `children`, the parent's.
@@ -950,11 +953,12 @@ pub struct Event {
 }
 
 /// What an [`Event`] reports; the `event` field names it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum EventKind {
     /// The program started (`run`, or a kept terminal back after a server restart).
+    #[default]
     Started,
     /// The reported state changed.
     State(Box<Reported>),
@@ -1206,7 +1210,7 @@ impl Tokens {
 }
 
 /// `emit` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct EmitParams {
     /// The terminal's name.
@@ -1220,7 +1224,7 @@ pub struct EmitParams {
 }
 
 /// `acp.model` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ModelParams {
     /// The terminal's name.
@@ -1578,7 +1582,7 @@ pub struct Medians {
 }
 
 /// `agents.match` params: an agent's id and text to apply its rules to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct MatchParams {
     /// The ACP agent id.
@@ -1696,7 +1700,7 @@ pub struct TerminalInfo {
 }
 
 /// `screen.watch` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WatchParams {
     /// The terminal's name.
@@ -1776,7 +1780,7 @@ pub enum Color {
 }
 
 /// `terminal.resize` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalResizeParams {
     /// The terminal's name; default the one this connection watches.
@@ -1789,7 +1793,7 @@ pub struct TerminalResizeParams {
 }
 
 /// `handover.check` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct HandoverCheckParams {
     /// The build the binary must be.
@@ -1799,7 +1803,7 @@ pub struct HandoverCheckParams {
 }
 
 /// `handover` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct HandoverParams {
     /// The build the server's own binary must be now.
@@ -1819,7 +1823,7 @@ pub struct Handover {
 }
 
 /// `terminal.readonly` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalParams {
     /// The terminal's name.

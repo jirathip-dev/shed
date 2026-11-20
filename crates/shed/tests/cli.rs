@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
 use shed_core::{Size, Terminal};
-use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
+use shed_server::proto::{BUILD, LONG_VERSION, OLDEST_PROTOCOL, PROTOCOL};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
@@ -190,8 +190,7 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
         format!(
-            "shed: SHED_VERSION: client {BUILD} protocol {}-{PROTOCOL} / server 56de739 protocol {1}-{1}; update the server and restart shed serve\n",
-            PROTOCOL - 1,
+            "shed: SHED_VERSION: this client speaks shed protocol {OLDEST_PROTOCOL} to {PROTOCOL}; the server is 0.0.0 (56de739) protocol {0} to {0}; update shed there (shed updates itself from its own releases: `shed self-update`, docs/self-update.md)\n",
             PROTOCOL - 2
         )
     );

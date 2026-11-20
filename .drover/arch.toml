@@ -16,6 +16,12 @@ mods = ["shed_proto"]
 may_use = []
 
 [[layer]]
+name = "client"
+paths = ["crates/shed-client/src/**"]
+mods = ["shed_client"]
+may_use = ["proto"]
+
+[[layer]]
 name = "pattern"
 paths = ["crates/shed-pattern/src/**"]
 mods = ["shed_pattern"]
@@ -31,12 +37,18 @@ may_use = ["pattern"]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto", "pattern", "script"]
+may_use = ["core", "proto", "client", "pattern", "script"]
 
 [[layer]]
 name = "cli"
 paths = ["crates/shed/src/**"]
-may_use = ["server"]
+may_use = ["server", "client"]
+
+[[ban]]
+pattern = "Hello::ours"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-proto/src/**", "crates/shed-client/src/**", "crates/shed-server/src/lib.rs"]
+reason = "shake hands through shed_client; only the server's dispatch answers a hello"
 
 [[ban]]
 pattern = "Command::new"

@@ -12,7 +12,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::transcript::{Preview, stdout_style};
 use super::{Input, sessions};
-use crate::Client;
+use shed_client::Conn;
 
 pub(crate) enum Out {
     Emit(EventKind),
@@ -55,7 +55,7 @@ impl Writer {
     pub(super) async fn run(mut self, mut outs: UnboundedReceiver<Out>) {
         let mut batch = Vec::new();
         let mut beat = tokio::time::interval(crate::HEARTBEAT);
-        let heartbeat = crate::notification(Method::Heartbeat, &serde_json::json!({}));
+        let heartbeat = shed_client::notification(Method::Heartbeat, &serde_json::json!({}));
         loop {
             tokio::select! {
                 n = outs.recv_many(&mut batch, 4096) => if n == 0 { return },
@@ -71,7 +71,7 @@ impl Writer {
                     Out::Emit(kind) => {
                         redraw |= self.keep(&kind);
                         let replay = false;
-                        crate::notification(Method::Emit, &EmitParams { name, kind, replay })
+                        shed_client::notification(Method::Emit, &EmitParams { name, kind, replay })
                     }
                     Out::Session(id, resumed) if id != self.record.id => {
                         redraw = true;
@@ -81,7 +81,7 @@ impl Writer {
                     Out::State(report) => {
                         *crate::lock(&self.reported) = Some(report.clone());
                         let params = StateParams { name, report };
-                        crate::notification(Method::State, &params)
+                        shed_client::notification(Method::State, &params)
                     }
                     Out::Name(name) => {
                         self.name = name;
@@ -148,7 +148,7 @@ impl Writer {
             self.preview.push(EventKind::clone(&kind));
             let (name, replay) = (self.name.clone(), true);
             let params = EmitParams { name, kind, replay };
-            calls.extend(crate::notification(Method::Emit, &params).unwrap_or_default());
+            calls.extend(shed_client::notification(Method::Emit, &params).unwrap_or_default());
         }
         calls
     }
@@ -156,7 +156,7 @@ impl Writer {
     async fn send(&mut self, calls: &[u8]) {
         for _ in 0..2 {
             if self.server.is_none() {
-                let socket = Client::connect(&self.socket).ok().map(|c| c.split().1);
+                let socket = Conn::connect(&self.socket).ok().map(|c| c.split().1);
                 let socket = socket.filter(|s| s.set_nonblocking(true).is_ok());
                 self.server = socket.and_then(|s| tokio::net::UnixStream::from_std(s).ok());
             }

@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 shed-proto = { path = "crates/shed-proto" }
+shed-client = { path = "crates/shed-client" }
 shed-core = { path = "crates/shed-core" }
 shed-pattern = { path = "crates/shed-pattern" }
 shed-server = { path = "crates/shed-server" }

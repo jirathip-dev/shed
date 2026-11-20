@@ -21,18 +21,18 @@ use anyhow::{Context as _, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use shed_client::{Calls as _, Conn, Shed};
 use shed_server::agents;
 use shed_server::handover;
-use shed_server::lane::{self, Input, Policy};
+use shed_server::lane::{self, Policy};
 use shed_server::machines::{self, Machine};
 use shed_server::proctree::{self, ProcessTable as _};
 use shed_server::proto::{
-    Children, Event, EventsParams, ExecParams, ExecResult, FileParams, KeysParams, Link, LinkState,
-    LsParams, MachineStats, Method, ModelParams, Parent, ReadParams, ReadResult, Reported,
-    RunParams, SendParams, SessionRecord, State, StateParams, StatsParams, Target, TerminalInfo,
-    WaitOutcome, WaitParams, WaitResult,
+    Children, Event, EventsParams, ExecParams, FileParams, KeysParams, Link, LinkState, LsParams,
+    MachineStats, Method, Parent, ReadParams, Reported, RunParams, SendParams, SessionRecord,
+    State, StatsParams, TerminalInfo, WaitOutcome, WaitParams, WaitResult,
 };
-use shed_server::{Client, Paths, config};
+use shed_server::{Paths, config};
 
 #[derive(Parser)]
 #[command(version = shed_server::proto::LONG_VERSION)]
@@ -340,7 +340,7 @@ impl Server<'_> {
         }
     }
 
-    fn connect(&self, autostart: Option<bool>) -> anyhow::Result<Client> {
+    fn connect(&self, autostart: Option<bool>) -> anyhow::Result<Conn> {
         match &self.on {
             Some(machine) if !self.linked => {
                 let control = self.paths.socket.parent().unwrap_or(Path::new("."));
@@ -356,9 +356,7 @@ impl Server<'_> {
 }
 
 fn links(paths: &Paths) -> BTreeMap<String, Link> {
-    let links = Client::connect(&paths.socket)
-        .and_then(|mut c| c.call(Method::MachineLinks, &serde_json::json!({})));
-    links.unwrap_or_default()
+    Shed::at(&paths.socket).links().unwrap_or_default()
 }
 
 #[derive(Args)]
@@ -499,9 +497,9 @@ fn main() -> ExitCode {
 }
 
 fn other_build(paths: &Paths) -> Option<String> {
-    let server = match Client::connect(&paths.socket) {
+    let server = match Conn::connect(&paths.socket) {
         Ok(client) => client.server().clone(),
-        Err(shed_server::Error::Rpc(e)) => return Some(e.to_string()),
+        Err(e @ shed_client::Error::Version { .. }) => return Some(e.to_string()),
         Err(_) => return None,
     };
     let ours = shed_server::proto::BUILD;
@@ -533,7 +531,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             ls(&server, json, &LsParams { labels, parent })?;
         }
         Command::Get { name } => {
-            let info: TerminalInfo = server.connect(None)?.call(Method::Get, &Target { name })?;
+            let info = server.connect(None)?.get(&name)?;
             let pretty = serde_json::to_string_pretty(&info)?;
             print(json, &info, || format!("{pretty}\n"))?;
         }
@@ -557,17 +555,17 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         }
         Command::Send(args) => send(&server, json, args)?,
         Command::Approve(args) => approve(&server, json, args)?,
-        Command::Cancel { name } => to_acp(&server, json, name, &Input::Cancel)?,
+        Command::Cancel { name } => to_acp(&server, json, &name, |c| c.cancel(&name))?,
         Command::Model { name, model } => {
-            let mut client = server.connect(None)?;
-            let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
-            let done: Value = client.call(Method::Model, &ModelParams { name, model })?;
+            let client = server.connect(None)?;
+            let info = client.get(&name)?;
+            client.model(&name, &model)?;
             if info.session.is_some_and(|s| s.turn_ended.is_some()) {
                 out::err(
                     "shed: the model switch drops the prompt cache; the next turn reads the conversation uncached",
                 );
             }
-            print(json, &done, String::new)?;
+            print(json, &json!({}), String::new)?;
         }
         Command::Agents { action } => agents_cmd(&paths, json, action)?,
         Command::AcpBridge(a) => return bridge(&a),
@@ -578,14 +576,14 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
             print(json, &done, String::new)?;
         }
         Command::Kill { name } => {
-            let info: TerminalInfo = server.connect(None)?.call(Method::Kill, &Target { name })?;
+            let info = server.connect(None)?.kill(&name)?;
             print(json, &info, || match info.exit {
                 Some(code) => format!("{} exited {code}\n", info.name),
                 None => format!("{} exited\n", info.name),
             })?;
         }
         Command::Rm { name } => {
-            let info: TerminalInfo = server.connect(None)?.call(Method::Rm, &Target { name })?;
+            let info = server.connect(None)?.rm(&name)?;
             print(json, &info, || format!("{} removed\n", info.name))?;
         }
         Command::Attach { name } => attach::attach(server.connect(None)?, &name)?,
@@ -614,7 +612,7 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
 }
 
 fn ls(server: &Server, json: bool, params: &LsParams) -> anyhow::Result<()> {
-    let mut list: Vec<TerminalInfo> = server.connect(None)?.call(Method::Ls, params)?;
+    let mut list = server.connect(None)?.ls(params)?;
     if server.linked {
         let prefix = server.name(String::new());
         list.retain(|t| t.name.starts_with(&prefix));
@@ -697,8 +695,7 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
     };
-    let mut client = server.connect(Some(args.autostart))?;
-    let info: TerminalInfo = client.call(Method::Run, &params)?;
+    let info = server.connect(Some(args.autostart))?.run(&params)?;
     print(json, &info, || format!("{}\n", info.name))
 }
 
@@ -717,7 +714,7 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
 
 fn read(server: &Server, json: bool, mut params: ReadParams) -> anyhow::Result<()> {
     params.n = params.lines.filter(|_| params.events);
-    let mut read: ReadResult = server.connect(None)?.call(Method::Read, &params)?;
+    let mut read = server.connect(None)?.read(&params)?;
     if params.events && !json {
         let mut preview = shed_server::lane::transcript::Preview::default();
         for e in read.events.drain(..) {
@@ -731,27 +728,20 @@ fn read(server: &Server, json: bool, mut params: ReadParams) -> anyhow::Result<(
 }
 
 fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
-    let mut params = SendParams {
+    let params = SendParams {
         name: args.name,
         text: args.text,
         no_enter: args.no_enter,
         no_paste: args.no_paste,
         draft_wait: args.draft_wait,
     };
-    let mut client = server.connect(None)?;
-    let name = params.name.clone();
-    let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
-    if info.acp.is_some() {
-        let report = Reported {
-            state: "working".to_owned(),
-            ..Reported::default()
-        };
-        let state = StateParams { name, report };
-        let _: TerminalInfo = client.call(Method::State, &state)?;
-        params.text = lane::frame(&Input::Prompt(std::mem::take(&mut params.text)));
+    let client = server.connect(None)?;
+    if client.get(&params.name)?.acp.is_some() {
+        client.prompt(&params.name, &params.text)?;
+    } else {
+        client.send(&params)?;
     }
-    let done: Value = client.call(Method::Send, &params)?;
-    print(json, &done, String::new)
+    print(json, &json!({}), String::new)
 }
 
 fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
@@ -770,23 +760,23 @@ fn approve(server: &Server, json: bool, args: ApproveArgs) -> anyhow::Result<()>
         option,
         request,
     } = args;
-    to_acp(server, json, name, &Input::Approve { option, request })
+    to_acp(server, json, &name, |c| {
+        c.approve(&name, &option, request.as_deref())
+    })
 }
 
-fn to_acp(server: &Server, json: bool, name: String, input: &Input) -> anyhow::Result<()> {
-    let mut client = server.connect(None)?;
-    let info: TerminalInfo = client.call(Method::Get, &Target { name: name.clone() })?;
-    if info.acp.is_none() {
+fn to_acp(
+    server: &Server,
+    json: bool,
+    name: &str,
+    input: impl FnOnce(&Conn) -> Result<(), shed_client::Error>,
+) -> anyhow::Result<()> {
+    let client = server.connect(None)?;
+    if client.get(name)?.acp.is_none() {
         bail!("{name} is not an ACP terminal (shed run --acp)");
     }
-    let text = lane::frame(input);
-    let params = SendParams {
-        name,
-        text,
-        ..SendParams::default()
-    };
-    let done: Value = client.call(Method::Send, &params)?;
-    print(json, &done, String::new)
+    input(&client)?;
+    print(json, &json!({}), String::new)
 }
 
 fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyhow::Result<()> {
@@ -824,15 +814,14 @@ fn agents_cmd(paths: &Paths, json: bool, action: Option<AgentsCommand>) -> anyho
 }
 
 fn top(server: &Server, json: bool, name: Option<String>, full: bool) -> anyhow::Result<()> {
-    let mut client = server.connect(None)?;
+    let client = server.connect(None)?;
     if let Some(name) = name {
         if server.on.is_some() {
             bail!("shed top <terminal> reads this machine's process table; run it there");
         }
-        let info: TerminalInfo = client.call(Method::Get, &Target { name })?;
-        return processes(json, &info, full);
+        return processes(json, &client.get(&name)?, full);
     }
-    let mut list: Vec<TerminalInfo> = client.call(Method::Ls, &LsParams::default())?;
+    let mut list = client.ls(&LsParams::default())?;
     list.sort_by_key(|t| std::cmp::Reverse(t.resources.map(|r| r.rss_mb)));
     print(json, &list, || table(&list, true) + &totals(&list))
 }
@@ -904,15 +893,22 @@ fn state(
         None => shed_server::config::var("SHED")
             .context("no terminal given and $SHED is unset (it is set inside a terminal)")?,
     };
-    let params = StateParams {
-        name: server.name(name),
-        report: Reported {
-            state,
-            note,
-            ..Reported::default()
-        },
+    let report = Reported {
+        state,
+        note,
+        ..Reported::default()
     };
-    let info: TerminalInfo = server.connect(None)?.call(Method::State, &params)?;
+    let info = server
+        .connect(None)
+        .and_then(|c| Ok(c.state(&server.name(name), &report)?))
+        .map_err(|e| match e.downcast_ref() {
+            Some(shed_client::Error::Io { source, .. })
+                if source.kind() == io::ErrorKind::TimedOut =>
+            {
+                anyhow::anyhow!("{source} ($SHED_STATE_TIMEOUT)")
+            }
+            _ => e,
+        })?;
     print(json, &info, String::new)
 }
 
@@ -956,13 +952,10 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
             .duration_since(started)
             .as_secs_f64();
         let timeout = params.timeout.map(|t| (t - gone).max(0.0));
-        c.call(
-            Method::Wait,
-            &WaitParams {
-                timeout,
-                ..params.clone()
-            },
-        )
+        c.wait(&WaitParams {
+            timeout,
+            ..params.clone()
+        })
     })?;
     let t = &done.terminal;
     let state = t.reported.as_ref().map(|r| &r.state);
@@ -997,19 +990,19 @@ fn wait(server: &Server, json: bool, args: WaitArgs) -> anyhow::Result<ExitCode>
 
 fn again<T>(
     server: &Server,
-    mut call: impl FnMut(&mut Client) -> Result<T, shed_server::Error>,
+    mut call: impl FnMut(&Conn) -> Result<T, shed_client::Error>,
 ) -> anyhow::Result<T> {
     let mut client = server.connect(None)?;
     for _ in 0..100 {
-        match call(&mut client) {
-            Err(shed_server::Error::BadResponse(_) | shed_server::Error::Io(_)) => {
+        match call(&client) {
+            Err(shed_client::Error::Bad(_) | shed_client::Error::Io { .. }) => {
                 shed_server::clock::sleep(Duration::from_millis(100));
                 client = server.connect(None).unwrap_or(client);
             }
             done => return Ok(done?),
         }
     }
-    Ok(call(&mut client)?)
+    Ok(call(&client)?)
 }
 
 fn events(server: &Server, params: &EventsParams) -> anyhow::Result<()> {
@@ -1098,7 +1091,7 @@ struct Listed {
 
 fn machine_stats(server: &Server, json: bool, params: StatsParams) -> anyhow::Result<ExitCode> {
     let stats: MachineStats = match &server.on {
-        None => server.connect(None)?.call(Method::MachineStats, &params)?,
+        None => server.connect(None)?.stats(&params)?,
         Some(m) => {
             let control = server.paths.socket.parent().unwrap_or(Path::new("."));
             let seen = server.paths.state.with_file_name("seen");
@@ -1158,7 +1151,7 @@ fn exec(server: &Server, json: bool, args: ExecArgs) -> anyhow::Result<ExitCode>
         machine: server.machine(),
         cmd: args.cmd,
     };
-    let done: ExecResult = server.connect(None)?.call(Method::Exec, &params)?;
+    let done = server.connect(None)?.exec(&params)?;
     raw(json, &done, &done.stdout, &done.stderr)?;
     Ok(ExitCode::from(u8::try_from(done.code).unwrap_or(1)))
 }
@@ -1200,9 +1193,10 @@ fn connect(
     dir: Option<&Path>,
     autostart: Option<bool>,
     deadline: Option<Duration>,
-) -> anyhow::Result<Client> {
-    match Client::connect_within(&paths.socket, deadline) {
-        Err(shed_server::Error::Io(e))
+) -> anyhow::Result<Conn> {
+    let dial = UnixStream::connect(&paths.socket);
+    match dial.and_then(|s| s.set_read_timeout(deadline).map(|()| s)) {
+        Err(e)
             if matches!(
                 e.kind(),
                 io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
@@ -1211,13 +1205,13 @@ fn connect(
             if autostart == Some(true) {
                 let started = start_server(paths, dir);
                 for _ in 0..50 {
-                    if let Ok(client) = Client::connect(&paths.socket) {
+                    if let Ok(client) = Conn::connect(&paths.socket) {
                         return Ok(client);
                     }
                     shed_server::clock::sleep(Duration::from_millis(100));
                 }
                 started?;
-                return Ok(Client::connect(&paths.socket)?);
+                return Ok(Conn::connect(&paths.socket)?);
             }
             let hint = if autostart.is_some() {
                 " (or pass --autostart)"
@@ -1229,7 +1223,7 @@ fn connect(
                 paths.socket.display()
             )
         }
-        client => Ok(client?),
+        stream => Ok(Conn::over(stream?)?),
     }
 }
 

@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
+use shed_client::Conn;
+use shed_server::Paths;
 use shed_server::proto::{EventsParams, Handover, Method, Target, TerminalInfo};
-use shed_server::{Client, Paths};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
@@ -30,8 +31,8 @@ fn ok(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
-fn client(dir: &Path) -> Client {
-    Client::connect(&Paths::in_dir(dir).socket).expect("connect")
+fn client(dir: &Path) -> Conn {
+    Conn::connect(&Paths::in_dir(dir).socket).expect("connect")
 }
 
 fn get(dir: &Path, name: &str) -> TerminalInfo {
@@ -41,7 +42,7 @@ fn get(dir: &Path, name: &str) -> TerminalInfo {
     client(dir).call(Method::Get, &target).expect("get")
 }
 
-fn hand_over(dir: &Path, build: &str) -> Result<Handover, shed_server::Error> {
+fn hand_over(dir: &Path, build: &str) -> Result<Handover, shed_client::Error> {
     client(dir).call(Method::Handover, &json!({ "build": build }))
 }
 

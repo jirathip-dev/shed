@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use anyhow::bail;
 use rustix::termios::{isatty, tcgetwinsize};
 use serde_json::Value;
-use shed_server::Client;
+use shed_client::{Conn, Streamed};
 use shed_server::proto::{
     Color, Event, EventKind, EventsParams, LsParams, Method, Run, ScreenUpdate, State,
     TerminalInfo, WatchParams,
@@ -56,7 +56,7 @@ pub(crate) fn watch(
 }
 
 struct Screen<'a> {
-    connect: &'a dyn Fn() -> anyhow::Result<Client>,
+    connect: &'a dyn Fn() -> anyhow::Result<Conn>,
     _raw: RawMode,
 }
 
@@ -100,22 +100,20 @@ impl Drop for Screen<'_> {
 
 pub(crate) fn run(
     tty: &mut impl Tty,
-    connect: &dyn Fn() -> anyhow::Result<Client>,
+    connect: &dyn Fn() -> anyhow::Result<Conn>,
     machine: Option<String>,
     labels: BTreeMap<String, String>,
 ) -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel();
-    let mut events = connect()?;
     let params = EventsParams {
         labels: labels.clone(),
         since: None,
     };
-    let _: Value = events.call(Method::Events, &params)?;
+    let events = connect()?.stream(Method::Events, &params)?;
     let to = tx.clone();
     std::thread::spawn(move || {
-        let (reader, _writer) = events.split();
-        for line in reader.lines().map_while(Result::ok) {
-            if let Ok(event) = serde_json::from_str(&line)
+        for item in events {
+            if let Streamed::Item(event) = item
                 && to.send(Msg::Event(Box::new(event))).is_err()
             {
                 return;
@@ -176,7 +174,7 @@ pub(crate) fn run(
 }
 
 fn watch_screen(
-    connect: &dyn Fn() -> anyhow::Result<Client>,
+    connect: &dyn Fn() -> anyhow::Result<Conn>,
     name: &str,
     n: u64,
     tx: Sender<Msg>,
@@ -552,11 +550,11 @@ mod tests {
     }
 
     impl Fake {
-        fn connect(self: &Arc<Self>) -> anyhow::Result<Client> {
+        fn connect(self: &Arc<Self>) -> anyhow::Result<Conn> {
             let (ours, theirs) = UnixStream::pair()?;
             let fake = Arc::clone(self);
             std::thread::spawn(move || fake.serve(theirs));
-            Ok(Client::over(ours)?)
+            Ok(Conn::over(ours)?)
         }
 
         fn serve(&self, stream: UnixStream) {
@@ -570,7 +568,10 @@ mod tests {
                 let call = format!("{} {}", req.method, terminal.unwrap_or(""));
                 self.calls.lock().unwrap().push(call.trim_end().to_owned());
                 let result = match req.method.as_str() {
-                    "hello" => serde_json::to_value(Hello::ours()).unwrap(),
+                    "hello" => serde_json::to_value(Hello::answer(
+                        &serde_json::from_value(req.params.clone()).unwrap(),
+                    ))
+                    .unwrap(),
                     "ls" => Value::from(self.list.clone()),
                     _ => json!({}),
                 };
