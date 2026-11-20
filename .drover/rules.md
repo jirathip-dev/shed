@@ -9,10 +9,10 @@
 - Don't add a dependency with a disallowed licence, an advisory or a duplicate version. Enforcer: `just deny` (deny.toml).
 - Don't grow the non-test Rust lines in crates/*/src past `line_cap`. Enforcer: `just cap` (ci/cap.toml).
 - Don't make shed-core depend on another workspace crate. Enforcer: `just deps` (scripts/dep-direction.sh).
-- Don't use a layer outside its `may_use` (core and proto use nothing, server uses core and proto, cli uses server). Enforcer: `just arch` (.herdsman/arch.toml).
-- Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.herdsman/arch.toml).
-- Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.herdsman/arch.toml).
-- Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.herdsman/arch.toml).
+- Don't use a layer outside its `may_use` (core and proto use nothing, server uses core and proto, cli uses server). Enforcer: `just arch` (.drover/arch.toml).
+- Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.drover/arch.toml).
+- Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.drover/arch.toml).
+- Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.drover/arch.toml).
 - Don't commit a setup-specific name (home paths, tailnet hosts, private IPs, chat IDs). Enforcer: `just hygiene` (ci/denylist.txt).
 - Don't name an agent or provider outside crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
 - Don't push a GitHub workflow actionlint rejects. Enforcer: `just actionlint`.

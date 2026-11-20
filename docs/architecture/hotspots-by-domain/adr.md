@@ -43,7 +43,7 @@ because one domain is busy, not because domains collide. They stay as they are.
   `impl` spread over files by concern, the server keeps one dispatch match whose arms are one line each,
   the CLI keeps one `Command` enum. Every move is mechanical and reviewable with `git diff --color-moved`.
 - **D. Feature folders across layers** (`features/acp/{proto,server,cli}.rs`). Fights the crate split and
-  the `may_use` layer rule in `.herdsman/arch.toml`; needs a workspace reshuffle. Rejected.
+  the `may_use` layer rule in `.drover/arch.toml`; needs a workspace reshuffle. Rejected.
 - **E. Generate the CLI from the protocol.** The CLI arms are small and hand-shaped (tables, exit codes);
   the churn is not there. Rejected.
 
@@ -54,7 +54,7 @@ the three biggest conflict sources on their own.
 
 1. **Changelog fragments and generated marks.** `changelog.d/<kind>-<issue>.md`, one file per PR; a script
    renders `CHANGELOG.md`'s Unreleased section from them and folds them into a release section on
-   `--release`. `.herdsman/arch.toml` gains `generated = [CHANGELOG.md, docs/protocol.md,
+   `--release`. `.drover/arch.toml` gains `generated = [CHANGELOG.md, docs/protocol.md,
    docs/shed.openrpc.json]` and `generate = "just generate"`; CI's rules job checks out two commits and runs
    `drover arch-check --base HEAD^1`. A frozen or generated file leaves `drover hotspots`, and an update round
    reruns `generate` instead of hand-merging.

@@ -1,7 +1,7 @@
 # Every CI gate, locally.
 check: generate fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
 
-# The generated files in .herdsman/arch.toml, written in the current folder (so a fixture gets its own):
+# The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json.
 [no-cd]
 generate:
@@ -62,21 +62,21 @@ self-hosted:
     ! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
 
 # Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
-# environment only in shed_server::config), size limits and generated files in .herdsman/arch.toml; one
+# environment only in shed_server::config), size limits and generated files in .drover/arch.toml; one
 # fixture breaks each. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
 arch:
     drover arch-check ${ARCH_BASE:+--base "$ARCH_BASE"}
-    cd ci/fixtures/arch-layer && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-spawn && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-process && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-sleep && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-env && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-system-time && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-instant && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.herdsman/arch.toml
-    cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.herdsman/arch.toml
+    cd ci/fixtures/arch-layer && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-spawn && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-process && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-sleep && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-env && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-system-time && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-instant && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.drover/arch.toml
 
-# The lesson checks in .herdsman/rules.md: an active one that fails fails, a shadow one only reports.
+# The lesson checks in .drover/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:
     drover lesson-check
     ! env -u GITHUB_STEP_SUMMARY drover lesson-check --rules ci/fixtures/lesson-active.md

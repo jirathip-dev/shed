@@ -75,7 +75,7 @@ and the next `## [` with the fragments grouped by kind in that order and sorted 
 name does not match the grammar fails it. With `--release <version>` it writes `## [<version>] - <date>`
 instead and removes the fragments. Both are idempotent.
 
-The arch config, `.herdsman/arch.toml`, top-level keys before the first table:
+The arch config, `.drover/arch.toml`, top-level keys before the first table:
 
 ```toml
 generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json"]
@@ -146,7 +146,7 @@ The generated docs have one state: equal to what `generate` writes. A PR that le
 
 | # | what | files | src lines | mark |
 |---|---|---|---|---|
-| 1 | fragments, generated marks, CI base ref | `changelog.d/`, `scripts/changelog.py`, `justfile`, `.herdsman/arch.toml`, `ci.yml`, `CONTRIBUTING.md` | 0 | this PR |
+| 1 | fragments, generated marks, CI base ref | `changelog.d/`, `scripts/changelog.py`, `justfile`, `.drover/arch.toml`, `ci.yml`, `CONTRIBUTING.md` | 0 | this PR |
 | 2 | prose into `///`, doc test by domain | `shed-proto/src/lib.rs`, `tests/protocol_doc/{main,terminal,acp,machine,screen,render}.rs`, the two generated docs | about +30 | this PR |
 | 3 | shed-proto by domain | `shed-proto/src/{lib,terminal,events,acp,screen,machine}.rs` | about +45 | follow-up, `--refactor --serial` |
 | 4 | shed-server by concern | `shed-server/src/{lib,serve,terminal,files,client}.rs`, `registry/` | about +75 | follow-up, `--refactor --serial` |

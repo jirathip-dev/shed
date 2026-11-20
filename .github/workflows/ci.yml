@@ -53,7 +53,7 @@ jobs:
         run: just comments
 
   # The fleet-wide rules: actionlint, drover's arch-check (layers, banned calls, size limits in
-  # .herdsman/arch.toml) and lesson checks (.herdsman/rules.md), each with the fixtures that break it.
+  # .drover/arch.toml) and lesson checks (.drover/rules.md), each with the fixtures that break it.
   rules:
     runs-on: ubuntu-latest
     env:
@@ -76,7 +76,7 @@ jobs:
         run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging drover
       - name: actionlint (.github/workflows)
         run: just actionlint
-      - name: arch-check (.herdsman/arch.toml; generated files rerun `just generate`)
+      - name: arch-check (.drover/arch.toml; generated files rerun `just generate`)
         env:
           ARCH_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: just arch
