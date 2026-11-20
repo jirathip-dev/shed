@@ -1,6 +1,6 @@
 use crate::ScriptError;
 use crate::ast::Pos;
-use crate::error::syntax;
+use crate::syntax;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Tok {

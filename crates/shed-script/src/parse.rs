@@ -5,8 +5,8 @@ use crate::ast::{
     Assign, Binary, Binding, Decl, Expr, Function, Item, Key, Logic, Pattern, Pos, Prop, Script,
     Stmt, Unary,
 };
-use crate::error::syntax;
 use crate::lex::{Lexer, Tok, Token};
+use crate::syntax;
 
 const DEPTH_MAX: usize = 200;
 const REGEX: &str =
