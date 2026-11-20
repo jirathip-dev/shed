@@ -1,0 +1,50 @@
+"""A job queue.
+
+def not_a_function(): this line is inside the module docstring
+"""
+import asyncio
+
+RETRIES = 3
+
+
+class QueueError(Exception):
+    pass
+
+
+# The queue keeps jobs in order.
+class Queue:
+    """Holds jobs until they run."""
+
+    def __init__(self, limit):
+        self.limit = limit
+        self.jobs = []
+
+    @property
+    def size(self):
+        return len(self.jobs)
+
+    def push(
+        self,
+        job,
+        retries=RETRIES,
+    ):
+        if self.size >= self.limit:
+            raise QueueError(f"full after {retries} retries")
+        self.jobs.append(job)
+
+    async def drain(self, run):
+        def one(job):
+            return run(job)
+
+        return await asyncio.gather(*map(one, self.jobs))
+
+
+def fresh(job_id): return {"id": job_id, "retries": 0}
+
+
+@asyncio.coroutine
+def main():
+    queue = Queue(2)
+# a comment at column 0 does not end the function
+    queue.push(fresh(1))
+    return queue
