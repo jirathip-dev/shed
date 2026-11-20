@@ -1,0 +1,6 @@
+Decided: git mv .herdsman to .drover and rewrite every .herdsman/ path, docs included
+Because: "No `.herdsman/` path is left anywhere in the tree: `git grep -n '\.herdsman/'` prints nothing"
+Decided: drop the ADR notes saying there is no .drover/arch.toml, now false
+Rejected: leaving docs/architecture hits — the grep AC would still print them
+Check: each arch fixture fails on its own violation; the old --config path now exits 0 with nothing to check
+Owner: the fleet rules folder moved from .herdsman to .drover; rules and checks are unchanged
