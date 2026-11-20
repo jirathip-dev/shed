@@ -43,7 +43,7 @@ const guard = (method) => (method === "kill" ? "lanes are stopped with drover ki
 
 async function run(code) {
   let [now, calls, pending, guardUp] = [0, 0, [], false];
-  const logs = [];
+  const [logs, acting] = [[], []];
   const tick = () => {
     pending.sort((a, b) => a.at - b.at);
     const next = pending.shift();
@@ -57,9 +57,18 @@ async function run(code) {
     return new Promise((resolve, reject) => {
       const refused = guarded.has(method) ? guard(method) : null;
       const [ms, result] = refused === null ? methods[method](params) : [1, null];
-      const settle = () => refused === null
-        ? resolve(structuredClone(result))
-        : reject({ name: "GuardError", message: `${method} refused by the guard: ${refused}`, ...at, code: "GUARD_REFUSED", method });
+      const entry = guarded.has(method) ? { method, params: structuredClone(params) } : null;
+      if (entry) acting.push(entry);
+      const settle = () => {
+        if (refused === null) {
+          if (entry) entry.result = structuredClone(result);
+          resolve(structuredClone(result));
+        } else {
+          const error = { name: "GuardError", message: `${method} refused by the guard: ${refused}`, ...at, code: "GUARD_REFUSED", method };
+          entry.error = { code: error.code, message: error.message };
+          reject(error);
+        }
+      };
       const start = guarded.has(method) && !guardUp ? 20 : 0;
       guardUp ||= guarded.has(method);
       pending.push({ at: now + ms + start, settle });
@@ -78,9 +87,9 @@ async function run(code) {
   const console = { log: (...a) => logs.push(a.map((v) => (typeof v === "string" ? v : JSON.stringify(v))).join(" ")) };
   try {
     const result = (await new AsyncFunction("shed", "console", code)(path(""), console)) ?? null;
-    return { result, logs, calls, ms: now };
+    return { result, logs, calls, acting, ms: now };
   } catch (error) {
-    return { error, logs, calls, ms: now };
+    return { error, logs, calls, acting, ms: now };
   } finally {
     clearInterval(pump);
   }

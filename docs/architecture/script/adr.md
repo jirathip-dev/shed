@@ -3,7 +3,7 @@
 ## Summary
 
 Decision: shed gets a `script` method. A caller sends one program in a JavaScript subset and the server runs it beside the terminals, in a new pure crate that shed builds itself (lexer, parser, compiler, a small virtual machine; no third-party engine, no new dependency). The program calls shed's methods through the same path a socket request takes. A call that acts is first shown to a guard: one process for the whole run, named in the server's config file, which answers each call in well under a millisecond; with no guard named the call is refused. Steps, memory, calls, logs and a deadline bound every run. Speed has six targets, each with its measurement, and a gate: CI compares fixed scripts' step counts and peak memory with a committed baseline, and the reviewer of slices 3 to 7 reports before and after times.
-Slices: (1) parser, +1,700; (2) values and heap, +550; (3) compiler and virtual machine, +1,680; (4) built-ins, +950; (5) promises and the host interface, +400; (6) the server's `script` method and the guard, +620; (7) the command, `--on`, cancelling across machines, the skill doc and the numbers from a real remote host, +160. About +6,060 lines, 230 more than before this revision (the guard as one process, the collector taken in slices, the counters the gate reads). With the other queued work that is about 20,045 of the 20,300 in PR #205.
+Slices: (1) parser, +1,700; (2) values and heap, +550; (3) compiler and virtual machine, +1,680; (4) built-ins, +950; (5) promises and the host interface, +400; (6) the server's `script` method, the guard and the reply's list of acting calls, +650; (7) the command with `--check`, `--on`, cancelling across machines, the skill doc and the numbers from a real remote host, +170. About +6,100 lines, 270 more than the first version (the guard as one process, the collector taken in slices, the counters the gate reads, the acting list, `--check` and roles). Conformance is a vendored test262 subset and Node-made goldens, both tests. With the other queued work that is about 20,085 of the 20,300 in PR #205.
 Open questions: none. The first three are decided as recommended and the cap by PR #205.
 
 **Status:** proposed, for the owner; revised after the owner's note of 2026-11-20 (q2649: the guard as
@@ -27,17 +27,17 @@ no guard means those calls are refused.
 
 ## Options
 
-Lines are non-test Rust under `crates/*/src`. Every option also needs the same 780 lines outside the
+Lines are non-test Rust under `crates/*/src`. Every option also needs the same 820 lines outside the
 engine (the wire shapes, the server's method and loop, the guard, the CLI); the last column includes them.
 
 | | option | engine | in all | verdict |
 |---|---|---|---|---|
-| a | **A JavaScript subset, compiled to instructions for a small machine** | 5,280 | 6,060 | chosen |
-| a′ | The same subset, walked as a tree by async Rust | about 4,550 | 5,330 | 700 lines cheaper, and rejected for them: see "Inside the choice" |
-| b | A JSON plan: steps, references to earlier results, map and filter with simple predicates | about 750 | 1,530 | can express the three worked examples and little past them |
-| c1 | A small language of shed's own | about 3,300 | 4,080 | every caller learns it from the skill doc |
-| c2 | A Rust-syntax subset, interpreted | about 5,700 | 6,480 | the largest, and Rust without its compiler |
-| c3 | A Python subset (added here) | about 5,400 | 6,180 | no gain over (a) |
+| a | **A JavaScript subset, compiled to instructions for a small machine** | 5,280 | 6,100 | chosen |
+| a′ | The same subset, walked as a tree by async Rust | about 4,550 | 5,370 | 700 lines cheaper, and rejected for them: see "Inside the choice" |
+| b | A JSON plan: steps, references to earlier results, map and filter with simple predicates | about 750 | 1,570 | can express the three worked examples and little past them |
+| c1 | A small language of shed's own | about 3,300 | 4,120 | every caller learns it from the skill doc |
+| c2 | A Rust-syntax subset, interpreted | about 5,700 | 6,520 | the largest, and Rust without its compiler |
+| c3 | A Python subset (added here) | about 5,400 | 6,220 | no gain over (a) |
 | | Compiled Rust | | | rejected |
 | | An embedded engine (QuickJS, Boa, Rhai, Lua) | | | ruled out by the owner |
 
@@ -87,7 +87,7 @@ engine (the wire shapes, the server's method and loop, the guard, the CLI); the 
   (`prelude.js`, 120 lines), compiled once per process. Fuel, depth and `await` work inside a callback
   with no special case, and the machine never recurses natively at run time.
 - **A script's failure is a result, not an RPC error.** `RpcError` carries a code and a message. As
-  `exec` answers with an exit code, `script` answers `{error, logs, calls, ms}`: the logs, which are how a
+  `exec` answers with an exit code, `script` answers `{error, logs, calls, acting, ms}`: the logs, which are how a
   lane debugs in one more trip, survive every failure, the deadline included.
 - **Refuse rather than guess.** No implicit conversion, `==` only against `null`, no `Math.random` or
   `Date` (the engine has no entropy and no clock). What is left out fails with a message that says what to
@@ -112,8 +112,15 @@ engine (the wire shapes, the server's method and loop, the guard, the CLI); the 
   socket, which the server can tell apart (below) and asks for once a second while a script runs.
 - **A call starts when called, and a run that returns waits for its calls.** As in JavaScript, and so that
   a forgotten `await` on `shed.send` still sends. A run that fails drops its calls and names them.
-- **`Pattern` moves to shed-proto.** The engine may use proto only and scripts match with shed's pattern.
-  Its one user today is the server's `wait`, and its syntax is already part of `wait`'s contract.
+- **Patterns come from `shed-pattern` (#193).** Scripts match with shed's own pattern, the one `wait`
+  uses, and #193 makes it a crate of its own; the engine uses that crate and not shed-proto, so its errors
+  and its host's are its own types and the server maps them to the wire. Nothing moves to shed-proto.
+- **The reply lists what acted.** Every call of a guarded method is in the reply's `acting` list with its
+  params and its result or refusal, so a caller learns what a failed or stopped run had already done
+  without a second trip.
+- **Conformance has two sources, neither needing Node in CI.** A vendored subset of test262, picked by
+  feature tags, run by a Rust harness; and goldens for the worked examples, made by Node (`check.mjs`)
+  only when an example changes.
 
 ## Decision
 
@@ -121,7 +128,7 @@ engine (the wire shapes, the server's method and loop, the guard, the CLI); the 
    function, and anything outside the subset is a `SyntaxError` naming the construct.
 2. **The engine** is the new crate `shed-script`: lexer, parser, compiler, a machine with heap-kept
    frames, an arena heap, the built-ins. Pure: no socket, file, process, thread, clock, environment, async
-   runtime or `unsafe`; its dependencies are `shed-proto` and `serde_json`.
+   runtime or `unsafe`; its dependencies are `shed-pattern` (#193) and `serde_json`, not shed-proto.
 3. **One way out**: `Host::call(method, params) -> future`. The engine knows no method name.
 4. **The host is the server's `dispatch`**, with a session of its own per call, polled inside the script's
    request: validation, events, saving and the handover count are those of a socket request.
@@ -137,15 +144,20 @@ engine (the wire shapes, the server's method and loop, the guard, the CLI); the 
 7. **The limits** are counted in the engine (50,000,000 steps, 64 MiB live, 200 frames, 2,000 calls, 32 in
    flight, 64 KiB of logs) except the deadline (60 s, at most 600), which the server adds with tokio. Eight
    scripts run at once per server, and the worker threads less one step at once.
-8. **The reply** is `{result, logs, calls, ms}` or `{error, logs, calls, ms}`, within `REPLY_LIMIT`; over
-   it, it is an error that says to return less.
-9. **The surface**: the `script` method (`code`, `timeout`, `machine`, `caller`); `shed script -f <file>`,
-   `shed script -`, `shed --on <machine> script`; `skill/script/` for lanes.
+8. **The reply** is `{result, logs, calls, acting, ms}` or `{error, logs, calls, acting, ms}`, within
+   `REPLY_LIMIT`; `acting` is every guarded call made, `{method, params, result}` or `{method, params,
+   error}`. Over the limit it is an error that says to return less, never a cut result.
+9. **The surface**: the `script` method (`code`, `timeout`, `machine`, `caller` with its `role`, `check`);
+   `shed script -f <file>`, `shed script -`, `shed script --check` (parse and compile, no run, no call, no
+   guard), `shed --on <machine> script`; `skill/script/` for lanes. The guard may refuse by
+   `caller.role`; a role never allows more.
 10. **Speed is specified and gated**: the six targets and the three-level gate of "Performance" below.
+11. **Conformance** is test262's files for the subset's feature tags, vendored and run by a Rust harness in
+    CI, plus Node-made goldens for the worked examples (README.md, "Conformance").
 
 ## Consequences
 
-- **Size.** shed's source grows by 46%. All but 780 lines are in one crate that the layer rule keeps away
+- **Size.** shed's source grows by 46%. All but 820 lines are in one crate that the layer rule keeps away
   from everything else, that is deterministic (no clock: the same program and answers give the same steps
   everywhere) and that is tested alone.
 - **The server stays safe by construction, not by care**: no native recursion at run time; the workspace
@@ -280,21 +292,22 @@ two are models, made before the engine exists; targets 2 and 6 are measured on t
 
 ## Open questions
 
-None. Decided by the owner on 2026-11-20 (q2649, and the amendment in the issue):
+None. Decided by the owner on 2026-11-20 (q2649, and the two amendments in the issue, folded into this ADR and the README):
 
 1. **Size.** The JavaScript subset, at its full size, not the JSON plan.
 2. **`file.read` is guarded.** On a server with no guard a script reads terminals and nothing else.
 3. **The caller is only what it says.** The guard gets it and may use it to refuse more (a reviewer's
    script may not act), never to allow more.
-4. **The cap.** 20,300, in PR #205. This revision's 230 more lines leave 255 of its 485 to spare; the sum
+4. **The cap.** 20,300, in PR #205. This revision's 270 more lines leave 215 of its 485 to spare; the sum
    is in README.md, "Slices".
 
 ## `.drover/arch.toml`
 
 This PR adds the layer, lets the server use it, and adds the bans that make "pure" a check; slice 1 adds
 the fixture (`ci/fixtures/arch-script-pure`) that breaks them. The bans on processes, sleeping, the clock
-and `env::var` already cover every crate. By the amendment below the layer uses `pattern` (#193), not
-`proto`.
+and `env::var` already cover every crate. The layer uses `pattern`, the layer #193 adds for
+`shed-pattern`, not `proto`: until #193 lands the name matches no crate, and slice 4, the first to use
+it, waits for #193.
 
 ```toml
 [[layer]]
@@ -321,7 +334,7 @@ except = []
 reason = "the script engine is pure: it reaches the outside only through Host"
 ```
 
-`scripts/dep-direction.sh` (`just deps`) gains one check: shed-script's dependencies are shed-proto and
+`scripts/dep-direction.sh` (`just deps`) gains one check: shed-script's dependencies are shed-pattern and
 serde_json, nothing else. Two generated files join the list, each written by `just generate`: the gate's
 counts in slice 3 (`just generate` gains `SHED_BLESS=1 cargo test -p shed-script --locked --test perf
 counts`) and the skill's method page in slice 7:
@@ -331,26 +344,7 @@ generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crat
 ```
 
 No central list grows. The fixed scripts are a folder, one file each with its own ceiling, collected by
-the test that reads the folder. New code is new files (`shed-proto/src/script.rs` and `pattern.rs`,
+the test that reads the folder. New code is new files (`shed-proto/src/script.rs`,
 `shed-server/src/script.rs` and `script/guard.rs`, `shed/src/script.rs`); the files many PRs edit get a
 few lines each: a `Method` variant and its arms, one `dispatch` arm, one `Command` variant, one function
 in `runner.rs`, two recipes' lines in the `justfile`.
-
-## Amendment: shed-pattern, conformance, `--check`, acting calls, roles
-
-The owner's second amendment (2026-11-20) overrides the text above where they differ:
-
-- **The pattern crate.** The engine uses the `shed-pattern` crate from #193, not shed-proto: `Pattern`
-  does not move to shed-proto. shed-script's dependencies are shed-pattern and serde_json (the method
-  classes stay in shed-proto, used by the server: the engine knows no method name); its layer's `may_use` is `["pattern"]`, and
-  `just deps` checks that list.
-- **Conformance.** A vendored subset of test262, chosen by feature tags (those of the subset's
-  constructs), run by a Rust harness in CI, plus goldens for the four worked examples made by Node. Node is
-  needed only to regenerate them (`check.mjs`), never in CI.
-- **`shed script --check`** parses and compiles without running: no call, no guard; a `SyntaxError` with
-  line and column, or exit 0.
-- **The reply lists every acting call** the run made, each with its method, params and result (or its
-  refusal), as `acting: [{method, params, result}]` beside `{result, logs, calls, ms}`, and counts toward
-  `REPLY_LIMIT` like the rest.
-- **Roles.** The guard may refuse calls by the caller's role (a reviewer's script may not act), as open
-  question 3 says; the role never allows more.

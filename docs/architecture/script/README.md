@@ -3,7 +3,7 @@
 ## Summary
 
 Decision: shed gets a `script` method. A caller sends one program in a JavaScript subset and the server runs it beside the terminals, in a new pure crate that shed builds itself (lexer, parser, compiler, a small virtual machine; no third-party engine, no new dependency). The program calls shed's methods through the same path a socket request takes. A call that acts is first shown to a guard: one process for the whole run, named in the server's config file, which answers each call in well under a millisecond; with no guard named the call is refused. Steps, memory, calls, logs and a deadline bound every run. Speed has six targets, each with its measurement, and a gate: CI compares fixed scripts' step counts and peak memory with a committed baseline, and the reviewer of slices 3 to 7 reports before and after times.
-Slices: (1) parser, +1,700; (2) values and heap, +550; (3) compiler and virtual machine, +1,680; (4) built-ins, +950; (5) promises and the host interface, +400; (6) the server's `script` method and the guard, +620; (7) the command, `--on`, cancelling across machines, the skill doc and the numbers from a real remote host, +160. About +6,060 lines, 230 more than before this revision (the guard as one process, the collector taken in slices, the counters the gate reads). With the other queued work that is about 20,045 of the 20,300 in PR #205.
+Slices: (1) parser, +1,700; (2) values and heap, +550; (3) compiler and virtual machine, +1,680; (4) built-ins, +950; (5) promises and the host interface, +400; (6) the server's `script` method, the guard and the reply's list of acting calls, +650; (7) the command with `--check`, `--on`, cancelling across machines, the skill doc and the numbers from a real remote host, +170. About +6,100 lines, 270 more than the first version (the guard as one process, the collector taken in slices, the counters the gate reads, the acting list, `--check` and roles). Conformance is a vendored test262 subset and Node-made goldens, both tests. With the other queued work that is about 20,085 of the 20,300 in PR #205.
 Open questions: none. The first three are decided as recommended and the cap by PR #205.
 
 The question, the options with their line estimates, the decision and its consequences are in
@@ -21,12 +21,13 @@ $ shed script -f blocked.js                  # logs, then the result, then `[3 c
 $ shed script - < start.js                   # the program on stdin
 $ shed --on box script -f errors.js --json   # runs on box's server; the whole reply as one line
 $ shed script -f long.js --timeout 300       # the deadline, 60 s unless raised (at most 600)
+$ shed script --check -f blocked.js         # parse and compile only: nothing runs, no call, no guard
 ```
 
 drover, in place of N calls: one line after `hello`, one line back.
 
 ```json
-{"jsonrpc":"2.0","id":2,"method":"script","params":{"code":"…","timeout":120,"caller":{"terminal":"orchestrator-7"}}}
+{"jsonrpc":"2.0","id":2,"method":"script","params":{"code":"…","timeout":120,"caller":{"terminal":"orchestrator-7","role":"orchestrator"}}}
 ```
 
 A program is the body of an async function: `await` and `return` work at the top, and what it returns is
@@ -50,7 +51,7 @@ return Promise.all(
    "tail":["Bash(cargo test --workspace --locked)","Do you want to proceed?","> 1. Yes   2. No"]},
   {"name":"impl-191","kind":"question","note":"Which cap raise?",
    "tail":["The slice needs 180 more lines than the cap has.","Raise the cap, or trim the CLI help?","> "]}],
- "logs":[],"calls":3,"ms":2}
+ "logs":[],"calls":3,"acting":[],"ms":2}
 ```
 
 Three calls, no guard (all reads); the two reads were in flight together. The fixture's screens are three
@@ -73,7 +74,15 @@ return { name: lane.name, pid: lane.pid, outcome, state: terminal.reported?.stat
 
 ```json
 {"result":{"name":"impl-192","pid":4192,"outcome":"matched","state":"blocked","note":"Bash: git status"},
- "logs":[],"calls":4,"ms":13182}
+ "logs":[],"calls":4,
+ "acting":[
+  {"method":"run","params":{"name":"impl-192","cwd":"/home/user/work/shed/issue-192","cmd":["claude"],
+                            "labels":{"fleet":"shed","issue":"192","role":"impl"},"idle_after":5},
+   "result":{"name":"impl-192","labels":{"fleet":"shed","issue":"192","role":"impl"},
+             "cwd":"/home/user/work/shed/issue-192","cmd":["claude"],"keep":false,"state":"running",
+             "exit":null,"pid":4192,"idle_after":5}},
+  {"method":"send","params":{"name":"impl-192","text":"Read .brief.md fully, then start."},"result":{}}],
+ "ms":13182}
 ```
 
 The guard was started once, at `run` (20 ms in the fixture), and answered `send` on the same process in
@@ -95,7 +104,7 @@ return kept.slice(-20);
   {"n":412,"line":"error[E0308]: mismatched types"},
   {"n":1841,"line":"error[E0599]: no method named `settle` found for struct `Machine`"},
   {"n":2913,"line":"test result: FAILED. 212 passed; 1 failed; 0 ignored"}],
- "logs":["2913 lines read, 3 kept"],"calls":1,"ms":1}
+ "logs":["2913 lines read, 3 kept"],"calls":1,"acting":[],"ms":1}
 ```
 
 2,913 lines stayed in the server; three came back. `matches` takes shed's own pattern (`wait --output`'s),
@@ -110,7 +119,10 @@ return "killed";
 ```json
 {"error":{"name":"GuardError","message":"kill refused by the guard: lanes are stopped with drover kill",
           "line":2,"column":12,"code":"GUARD_REFUSED","method":"kill"},
- "logs":[],"calls":1,"ms":21}
+ "logs":[],"calls":1,
+ "acting":[{"method":"kill","params":{"name":"impl-190"},
+            "error":{"code":"GUARD_REFUSED","message":"kill refused by the guard: lanes are stopped with drover kill"}}],
+ "ms":21}
 ```
 
 The server, `crates/shed-server/src/script.rs`: the method with its loop, then the host the engine calls
@@ -123,6 +135,9 @@ pub(crate) async fn answer(registry: &Shared, outer: &Session, p: ScriptParams) 
         Ok(program) => program,
         Err(error) => return reply(Err(error), None, started),  // SyntaxError, 0 calls
     };
+    if p.check {
+        return reply(Ok(Value::Null), None, started);           // `--check`: parsed and compiled, nothing ran
+    }
     let guard = Guard::for_run(&lock(registry).config);        // `[script]`, read once; no process yet
     let host = ScriptHost { registry, outer, guard, caller: p.caller };
     let mut run = Run::new(&program, Limits::default(), &host);
@@ -154,11 +169,22 @@ impl Host for ScriptHost<'_> {
             let m = Method::parse(method).ok_or_else(|| no_such(method))?;
             match m.in_script() {                               // an exhaustive match in shed-proto
                 Access::Refused => return Err(not_in_script(m)),
-                Access::Guarded => self.guard.ask(m, &params, self.caller.as_ref()).await?,
-                Access::Read => {}
+                Access::Read => {
+                    let mut session = self.outer.inner();       // hello done, the outer read-only marks
+                    return crate::dispatch(self.registry, &mut session, &Request::inner(m, params)).await.map_err(host_error);
+                }
+                Access::Guarded => {}
             }
-            let mut session = self.outer.inner();               // hello done, the outer read-only marks
-            crate::dispatch(self.registry, &mut session, &Request::inner(m, params)).await
+            let entry = self.acting.start(m, &params);          // the reply's `acting`, in call order
+            let answer = match self.guard.ask(m, &params, self.caller.as_ref()).await {
+                Ok(()) => {
+                    let mut session = self.outer.inner();
+                    crate::dispatch(self.registry, &mut session, &Request::inner(m, params)).await
+                }
+                Err(refused) => Err(refused),
+            };
+            self.acting.settle(entry, &answer);                 // its result, or its refusal or error
+            answer.map_err(host_error)                          // shed-proto's RpcError to the engine's HostError
         })
     }
 }
@@ -279,6 +305,8 @@ pub struct ScriptParams {
     pub machine: Option<String>,
     /// Who sends it, as the sender says; the guard gets it unchanged.
     pub caller: Option<Caller>,
+    /// Parse and compile only (`shed script --check`): nothing runs, no call is made, no guard is asked.
+    pub check: bool,
 }
 
 /// What a script's sender says about itself. shed proves none of it.
@@ -287,6 +315,8 @@ pub struct Caller {
     pub terminal: Option<String>,
     /// Its working directory.
     pub cwd: Option<PathBuf>,
+    /// Its role (`impl`, `rev`, `orchestrator`, …), for the guard to refuse by; it never allows more.
+    pub role: Option<String>,
 }
 
 /// `script` result: `result` when the program returned, `error` when it did not; never both.
@@ -299,9 +329,27 @@ pub struct ScriptResult {
     pub logs: Vec<String>,
     /// How many `shed` calls it made, refused ones included.
     pub calls: u64,
+    /// Every call of a guarded method it made, in call order, with what came of it.
+    pub acting: Vec<Acting>,
     /// How long it took, queueing and guards included.
     pub ms: u64,
 }
+
+/// One acting call: `result` when it was dispatched and answered, `error` when the guard refused it or
+/// it failed; never both.
+pub struct Acting {
+    /// The method's wire name.
+    pub method: String,
+    /// Its params, as the script gave them.
+    pub params: Value,
+    /// What it answered.
+    pub result: Option<Value>,
+    /// Its refusal (`GUARD_REFUSED`, …) or shed's error, as `{code, message}`.
+    pub error: Option<ActingError>,
+}
+
+/// Why an acting call came to nothing.
+pub struct ActingError { pub code: String, pub message: String }
 
 /// A script's error: where, and what.
 pub struct ScriptError {
@@ -328,9 +376,10 @@ impl Method {
 }
 ```
 
-`Method::Script` is the 33rd method. `Pattern` moves from shed-core to `crates/shed-proto/src/pattern.rs`:
-its only user is the server's `wait`, its syntax is part of the wire contract, and the engine may use
-proto only.
+`Method::Script` is the 33rd method. `Pattern` comes from the `shed-pattern` crate of #193, which the
+engine and the server's `wait` both use; nothing moves to shed-proto. The engine may use shed-pattern
+only, so its errors and its host's are its own types, and the server's `script.rs` maps them to the wire
+shapes above.
 
 The engine, `shed-script`:
 
@@ -340,7 +389,14 @@ pub trait Host: Sync {
     /// Starts one call. The engine polls it with the others in flight and drops it to cancel.
     fn call(&self, method: &str, params: serde_json::Value) -> Call<'_>;
 }
-pub type Call<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value, RpcError>> + Send + 'a>>;
+pub type Call<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value, HostError>> + Send + 'a>>;
+
+/// A call's failure as the engine throws it: the host names the error class (`ShedError`, `GuardError`)
+/// and its code; the server builds it from shed-proto's `RpcError`, which the engine never sees.
+pub struct HostError { pub name: String, pub code: String, pub message: String }
+
+/// The engine's own error, the wire's `ScriptError` field for field; the server converts it.
+pub struct ScriptError { pub name: String, pub message: String, pub line: u32, pub column: u32, pub code: Option<String>, pub method: Option<String> }
 
 pub struct Program { /* compiled code and constants; no state */ }
 impl Program { pub fn parse(code: &str) -> Result<Self, ScriptError>; }
@@ -388,19 +444,21 @@ guard_timeout = 10              # seconds for one answer, the first with the sta
 | `value.rs`, `heap.rs` | 550 | `Value`, `Cell`, the arena, the mark and sweep taken in slices, the byte count | nothing |
 | `compile.rs` | 860 | tree to instructions: scopes, jumps, handlers, destructuring | `ast`, `value` |
 | `vm.rs` | 930 | frames, tasks, promises, the step loop, fuel and depth, `Counts` | `heap`, `compile`, `builtins` |
-| `builtins/`, `prelude.js`, `json.rs` | 950 | the tables above; JSON in and out. Methods that take a callback (`map`, `sort`, `then`) are 120 lines of the subset itself, compiled once per process, so no built-in ever calls back into the machine | `heap`, `value`, `shed_proto::Pattern` |
-| `lib.rs` | 290 | `Program`, `Run` (the machine and its calls in flight), `Limits`, `Host` | all of the above, `shed_proto::{RpcError, ScriptError}`, `serde_json`, `std::future` |
-| `shed-proto`: `script.rs`, `pattern.rs` | 100 | the wire shapes, `Access`, `Method::in_script`; `Pattern`, its 105 lines moved from shed-core | nothing |
-| `shed-server`: `script.rs` | 255 | `answer` and its loop, `ScriptHost`, the run slots and the stepping permits, the deadline, the reply and its size check, `methods` and `describe` from `proto::openrpc()` | `shed_script`, `crate::dispatch`, `script::guard`, `clock` |
+| `builtins/`, `prelude.js`, `json.rs` | 950 | the tables above; JSON in and out. Methods that take a callback (`map`, `sort`, `then`) are 120 lines of the subset itself, compiled once per process, so no built-in ever calls back into the machine | `heap`, `value`, `shed_pattern::Pattern` |
+| `lib.rs` | 290 | `Program`, `Run` (the machine and its calls in flight), `Limits`, `Host` | all of the above, `serde_json`, `std::future` |
+| `shed-proto`: `script.rs` | 100 | the wire shapes (`ScriptParams` with `check`, `Caller` with `role`, `ScriptResult` with `acting`), `Access`, `Method::in_script` | nothing |
+| `shed-server`: `script.rs` | 285 | `answer` and its loop, `check`, `ScriptHost`, the record of acting calls, the run slots and the stepping permits, the deadline, the reply and its size check, the engine's errors to the wire's, `methods` and `describe` from `proto::openrpc()` | `shed_script`, `crate::dispatch`, `script::guard`, `clock` |
 | `script/guard.rs` | 190 | `[script]` of the config file; the run's guard process, the line each way and its id; the per-call fallback; the verdict | `runner::held`, `runner::exec`, `toml` |
 | `lib.rs`, `links.rs`, `machines.rs`, `runner.rs` | 155 | one `dispatch` arm; the peer-closed watch in `connection`; `script` forwarded on a connection of its own; `[script]` skipped by the machines reader; `exec` ends its group when dropped; `runner::held`, a piped process in a group of its own that ends when dropped | as today |
-| `shed` (CLI): `script.rs` | 80 | `shed script`, its output and exit code | `shed_server::{Client, proto}` |
+| `shed` (CLI): `script.rs` | 90 | `shed script`, `--check`, `--role`, its output and exit code | `shed_server::{Client, proto}` |
 
 - `shed-script` is pure: no socket, file, process, thread, clock, environment or `unsafe`, and no async
-  runtime. Its dependencies are `shed-proto` and `serde_json`. The layer rule, eight bans and the
-  dependency check that hold this are at the end of [adr.md](adr.md).
+  runtime. Its dependencies are `shed-pattern` (#193) and `serde_json`; it does not use shed-proto. The
+  layer rule (`may_use = ["pattern"]`), eight bans and the dependency check that hold this are at the end
+  of [adr.md](adr.md).
 - The engine knows no method name. `shed.a.b(p)` is `host.call("a.b", p)`; what exists, what is refused
-  and what is guarded is the server's `ScriptHost` and proto's `Access`.
+  and what is guarded is the server's `ScriptHost` and proto's `Access`, and the reply's `acting` list is
+  kept by `ScriptHost`, never by the engine.
 - An inner call is `dispatch`, the function a socket request reaches after its line is parsed, with a
   session of its own. It is polled inside the script's request, never spawned, so the request's save
   generation (`registry::answering`) and its handover count cover it: the reply is written after the state
@@ -417,6 +475,7 @@ One run:
 stateDiagram-v2
     [*] --> Parsing: script
     Parsing --> Replied: outside the subset / SyntaxError, 0 calls
+    Parsing --> Replied: compiled, check / result null, 0 calls, nothing ran
     Parsing --> Queued: compiled
     Queued --> Stepping: one of 8 run slots is free
     Stepping --> Stepping: 10,000 steps, or as much collecting, used / hand the thread back, take the answers that are ready
@@ -434,7 +493,7 @@ stateDiagram-v2
     Waiting --> Cancelled: the peer closed its socket / calls in flight dropped, no reply
     Stepping --> Cancelled: the peer closed its socket
     Draining --> Cancelled: the peer closed its socket
-    Replied --> [*]: result or error with logs, calls and ms / over REPLY_LIMIT a LimitError instead
+    Replied --> [*]: result or error with logs, calls, acting and ms / over REPLY_LIMIT a LimitError instead
     Cancelled --> [*]
 ```
 
@@ -489,7 +548,7 @@ stateDiagram-v2
 ## Errors
 
 Everything about the program is in the result, as `exec` answers with an exit code: a failed script is
-`{error, logs, calls, ms}`, so its logs survive. An RPC error is left for what happens before a run
+`{error, logs, calls, acting, ms}`, so its logs and the acting calls it made survive. An RPC error is left for what happens before a run
 (`INVALID_PARAMS` for a timeout over 600 or code over 256 KiB, `NO_LINK` for the machine).
 
 | `name` | when | `code` | caught by `catch` |
@@ -522,7 +581,8 @@ LimitError 12:1: the reply is 9,437,201 bytes, over the limit of 8,388,608: retu
 |---|---|
 | Where | `[script]` in the server's `config.toml`: `guard`, a command line; `guard_timeout` (10 s); `guard_per`, `"run"` unless given. Read once when a run starts, never from the request: a caller cannot name its own guard |
 | The process | One for the run, started at its first guarded call (a run of reads starts none) in a process group of its own, its stderr the server's. It ends with the run: its stdin is closed and its group ended. A guard that has ended is started again at the next guarded call |
-| Asked | Before each call of a guarded method, every time; nothing is remembered between calls. One line on its stdin, `id` first: `{"id":7,"method":"exec","params":{"cmd":["git","push"],"cwd":"/home/user/project"},"machine":null,"caller":{"terminal":"impl-190","cwd":"/home/user/work/shed/issue-190"}}`. `params` are the call's, untouched; `machine` is where the call will act when it names one (`machine`, or `box/t1`), else `null`; `caller` is the request's |
+| Asked | Before each call of a guarded method, every time; nothing is remembered between calls. One line on its stdin, `id` first: `{"id":7,"method":"exec","params":{"cmd":["git","push"],"cwd":"/home/user/project"},"machine":null,"caller":{"terminal":"impl-190","cwd":"/home/user/work/shed/issue-190"}}`. `params` are the call's, untouched; `machine` is where the call will act when it names one (`machine`, or `box/t1`), else `null`; `caller` is the request's, `role` included |
+| Roles | `caller.role` is what the sender says (`shed script --role rev`; drover sets it per lane). The guard may refuse by it (a reviewer's script may not act); shed never reads it, and no role allows a call the guard would refuse without one |
 | Answers | One line on its stdout: `{"id":7,"allow":true}`, or `{"id":7,"allow":false,"reason":"lanes are stopped with drover kill"}`. One call is asked at a time, in call order, so a guard is a loop: read a line, write a line. The calls of one `Promise.all` are asked one after another and then run together |
 | Allowed | Only by a line that parses, carries this call's `id` and says `"allow":true`, within the timeout |
 | Refused | `"allow":false`: `GUARD_REFUSED` with its `reason` (at most 400 characters). It cannot start, ends before it answers, or its line is not JSON or carries another `id`: `GUARD_FAILED`. No line within `guard_timeout`: `GUARD_TIMEOUT`. After either of the last two its group is ended, so a guard that lost its place is never asked again. No `guard` key: `NO_GUARD` |
@@ -558,8 +618,14 @@ with the schemas it refers to, so one call is enough to write a correct one.
 | runs stepping at once | the server's worker threads less one (3 of 4; 1 on a single core) | the server, a permit per slice | none: a run waits its turn, a slice at a time |
 | reply | `REPLY_LIMIT`, 8 MiB as one line | the server | `REPLY_LIMIT`: an error that says to return less, with the logs; never a cut reply |
 
-The reply is `{result, logs, calls, ms}`, or `{error, logs, calls, ms}`. Only the deadline is the
-caller's to set. The engine reads no clock, so the same program with the same answers takes the same
+The reply is `{result, logs, calls, acting, ms}`, or `{error, logs, calls, acting, ms}`. `acting` lists
+every call of a guarded method the run made, in call order, each `{method, params, result}` or, refused
+or failed, `{method, params, error: {code, message}}`; a call still in flight when the run stopped is
+listed with `error` `CANCELLED`. It counts toward `REPLY_LIMIT` like the rest. Over the limit the reply is
+the `REPLY_LIMIT` error with its logs and `acting`; when those alone still pass it, each `acting` entry
+keeps only `method` and `error` (or `"result":true`) and the message says so, since the caller must still
+learn what acted. The result is never cut. With `check`, the reply is `{result: null, logs: [], calls: 0,
+acting: [], ms}` or a `SyntaxError`. Only the deadline is the caller's to set. The engine reads no clock, so the same program with the same answers takes the same
 steps on every machine, and the fuel and memory tests are exact.
 
 ## Measuring and the gate
@@ -607,15 +673,18 @@ first on `PATH` counts the sessions. It prints the median and the range of each,
 ## The CLI and the skill doc
 
 ```console
-shed script -f <file> [--timeout <S>]     # the file is the program
-shed script - [--timeout <S>]             # stdin is the program
-shed --on <machine> script …              # on that machine's server, one round trip
+shed script -f <file> [--timeout <S>] [--role <R>]   # the file is the program
+shed script - [--timeout <S>] [--role <R>]           # stdin is the program
+shed script --check (-f <file> | -)                  # parse and compile only: no run, no call, no guard
+shed --on <machine> script …                         # on that machine's server, one round trip
 ```
 
 Without `--json`: each log line, then the result (a string as it is, anything else as indented JSON) on
 stdout, then `[N calls, X ms]` on stderr; exit 0. On an error: the logs, then `error: <name> <line>:<column>:
 <message>` on stderr; exit 1. With `--json`: the reply as one line, and the same exit code. It sends
-`caller` as `$SHED` and its working directory. With `--on`, the command goes to the local server with
+`caller` as `$SHED`, its working directory and `--role`. `--check` sends `check: true`: exit 0 when the
+program parses and compiles, else the `SyntaxError` with its line and column and exit 1; nothing runs, so
+it needs no guard and makes no call. With `--on`, the command goes to the local server with
 `machine` when that holds the machine's link, which forwards it on a connection of its own (the shared one
 would hold every other call to that machine for the script's whole run); else it goes over `ssh … shed
 connect`, as `exec` does.
@@ -645,12 +714,41 @@ the real binary over its socket (`crates/shed/tests/script.rs`).
 | `one_guard_process_serves_a_run`, `a_run_of_reads_starts_no_guard`, `the_guard_ends_with_its_run`, `a_wrong_guard_per_refuses` | 50 guarded calls reach one process, which is gone when the reply is; a per-run guard set per call and a hook set per run both refuse |
 | `every_method_has_a_class` | the table in this file equals `Method::in_script` (which also cannot compile without a new method's arm) |
 | `the_2001st_call_stops_the_run`, `logs_stop_at_64k`, `a_reply_over_the_limit_is_an_error_not_a_cut` | `CALLS`, `LOGS` with the logs kept, `REPLY_LIMIT` with a reply that parses |
+| `the_reply_lists_every_acting_call`, `acting_survives_an_error_and_the_deadline`, `acting_over_the_limit_keeps_each_method` | `start.js`'s reply has `run` and `send` with their params and results and no read; `refused.js`'s has `kill` with `GUARD_REFUSED`; a run stopped at the deadline lists its in-flight `exec` as `CANCELLED`; 200 `file.write`s of 64 KiB give a `REPLY_LIMIT` reply that still names all 200 |
+| `check_parses_without_running`, `check_reports_a_syntax_error` | `shed script --check` on `start.js` exits 0 against a server with no `[script]`, and no terminal, event or guard process appears; on a regex literal it exits 1 with the `SyntaxError` at its line and column |
+| `the_guard_gets_the_role`, `a_role_never_allows_more` | `--role rev` reaches the guard's line as `caller.role`, and a guard that refuses by it refuses; a server with no guard refuses an acting call whatever the role |
+| `test262_subset` | the vendored test262 files whose feature tags are all in the subset (below) pass, and each file using a construct outside it fails with the `SyntaxError` naming it |
+| `examples_match_their_goldens` | each worked example, run by the engine against `check.mjs`'s fixture answers, gives exactly the golden reply Node made |
 | `promise_all_runs_its_calls_at_the_same_time` | both calls started before either settled; with 40, at most 32 were in flight |
 | `an_inner_call_is_a_socket_call` | a `run` from a script emits `started`, is in the state file before the reply is written, and fails with the same `INVALID_PARAMS` text as over the socket |
 | `an_unawaited_send_is_sent` | the run drains; its failure is the reply's error |
 | `counts_match_the_baseline`, `counts_stay_under_their_ceilings` | the gate of "Measuring and the gate": each fixed script's steps, peak bytes and collections equal `counts.json` and stay under its ceiling, twice in a row and on Linux and macOS |
 | `no_slice_is_over_10000_units` | with `hold.js` and `spin.js`, no `Run::step` does more than 10,000 steps or units of collecting: a collection of 60 MiB is hundreds of slices, never one |
 | `scripts_never_hold_every_worker` | while 8 scripts spin, at most the worker threads less one are inside `step` at any moment |
+
+## Conformance
+
+Two sources say what the subset means, and neither needs Node in CI.
+
+- **test262, vendored by feature tag.** `crates/shed-script/tests/test262/` holds a copy of the test262
+  files (BSD licence, its `LICENSE` beside them) whose `features:` and syntax use only the subset's
+  constructs, chosen by `scripts/test262-pick.py` from a pinned test262 commit named in its `README`. The
+  picker keeps a file when every feature tag is on the subset's list (`arrow-function`, `async-functions`,
+  `destructuring-binding`, `template`, `let`, `const`, `default-parameters`, `object-spread`,
+  `Promise.all`, `json-superset`, …) and drops any `flags: [module]`, `raw`, `$262` or `eval` use. The
+  harness, `crates/shed-script/tests/test262.rs`, is plain Rust: it runs each file with `harness.js`
+  prepended, test262's `assert`, `Test262Error` and `$DONE` rewritten in the subset (its own `sta.js`
+  uses prototypes), a fake `Host` with no methods and the
+  default limits, and expects a normal end, or for `negative:` files the named error. A second list,
+  `out.txt`, names files with a left-out feature (`class`, `generators`, `regexp-*`, …), each of which must
+  fail with the `SyntaxError` that names the construct. A slice adds the files for what it builds; the
+  picker never edits the harness. Vendored files are tests, not `src/`, so they cost the cap nothing.
+- **Goldens made by Node.** The worked examples' replies are generated, not hand-written: `check.mjs`
+  (here, then `crates/shed-script/tests/golden/make.mjs` from slice 5) runs each example in Node against a
+  fixture host and writes `<name>.reply.json` beside `<name>.js` and its `<name>.host.json` answers.
+  `examples_match_their_goldens` runs the engine with the same answers and compares byte for byte; `ms`
+  is the fixture's clock, so it matches too. Node is needed only to regenerate them, by hand, when an
+  example changes; CI never runs it.
 
 ## Slices
 
@@ -660,20 +758,22 @@ are queued `--perf`.
 
 | | slice | what | lines | total |
 |---|---|---|---|---|
-| 1 | **Parser** | the `shed-script` crate; `lex`, `ast`, `parse`, `error`; every "out" construct's message; the layer, the bans, their fixture and the dependency check | +1,700 | 14,948 |
+| 1 | **Parser** | the `shed-script` crate; `lex`, `ast`, `parse`, `error`; every "out" construct's message; the layer, the bans, their fixture and the dependency check; `scripts/test262-pick.py`, the vendored files and the `test262.rs` harness, which from here on fails a construct the parser does not take | +1,700 | 14,948 |
 | 2 | **Values and heap** | `value`, `heap`: cells, the arena, the byte count, the mark and sweep as a state taken in slices | +550 | 15,498 |
 | 3 | **Compiler and machine** | `compile`, `vm` without promises, `Program`, `Run::step`, `Counts`; fuel and depth; closures, destructuring, `try`/`catch`; the fixed scripts, `counts.json`, `just script-bench` | +1,680 | 17,178 |
-| 4 | **Built-ins** | `builtins/`, `prelude.js` compiled once, `json`; `Pattern` moves to shed-proto (no net lines); memory reserved before allocating; the globals test | +950 | 18,128 |
-| 5 | **Promises and the host** | tasks, `await`, `Promise.*`, `Host`, `Run::settle`, the call and in-flight limits, draining | +400 | 18,528 |
-| 6 | **The server** | `ScriptParams` and friends, `Access`, `Method::Script`; `script.rs` with its loop and the stepping permits; `script/guard.rs`, the guard per run and per call, `[script]`; `runner::held`; the peer-closed watch; `exec` ends its group on drop; the two protocol docs regenerate | +620 | 19,148 |
-| 7 | **The command and the skill** | `shed script`; `script` over a link on its own connection, ended with the run; `shed connect` ends when its reader is gone (rustix's `event` feature, on in shed-core already); `skill/script/` with `methods.md` generated; the examples' test; `scripts/script-remote.sh` and its numbers | +160 | 19,308 |
+| 4 | **Built-ins** | `builtins/`, `prelude.js` compiled once, `json`; `matches` on the `shed-pattern` crate of #193 (blocked on #193; no move, no lines here); memory reserved before allocating; the globals test | +950 | 18,128 |
+| 5 | **Promises and the host** | tasks, `await`, `Promise.*`, `Host` and `HostError`, `Run::settle`, the call and in-flight limits, draining; `check.mjs` moves to `tests/golden/make.mjs`, the goldens and `examples_match_their_goldens` | +400 | 18,528 |
+| 6 | **The server** | `ScriptParams` and friends, `Access`, `Method::Script`; `script.rs` with its loop and the stepping permits; `script/guard.rs`, the guard per run and per call, `[script]`; `runner::held`; the peer-closed watch; `exec` ends its group on drop; `check`, `caller.role` and the reply's `acting` list; the engine's errors to the wire's; the two protocol docs regenerate | +650 | 19,178 |
+| 7 | **The command and the skill** | `shed script` with `--check` and `--role`; `script` over a link on its own connection, ended with the run; `shed connect` ends when its reader is gone (rustix's `event` feature, on in shed-core already); `skill/script/` with `methods.md` generated; the examples' test; `scripts/script-remote.sh` and its numbers | +170 | 19,348 |
 
-Slices 1 to 5 touch no existing file but `Cargo.toml`, `.drover/arch.toml`, the `justfile` (in 3) and, in
-4, the `Pattern` move, so they conflict with nothing in flight. The estimate is 6,060: 230 over the 5,830
-of this ADR's first version, for the guard as one process (+105), `runner::held` (+30), the server's loop
-and permits (+25), the collector in slices (+40) and the counters (+30). PR #205 raises the cap to 20,300
-for staging's 13,248, #194's 47, the client slices' 690 and 5,830 of this, with 485 to spare; with 6,060
-that is 20,045 and 255 to spare. The last design's largest slice landed 43% over its own estimate (#178:
+Slices 1 to 5 touch no existing file but `Cargo.toml`, `.drover/arch.toml` and the `justfile` (in 1 and
+3), so they conflict with nothing in flight; slice 4 waits for #193's `shed-pattern`. The estimate is
+6,100: 270 over the 5,830 of this ADR's first version, for the guard as one process (+105),
+`runner::held` (+30), the server's loop and permits (+25), the collector in slices (+40), the counters
+(+30), and the second amendment's `acting` list, `check`, `role` and error mapping (+40). The test262
+files, their harness and the goldens are tests and cost the cap nothing. PR #205 raises the cap to 20,300
+for staging's 13,248, #194's 47, the client slices' 690 and 5,830 of this, with 485 to spare; with 6,100
+that is 20,085 and 215 to spare, so no slice needs a further raise unless it runs over its estimate. The last design's largest slice landed 43% over its own estimate (#178:
 472 for 330), so a slice here may well cross it; the one that would trims first, then asks with
 `drover cap`'s view, as the cap rule says. drover's side (its guard command, its generated scripts) is
 drover's issue, after slice 7.
