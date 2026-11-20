@@ -291,16 +291,17 @@ None. Decided by the owner on 2026-11-20 (q2649, and the amendment in the issue)
 
 ## `.drover/arch.toml`
 
-Slice 1 adds the layer, lets the server use it, and adds the bans that make "pure" a check, with one
-fixture (`ci/fixtures/arch-script-pure`) that breaks them; the bans on processes, sleeping, the clock and
-`env::var` already cover every crate.
+This PR adds the layer, lets the server use it, and adds the bans that make "pure" a check; slice 1 adds
+the fixture (`ci/fixtures/arch-script-pure`) that breaks them. The bans on processes, sleeping, the clock
+and `env::var` already cover every crate. By the amendment below the layer uses `pattern` (#193), not
+`proto`.
 
 ```toml
 [[layer]]
 name = "script"
 paths = ["crates/shed-script/src/**"]
 mods = ["shed_script"]
-may_use = ["proto"]
+may_use = ["pattern"]
 
 [[layer]]
 name = "server"
@@ -334,3 +335,22 @@ the test that reads the folder. New code is new files (`shed-proto/src/script.rs
 `shed-server/src/script.rs` and `script/guard.rs`, `shed/src/script.rs`); the files many PRs edit get a
 few lines each: a `Method` variant and its arms, one `dispatch` arm, one `Command` variant, one function
 in `runner.rs`, two recipes' lines in the `justfile`.
+
+## Amendment: shed-pattern, conformance, `--check`, acting calls, roles
+
+The owner's second amendment (2026-11-20) overrides the text above where they differ:
+
+- **The pattern crate.** The engine uses the `shed-pattern` crate from #193, not shed-proto: `Pattern`
+  does not move to shed-proto. shed-script's dependencies are shed-pattern and serde_json (the method
+  classes stay in shed-proto, used by the server: the engine knows no method name); its layer's `may_use` is `["pattern"]`, and
+  `just deps` checks that list.
+- **Conformance.** A vendored subset of test262, chosen by feature tags (those of the subset's
+  constructs), run by a Rust harness in CI, plus goldens for the four worked examples made by Node. Node is
+  needed only to regenerate them (`check.mjs`), never in CI.
+- **`shed script --check`** parses and compiles without running: no call, no guard; a `SyntaxError` with
+  line and column, or exit 0.
+- **The reply lists every acting call** the run made, each with its method, params and result (or its
+  refusal), as `acting: [{method, params, result}]` beside `{result, logs, calls, ms}`, and counts toward
+  `REPLY_LIMIT` like the rest.
+- **Roles.** The guard may refuse calls by the caller's role (a reviewer's script may not act), as open
+  question 3 says; the role never allows more.
