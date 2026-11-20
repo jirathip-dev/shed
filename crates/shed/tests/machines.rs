@@ -753,6 +753,7 @@ fn exec_and_files(root: &Path, on: &[&str]) {
         (bytes.clone(), 0o640)
     );
     assert_eq!(shed(&["file", "read", path], b"").stdout, bytes);
+    outline_and_lines(&dir, &shed);
 
     let big = dir.join(format!("big{}", on.len()));
     let file = std::fs::File::create(&big).expect("create");
@@ -763,6 +764,45 @@ fn exec_and_files(root: &Path, on: &[&str]) {
     refused(&shed(&flood, b""), "over the reply limit");
     let most = ["exec", "--", "head", "-c", "8388608", "/dev/zero"];
     assert_eq!(shed(&most, b"").stdout.len(), 8 << 20);
+}
+
+fn outline_and_lines(dir: &Path, shed: &dyn Fn(&[&str], &[u8]) -> Output) {
+    let file = dir.join("job.rs");
+    let path = file.to_str().expect("utf-8 path");
+    let source = "struct Job {\n    id: u64,\n}\n\nimpl Job {\n    fn run(&self) {}\n}\n";
+    std::fs::write(&file, source).expect("write");
+    let text = shed(&["code", "outline", path], b"");
+    let want = format!(
+        "{path} (rust, 7 lines, 3 symbols)\n  struct Job [1-3]\n  impl Job [5-7]\n    fn run [6-6]\n"
+    );
+    assert_eq!(String::from_utf8_lossy(&text.stdout), want, "{text:?}");
+    let json = shed(&["--json", "code", "outline", path], b"").stdout;
+    let json: Value = serde_json::from_slice(&json).expect("json");
+    assert_eq!(
+        json["symbols"][2],
+        json!({"kind": "fn", "name": "run", "start": 6, "end": 6, "depth": 1})
+    );
+    assert_eq!(
+        (json["lang"].as_str(), json["lines"].as_u64()),
+        (Some("rust"), Some(7))
+    );
+    let span = shed(&["file", "read", path, "--lines", "2-3"], b"").stdout;
+    assert_eq!(span, b"    id: u64,\n}\n");
+    assert_eq!(
+        shed(&["file", "read", path, "--lines", "7"], b"").stdout,
+        b"}\n"
+    );
+    assert!(
+        shed(&["file", "read", path, "--lines", "8-9"], b"")
+            .stdout
+            .is_empty()
+    );
+    let missing = shed(&["code", "outline", &format!("{path}.gone")], b"");
+    let stderr = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        !missing.status.success() && stderr.contains("IO: ") && stderr.contains(".gone"),
+        "{stderr}"
+    );
 }
 
 #[test]
