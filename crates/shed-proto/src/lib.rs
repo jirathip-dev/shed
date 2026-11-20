@@ -425,7 +425,7 @@ impl Method {
             }
             Self::Get => "One terminal.",
             Self::Read => {
-                "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`."
+                "The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. Every read returns a `cursor`; with `since: <cursor>` only what is new: the lines that scrolled off since (`lost: N` when scrollback dropped N of them first), then the screen only when it changed (`changed`), so nothing new is an empty `text`. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`, or with `since` only those after its `seq`."
             }
             Self::Send => {
                 "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is."
@@ -692,7 +692,7 @@ pub struct Target {
 }
 
 /// `read` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ReadParams {
     /// The terminal's name.
@@ -712,10 +712,23 @@ pub struct ReadParams {
     /// With `events`: only the last N.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub n: Option<usize>,
+    /// Only what came after this `cursor` of an earlier `read` (ACP: the events after its `seq`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<Cursor>,
+}
+
+/// A place in a terminal's output, as `read` returns it.
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Cursor {
+    /// The lines that have scrolled off the screen so far (ACP: the transcript's last `seq`).
+    pub seq: u64,
+    /// A hash of the visible screen's text (ACP: 0).
+    pub screen: u32,
 }
 
 /// `read` result.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ReadResult {
     /// Plain text, one line per row, trailing blanks dropped.
@@ -723,6 +736,14 @@ pub struct ReadResult {
     /// With `events`: the transcript's events, in order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Logged>,
+    /// Where this read ends: the next `read`'s `since`.
+    pub cursor: Cursor,
+    /// With `since`: lines that scrolled off after it but are no longer kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lost: Option<u64>,
+    /// With `since`: the screen changed, and `text` ends with it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub changed: bool,
 }
 
 /// One event of an ACP terminal's transcript.

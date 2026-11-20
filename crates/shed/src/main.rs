@@ -549,9 +549,9 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
                 history,
                 events,
                 before,
-                n: lines.filter(|_| events),
+                ..ReadParams::default()
             };
-            read(&server, json, &params)?;
+            read(&server, json, params)?;
         }
         Command::Send(args) => send(&server, json, args)?,
         Command::Approve(args) => approve(&server, json, args)?,
@@ -713,8 +713,9 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
     shed_server::relay(&paths.socket).context("shed connect")
 }
 
-fn read(server: &Server, json: bool, params: &ReadParams) -> anyhow::Result<()> {
-    let mut read: ReadResult = server.connect(None)?.call(Method::Read, params)?;
+fn read(server: &Server, json: bool, mut params: ReadParams) -> anyhow::Result<()> {
+    params.n = params.lines.filter(|_| params.events);
+    let mut read: ReadResult = server.connect(None)?.call(Method::Read, &params)?;
     if params.events && !json {
         let mut preview = shed_server::lane::transcript::Preview::default();
         for e in read.events.drain(..) {

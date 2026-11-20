@@ -7,7 +7,7 @@ shell
 $ shed read shell
 $
 $ shed --json read shell --lines 1
-{"text":"$"}
+{"text":"$","cursor":{"seq":0,"screen":2481876803}}
 $ shed send shell exit
 $ shed ls
 NAME   STATE   EXIT  PID  RSS  CPU  LABELS             CMD

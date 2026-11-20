@@ -207,6 +207,9 @@ All notable changes to this project are documented here. The format follows
   (about 120 MB less per awake lane). It is off by default; a host turns it on with `driver = "stream"` in
   its own `providers/claude.toml`. Lanes with policy `ask`, another command or an unmapped `--meta` option
   stay on ACP. What a client sees differently is in docs/acp.md, "The stream driver".
+- `read` returns a `cursor`, and `read` with `since: <cursor>` returns only what is new: the lines that
+  scrolled off since, then the screen only when it changed (`changed`). Lines scrollback dropped before
+  they were read are counted in `lost`. ACP terminals take `since` for their events by `seq`.
 
 ### Changed
 
