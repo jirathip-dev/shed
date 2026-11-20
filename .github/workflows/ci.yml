@@ -31,6 +31,8 @@ jobs:
         run: just clippy
       - name: banned APIs (one fixture per ban; clippy rejects each)
         run: just banned
+      - name: a live shed's folder in the system temp dir, which temp-left must not see (#220)
+        run: mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"
       - name: test
         run: just test
       - name: tests leave no temp folders (no shed-* in the temp dir)

@@ -1,7 +1,7 @@
 #!/bin/sh
-# Tests leave no temp folders: none named shed-* in DIR (default $TMPDIR, else /tmp) after `cargo test`.
+# Tests leave no temp folders: none named shed-* in DIR (default target/test-tmp, the tests' own temp dir) after `just test`.
 set -eu
-dir=${1:-${TMPDIR:-/tmp}}
+dir=${1:-target/test-tmp/}
 left=$(ls -a "$dir" | grep '^shed-' || true)
 if [ -n "$left" ]; then
   echo "$left"
