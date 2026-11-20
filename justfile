@@ -86,6 +86,7 @@ arch:
     cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-pattern && ! drover arch-check --config ../../../.drover/arch.toml
+    for d in ci/fixtures/arch-script-pure/*/; do (cd "$d" && ! drover arch-check --config ../../../../.drover/arch.toml) || exit 1; done
 
 # The lesson checks in .drover/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:

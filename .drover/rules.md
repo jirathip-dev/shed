@@ -9,7 +9,7 @@
 - Don't add a dependency with a disallowed licence, an advisory or a duplicate version. Enforcer: `just deny` (deny.toml).
 - Don't grow the non-test Rust lines in crates/*/src past `line_cap`. Enforcer: `just cap` (ci/cap.toml).
 - Don't make shed-core depend on another workspace crate. Enforcer: `just deps` (scripts/dep-direction.sh).
-- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, script uses pattern, server uses core, proto, pattern and script, cli uses server; shed-pattern reads no file). Enforcer: `just arch` (.drover/arch.toml).
+- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, script uses proto and pattern, server uses core, proto, pattern and script, cli uses server; shed-pattern reads no file). Enforcer: `just arch` (.drover/arch.toml).
 - Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.drover/arch.toml).
 - Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.drover/arch.toml).
 - Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.drover/arch.toml).
