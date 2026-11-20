@@ -44,8 +44,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use shed_core::proctree::ProcessTable as _;
-use shed_core::{Pattern, STATES, Terminal, Wake};
+use shed_core::{STATES, Terminal, Wake};
 pub use shed_core::{clock, proctree, runner};
+use shed_pattern::Pattern;
 pub use shed_proto as proto;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _};
 
