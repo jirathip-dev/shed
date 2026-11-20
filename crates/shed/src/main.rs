@@ -32,7 +32,7 @@ use shed_server::proto::{
     RunParams, SendParams, SessionRecord, State, StateParams, StatsParams, Target, TerminalInfo,
     WaitOutcome, WaitParams, WaitResult,
 };
-use shed_server::{Client, Paths};
+use shed_server::{Client, Paths, config};
 
 #[derive(Parser)]
 #[command(version = shed_server::proto::LONG_VERSION)]
@@ -245,6 +245,7 @@ struct Server<'a> {
     dir: Option<&'a Path>,
     on: Option<Machine>,
     linked: bool,
+    deadline: Option<Duration>,
 }
 
 impl Server<'_> {
@@ -305,6 +306,7 @@ impl Server<'_> {
             dir,
             on,
             linked,
+            deadline: matches!(command, Command::State { .. }).then(config::state_timeout),
         };
         if let Some(name) = command.terminal() {
             *name = server.name(std::mem::take(name));
@@ -348,7 +350,7 @@ impl Server<'_> {
                     autostart == Some(true),
                 )?)
             }
-            _ => connect(self.paths, self.dir, autostart),
+            _ => connect(self.paths, self.dir, autostart, self.deadline),
         }
     }
 }
@@ -708,7 +710,7 @@ fn relay(paths: &Paths, dir: Option<&Path>, autostart: bool) -> anyhow::Result<(
                 paths.socket.display()
             );
         }
-        connect(paths, dir, Some(true))?;
+        connect(paths, dir, Some(true), None)?;
     }
     shed_server::relay(&paths.socket).context("shed connect")
 }
@@ -1192,8 +1194,13 @@ fn raw<T: Serialize>(json: bool, value: &T, stdout: &[u8], stderr: &[u8]) -> any
     Ok(())
 }
 
-fn connect(paths: &Paths, dir: Option<&Path>, autostart: Option<bool>) -> anyhow::Result<Client> {
-    match Client::connect(&paths.socket) {
+fn connect(
+    paths: &Paths,
+    dir: Option<&Path>,
+    autostart: Option<bool>,
+    deadline: Option<Duration>,
+) -> anyhow::Result<Client> {
+    match Client::connect_within(&paths.socket, deadline) {
         Err(shed_server::Error::Io(e))
             if matches!(
                 e.kind(),

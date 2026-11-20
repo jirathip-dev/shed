@@ -67,6 +67,9 @@ pub enum Error {
     /// The server closed the connection or sent something that is not a response.
     #[error("bad response from the server: {0}")]
     BadResponse(String),
+    /// The server sent no answer within the client's deadline (`$SHED_STATE_TIMEOUT` for `shed state`).
+    #[error("no answer from the server within {0:?} ($SHED_STATE_TIMEOUT)")]
+    Deadline(Duration),
     /// The ACP agent could not start or failed the handshake.
     #[error("acp: {0}")]
     Acp(String),
@@ -988,6 +991,15 @@ impl Client {
         Self::over(UnixStream::connect(socket)?)
     }
 
+    /// As [`Client::connect`], but each answer, the handshake's too, must come within `deadline`.
+    /// # Errors
+    /// As [`Client::connect`]; [`Error::Deadline`] when an answer is late.
+    pub fn connect_within(socket: &Path, deadline: Option<Duration>) -> Result<Self, Error> {
+        let stream = UnixStream::connect(socket)?;
+        stream.set_read_timeout(deadline)?;
+        Self::over(stream)
+    }
+
     /// Speaks the protocol over `writer`, a connected stream (a socket, or one end of a socketpair
     /// whose other end is `ssh … shed connect`), and checks the server speaks this protocol.
     ///
@@ -1032,7 +1044,8 @@ impl Client {
         self.writer.write_all(b"\n")?;
         self.writer.flush()?;
         let mut reply = String::new();
-        if self.reader.read_line(&mut reply)? == 0 {
+        let read = self.reader.read_line(&mut reply);
+        if read.map_err(|e| self.late(e))? == 0 {
             return Err(Error::BadResponse("connection closed".to_owned()));
         }
         let response: Response = serde_json::from_str(&reply)?;
@@ -1043,6 +1056,13 @@ impl Client {
             (_, Some(e)) => Err(Error::Rpc(e)),
             (Some(result), None) => Ok(serde_json::from_value(result)?),
             (None, None) => Err(Error::BadResponse("neither result nor error".to_owned())),
+        }
+    }
+
+    fn late(&self, e: io::Error) -> Error {
+        match self.reader.get_ref().read_timeout() {
+            Ok(Some(d)) if e.kind() == io::ErrorKind::WouldBlock => Error::Deadline(d),
+            _ => Error::Io(e),
         }
     }
 

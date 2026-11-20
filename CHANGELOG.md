@@ -262,3 +262,5 @@ All notable changes to this project are documented here. The format follows
   the unit `shed install` writes has `OOMPolicy=continue` (`shed install --force` updates an older one).
   `--autostart` starts the installed job instead of a server outside it, and `shed doctor` flags a server
   that answers while the job is not loaded.
+- `shed state` (and the agent hooks that run it) gives up after 2 s with a nonzero exit when the server
+  accepts but never answers, instead of hanging; `$SHED_STATE_TIMEOUT` sets the seconds.

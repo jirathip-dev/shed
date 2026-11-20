@@ -47,6 +47,15 @@ pub fn sessions_keep() -> u64 {
     days.unwrap_or(30u64).saturating_mul(86_400)
 }
 
+/// How long `shed state` waits for the server's answer: `$SHED_STATE_TIMEOUT` seconds, else 2.
+#[must_use]
+pub fn state_timeout() -> std::time::Duration {
+    let secs = var("SHED_STATE_TIMEOUT").and_then(|s| s.parse().ok());
+    let deadline = secs.and_then(|s| std::time::Duration::try_from_secs_f64(s).ok());
+    let deadline = deadline.filter(|d| !d.is_zero());
+    deadline.unwrap_or(std::time::Duration::from_secs(2))
+}
+
 /// How many of an agent's last sessions `agents` takes medians over: `$SHED_MEDIAN_OF`, else 20.
 #[must_use]
 pub fn median_of() -> usize {
