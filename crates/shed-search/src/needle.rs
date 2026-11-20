@@ -1,5 +1,3 @@
-//! Fixed text in bytes, by Horspool's skip table, in exact or any ASCII case.
-
 pub(crate) struct Needle {
     bytes: Vec<u8>,
     skip: [usize; 256],

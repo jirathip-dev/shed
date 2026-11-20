@@ -1,5 +1,3 @@
-//! `.gitignore` rules and globs, on paths relative to the folder a rule file is in.
-
 pub(crate) struct Rule {
     base: String,
     pub(crate) negated: bool,

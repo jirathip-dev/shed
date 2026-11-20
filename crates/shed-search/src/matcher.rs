@@ -1,5 +1,3 @@
-//! A query to the matched lines of one file: needles first, the engine only on lines that hold one.
-
 use std::borrow::Cow;
 use std::ops::Range;
 
