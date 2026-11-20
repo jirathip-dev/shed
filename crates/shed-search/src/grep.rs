@@ -69,7 +69,12 @@ pub fn grep(
 fn group(symbols: &[Symbol], hay: &[u8], hits: Vec<Hit>, max: usize) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
     for hit in hits {
-        let line = clip(text(hay, &hit.bytes).into_owned(), hit.n, hit.bytes.len(), max);
+        let line = clip(
+            text(hay, &hit.bytes).into_owned(),
+            hit.n,
+            hit.bytes.len(),
+            max,
+        );
         let scope: Vec<Symbol> = symbols
             .iter()
             .filter(|s| s.start <= hit.n && hit.n <= s.end)
