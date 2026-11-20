@@ -1,0 +1,3 @@
+{"args":["turn","done"],"lane":"berth:206:impl","ts":1795188013882}
+{"args":["turn","done"],"lane":"berth:206:impl","ts":1795188472858}
+{"args":["turn","blocked","--why","turn done never reaches the main host: two 'turn done' lines (ts 1795188013882, 1795188472858) sit undelivered in .drover/outbox.jsonl for 8+ min. Gate checks pass locally at pushed head bfa31fe (arch-check 0 violations, cargo fmt --check 0, PR #224 body names the sha, has For humans, no Generated-with). Needs the outbox delivery fixed or turn done run from the main host."],"lane":"berth:206:impl","ts":1795188697249}
