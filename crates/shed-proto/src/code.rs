@@ -1,3 +1,5 @@
+//! The `code.*` params and results, re-exported at the crate root.
+
 use std::path::PathBuf;
 
 #[cfg(feature = "schema")]

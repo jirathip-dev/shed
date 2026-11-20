@@ -18,7 +18,7 @@ use serde_json::Value;
 #[cfg(feature = "schema")]
 use serde_json::json;
 
-mod code;
+pub mod code;
 pub use code::{Kind, Lang, OutlineParams, OutlineResult, Span, Symbol};
 
 /// The shed version.
