@@ -22,6 +22,12 @@ mods = ["shed_pattern"]
 may_use = []
 
 [[layer]]
+name = "search"
+paths = ["crates/shed-search/src/**"]
+mods = ["shed_search"]
+may_use = ["pattern", "proto"]
+
+[[layer]]
 name = "script"
 paths = ["crates/shed-script/src/**"]
 mods = ["shed_script"]
@@ -31,7 +37,7 @@ may_use = ["pattern"]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto", "pattern", "script"]
+may_use = ["core", "proto", "pattern", "search", "script"]
 
 [[layer]]
 name = "cli"
@@ -124,9 +130,15 @@ reason = "the script engine is pure: it reaches the outside only through Host"
 
 [[ban]]
 pattern = "fs::"
-paths = ["crates/shed-pattern/src/**"]
+paths = ["crates/shed-search/src/**", "crates/shed-pattern/src/**"]
+except = ["crates/shed-search/src/walk.rs"]
+reason = "shed-search reads files only in walk.rs; shed-pattern reads none"
+
+[[ban]]
+pattern = "std::net"
+paths = ["crates/shed-search/src/**", "crates/shed-pattern/src/**"]
 except = []
-reason = "shed-pattern reads no file"
+reason = "search and patterns open no socket"
 
 [[size]]
 paths = ["crates/*/src/**/*.rs"]

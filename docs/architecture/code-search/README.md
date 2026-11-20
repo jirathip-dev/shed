@@ -346,10 +346,10 @@ tabs and spaces.
 
 ### Goldens
 
-The inputs are in [golden/](golden/), named `sample.<ext>.in` so `just comments` does not read the Rust one
-as source. Each `.outline` beside them is what the prototype prints today. The impl moves the folder to
-`crates/shed-search/tests/golden/` and its test globs it: an outline golden is `lang::outline` on the text,
-a grep or find golden runs on a temp copy without the `.in`.
+The outline inputs are in [crates/shed-search/tests/golden/](../../../crates/shed-search/tests/golden/),
+named `sample.<ext>.in` so `just comments` does not read the Rust one as source; each `.outline` beside them
+is the text outline, and the crate's test globs them as `lang::outline` on the text. The grep and find
+goldens stay in [golden/](golden/) until their slices move them; each runs on a temp copy without the `.in`.
 
 <table><tr><td>
 

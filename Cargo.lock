@@ -1042,6 +1042,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "shed-search"
+version = "0.0.0"
+dependencies = [
+ "shed-proto",
+]
+
+[[package]]
 name = "shed-server"
 version = "0.0.0"
 dependencies = [
@@ -1053,6 +1060,7 @@ dependencies = [
  "shed-core",
  "shed-pattern",
  "shed-proto",
+ "shed-search",
  "thiserror",
  "tokio",
  "toml",
