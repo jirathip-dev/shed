@@ -20,8 +20,15 @@ clippy:
 banned:
     scripts/banned.sh
 
+# The tests, in a fresh private temp dir that target/test-tmp links to, so temp-left sees only what they leave.
 test:
-    cargo test --workspace --locked
+    #!/bin/sh
+    set -eu
+    if old=$(readlink target/test-tmp); then rm -rf "${old:?}"; fi
+    mkdir -p target
+    dir=$(mktemp -d /tmp/shed-test.XXXXXX)
+    ln -sfn "$dir" target/test-tmp
+    TMPDIR="$dir" cargo test --workspace --locked
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked

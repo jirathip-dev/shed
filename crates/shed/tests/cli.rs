@@ -199,6 +199,34 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
 }
 
 #[test]
+fn state_gives_up_on_a_server_that_never_answers_within_its_deadline() {
+    let dir = temp_dir("state-deadline");
+    let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
+    let (done, held) = std::sync::mpsc::channel::<()>();
+    let server = std::thread::spawn(move || {
+        let (_stream, _) = listener.accept().expect("accept");
+        held.recv_timeout(Duration::from_secs(10)).ok();
+    });
+    let started = Instant::now();
+    let out = Command::new(SHED)
+        .arg("--dir")
+        .arg(&dir)
+        .args(["state", "t1", "working"])
+        .env("SHED_STATE_TIMEOUT", "0.5")
+        .output()
+        .expect("shed runs");
+    let took = started.elapsed();
+    done.send(()).ok();
+    server.join().expect("fake server");
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "shed: no answer from the server within 500ms ($SHED_STATE_TIMEOUT)\n"
+    );
+    assert!(took < Duration::from_secs(2), "took {took:?}");
+}
+
+#[test]
 fn help_lists_every_command() {
     let help = shed(&["--help"]);
     for cmd in [

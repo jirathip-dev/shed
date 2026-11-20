@@ -1,0 +1,9 @@
+sample.py (python, 50 lines, 8 symbols)
+  class QueueError [10-11]
+  class Queue [14-39]
+    fn __init__ [18-20]
+    fn size [22-24]
+    fn push [26-33]
+    fn drain [35-39]
+  fn fresh [42-42]
+  fn main [45-50]

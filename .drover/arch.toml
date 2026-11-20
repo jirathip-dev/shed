@@ -16,10 +16,16 @@ mods = ["shed_proto"]
 may_use = []
 
 [[layer]]
+name = "script"
+paths = ["crates/shed-script/src/**"]
+mods = ["shed_script"]
+may_use = ["pattern"]
+
+[[layer]]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto"]
+may_use = ["core", "proto", "script"]
 
 [[layer]]
 name = "cli"
@@ -61,6 +67,54 @@ pattern = "Instant::now"
 paths = ["crates/*/src/**"]
 except = ["crates/shed-core/src/clock.rs"]
 reason = "read the time through shed_core::clock"
+
+[[ban]]
+pattern = "std::fs"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "std::net"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "std::os"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "std::io"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "std::thread"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "std::time"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "std::env"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
+
+[[ban]]
+pattern = "tokio::"
+paths = ["crates/shed-script/src/**"]
+except = []
+reason = "the script engine is pure: it reaches the outside only through Host"
 
 [[size]]
 paths = ["crates/*/src/**/*.rs"]

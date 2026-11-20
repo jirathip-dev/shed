@@ -1,0 +1,27 @@
+package queue
+
+import "errors"
+
+const Retries = 3
+
+// ErrFull is returned when the queue has no room.
+var ErrFull = errors.New("queue full")
+
+type Queue struct {
+	jobs  []Job
+	limit int
+}
+
+func (q *Queue) Push(job Job) error {
+	if len(q.jobs) >= q.limit {
+		return ErrFull
+	}
+	q.jobs = append(q.jobs, job)
+	return nil
+}
+
+func retries(
+	job Job,
+) int {
+	return job.Retries
+}
