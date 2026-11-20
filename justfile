@@ -36,8 +36,11 @@ doc:
 deny:
     cargo deny --locked check
 
+# The cap is the newest ci/cap.d/ raise by name, else ci/cap.toml; the fixtures prove both.
 cap:
     scripts/line-cap.sh
+    ! scripts/line-cap.sh ci/fixtures/cap-toml
+    scripts/line-cap.sh ci/fixtures/cap-raise
 
 deps:
     scripts/dep-direction.sh
