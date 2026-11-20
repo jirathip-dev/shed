@@ -247,6 +247,10 @@ All notable changes to this project are documented here. The format follows
   `run --resume` replays shed's own transcript (the agent's replay is dropped), `agents sessions` lists shed's
   sessions without starting the agent, `rm` deletes a session's files, and sessions go
   `$SHED_SESSIONS_KEEP` days (default 30) after their last turn. `session.driver` is new (`acp`).
+- `shed wait --output` takes groups `( … )`, alternation `a|b`, counts `{n,m}`, `\b` and anchors anywhere,
+  on a matcher whose time is bounded by pattern size times line length. `(`, `)`, `|`, and `^` or `$` in
+  the middle of a pattern are now operators; a construct shed lacks (lookaround, backreferences) is an
+  error that names it.
 
 ### Fixed
 

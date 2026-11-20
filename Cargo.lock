@@ -1029,6 +1029,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "shed-pattern"
+version = "0.0.0"
+
+[[package]]
 name = "shed-proto"
 version = "0.0.0"
 dependencies = [
@@ -1047,6 +1051,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shed-core",
+ "shed-pattern",
  "shed-proto",
  "thiserror",
  "tokio",

@@ -861,7 +861,7 @@ pub struct WaitParams {
     /// With `blocked` in `until`: only a block of this kind (`permission`, `question` or `auth`) ends the wait.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    /// A pattern (`.`, `[…]`, `\d \w \s`, `* + ?`, `^ $`) that ends the wait when a screen line matches.
+    /// A pattern (`.`, `[…]`, `\d \w \s`, `( | )`, `* + ? {n,m}`, `\b`, `^ $`) that ends the wait when a screen line matches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
     /// Give up after this many seconds; none waits for ever.
