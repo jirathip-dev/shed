@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use super::{arg, nth, place};
+use crate::Host;
 use crate::value::{Cell, Handle, Value};
 use crate::vm::{Done, Flow, Run, count, full, type_error};
 
 const FLAT_DEPTH: usize = 200;
 
-impl Run {
+impl<H: Host> Run<'_, H> {
     pub(crate) fn copy(&mut self, items: Vec<Value>) -> Done<Value> {
         self.touch(items.len())?;
         self.alloc(Cell::Array(items))

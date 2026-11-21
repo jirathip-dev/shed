@@ -1,6 +1,8 @@
 //! shed's script engine: a JavaScript subset parsed, compiled and run on a machine of its own.
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::ast::Pos;
@@ -12,6 +14,7 @@ pub mod heap;
 mod json;
 mod lex;
 mod parse;
+mod task;
 pub mod value;
 pub mod vm;
 
@@ -45,6 +48,26 @@ impl Program {
     }
 }
 
+/// What a script can reach: shed's methods, by wire name. The engine's only way out.
+pub trait Host: Sync {
+    /// Starts one call; the engine polls it with the others in flight and drops it to cancel.
+    fn call(&self, method: &str, params: serde_json::Value) -> Call<'_>;
+}
+
+/// One call in flight, as the host started it.
+pub type Call<'a> = Pin<Box<dyn Future<Output = Result<serde_json::Value, HostError>> + Send + 'a>>;
+
+/// A call's failure as the engine throws it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostError {
+    /// The error's class: `ShedError` or `GuardError`.
+    pub name: String,
+    /// shed's name for it (`NO_SUCH_TERMINAL`) or the guard's verdict (`GUARD_REFUSED`).
+    pub code: String,
+    /// One line, written to be acted on.
+    pub message: String,
+}
+
 /// A script's error: its class, one line to act on, and where it was thrown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptError {
@@ -56,8 +79,10 @@ pub struct ScriptError {
     pub line: u32,
     /// The column, from 1, in code points.
     pub column: u32,
-    /// The limit that stopped the run (`FUEL`, `MEMORY`, `DEPTH`).
+    /// A shed error's name, a guard's verdict or the limit that stopped the run (`FUEL`).
     pub code: Option<String>,
+    /// The shed method that failed or was refused.
+    pub method: Option<String>,
 }
 
 pub(crate) fn syntax<T>(pos: Pos, message: impl Into<String>) -> Result<T, ScriptError> {
@@ -67,6 +92,7 @@ pub(crate) fn syntax<T>(pos: Pos, message: impl Into<String>) -> Result<T, Scrip
         line: pos.line,
         column: pos.column,
         code: None,
+        method: None,
     })
 }
 

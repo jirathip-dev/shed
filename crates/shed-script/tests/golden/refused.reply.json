@@ -1,0 +1,1 @@
+{"error":{"name":"GuardError","message":"kill refused by the guard: lanes are stopped with drover kill","line":2,"column":12,"code":"GUARD_REFUSED","method":"kill"},"logs":[],"calls":1,"acting":[{"method":"kill","params":{"name":"impl-190"},"error":{"code":"GUARD_REFUSED","message":"kill refused by the guard: lanes are stopped with drover kill"}}],"ms":21}

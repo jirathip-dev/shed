@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use shed_pattern::Pattern;
 
 use super::{arg, nth, place};
+use crate::Host;
 use crate::value::{Cell, Value};
 use crate::vm::{Done, Flow, Run, count, type_error};
 
@@ -18,7 +19,7 @@ fn chars_in(s: &str, bytes: usize) -> usize {
     s.get(..bytes).map_or(0, |p| p.chars().count())
 }
 
-impl Run {
+impl<H: Host> Run<'_, H> {
     pub(crate) fn string_method(&mut self, name: &str, this: Value, args: &[Value]) -> Done<Value> {
         let s = self.str(this).unwrap_or_default().to_owned();
         self.touch(s.len() / 64)?;

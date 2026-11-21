@@ -1,20 +1,33 @@
 //! The fixed scripts' gate (exact counts, and ceilings) and `just script-bench`'s report of targets 3, 4 and 5, and big.js's hold.
 #![cfg(test)]
 
-use std::path::Path;
+#[path = "common/answers.rs"]
+mod answers;
+mod common;
+
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use shed_script::Program;
 use shed_script::vm::{Counts, Limits, Run, Step};
 
+use common::drive;
+
 const RUNS: usize = 5;
 const SLICE: u64 = 10_000;
 
+fn path(name: &str) -> PathBuf {
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let perf = tests.join("perf").join(name);
+    if perf.exists() {
+        perf
+    } else {
+        tests.join("golden").join(name)
+    }
+}
+
 fn fixed(name: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/perf")
-        .join(name);
-    std::fs::read_to_string(&path).unwrap()
+    std::fs::read_to_string(path(name)).unwrap()
 }
 
 fn report(what: &str, target: &str, mut runs: Vec<f64>) {
@@ -44,9 +57,10 @@ fn parse_ms(code: &str) -> f64 {
 }
 
 fn scripts() -> Vec<(String, String)> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/perf");
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .unwrap()
+    let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut names: Vec<String> = ["perf", "golden"]
+        .iter()
+        .flat_map(|dir| std::fs::read_dir(tests.join(dir)).unwrap())
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
         .filter(|name| Path::new(name).extension().is_some_and(|e| e == "js"))
         .collect();
@@ -60,15 +74,12 @@ fn ceiling(code: &str) -> Option<(u64, usize)> {
     Some((steps.parse().unwrap(), bytes.parse().unwrap()))
 }
 
-fn counts(code: &str) -> Counts {
+fn counts(code: &str, name: &str) -> Counts {
     let program = Program::parse(code).unwrap();
-    let mut run = Run::new(&program, Limits::default());
-    loop {
-        if let Step::Done(outcome) = run.step() {
-            outcome.unwrap();
-            return run.counts();
-        }
-    }
+    let host = answers::fixture(&path(name));
+    let mut run = Run::new(&program, Limits::default(), &host);
+    drive(&mut run, &host).unwrap();
+    run.counts()
 }
 
 fn table() -> String {
@@ -76,10 +87,10 @@ fn table() -> String {
         .into_iter()
         .filter(|(code, _)| ceiling(code).is_some())
         .map(|(code, name)| {
-            let c = counts(&code);
+            let c = counts(&code, &name);
             format!(
-                "  \"{name}\": {{\"steps\": {}, \"peak_bytes\": {}, \"collections\": {}, \"largest_collection\": {}}}",
-                c.steps, c.peak_bytes, c.collections, c.largest_collection
+                "  \"{name}\": {{\"steps\": {}, \"peak_bytes\": {}, \"collections\": {}, \"largest_collection\": {}, \"calls\": {}}}",
+                c.steps, c.peak_bytes, c.collections, c.largest_collection, c.calls
             )
         })
         .collect();
@@ -108,7 +119,7 @@ fn counts_stay_under_their_ceilings() {
         let Some((steps, peak_bytes)) = ceiling(&code) else {
             continue;
         };
-        let c = counts(&code);
+        let c = counts(&code, &name);
         assert!(
             c.steps <= steps,
             "{name}: {} steps, over its ceiling of {steps}",
@@ -132,7 +143,8 @@ struct Timed {
 
 fn timed(code: &str) -> Timed {
     let program = Program::parse(code).unwrap();
-    let mut run = Run::new(&program, Limits::default());
+    let host = common::Fixture::default();
+    let mut run = Run::new(&program, Limits::default(), &host);
     let (started, mut slice, mut collection, mut longest) = (
         Instant::now(),
         Duration::ZERO,
@@ -189,6 +201,26 @@ fn speed_report() {
         "target 5: hold.js, the longest collection",
         "at most 150 ms",
         holds.iter().map(|t| ms(t.collection)).collect(),
+    );
+}
+
+fn per_call_us(name: &str) -> f64 {
+    let program = Program::parse(&fixed(name)).unwrap();
+    let host = answers::fixture(&path(name));
+    let started = Instant::now();
+    let mut run = Run::new(&program, Limits::default(), &host);
+    drive(&mut run, &host).unwrap();
+    let calls = f64::from(u32::try_from(run.counts().calls).unwrap());
+    started.elapsed().as_secs_f64() * 1e6 / calls
+}
+
+#[test]
+#[ignore = "timed: run by `just script-bench`, in release"]
+fn speed_report_promises() {
+    report(
+        "fan.js, µs a call (2,000 calls, 32 in flight)",
+        "at most 20 µs",
+        (0..RUNS).map(|_| per_call_us("fan.js")).collect(),
     );
 }
 

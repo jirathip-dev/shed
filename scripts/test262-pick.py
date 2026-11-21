@@ -25,6 +25,7 @@ FEATURES = {
     "String.prototype.at", "String.prototype.endsWith", "String.prototype.includes", "String.prototype.replaceAll",
     "String.prototype.trimEnd", "String.prototype.trimStart", "Array.prototype.at", "Array.prototype.flat",
     "Array.prototype.flatMap", "Array.prototype.includes", "Object.fromEntries", "Object.hasOwn",
+    "async-functions", "Promise", "Promise.allSettled",
 }
 MEMBERS = {
     "Object": "keys values entries fromEntries assign hasOwn",
@@ -33,12 +34,13 @@ MEMBERS = {
     "Number": "isInteger isFinite",
     "Math": "min max floor ceil round trunc abs sign sqrt pow",
     "JSON": "parse stringify",
+    "Promise": "all allSettled race resolve reject",
 }
 METHODS = (
     "at charAt slice substring split trim trimStart trimEnd startsWith endsWith includes indexOf lastIndexOf "
     "toLowerCase toUpperCase replace replaceAll padStart padEnd repeat concat localeCompare matches toBytes "
     "push pop shift unshift join reverse flat entries map filter forEach find findIndex some every reduce "
-    "flatMap sort sameValue notSameValue throws compareArray " + " ".join(MEMBERS.values())
+    "flatMap sort then catch sameValue notSameValue throws throwsAsync compareArray " + " ".join(MEMBERS.values())
 )
 BUILTIN_DIRS = [
     "Array/isArray", "Array/from", "Boolean", "JSON/parse", "JSON/stringify", "Number/isFinite", "Number/isInteger",
@@ -50,10 +52,10 @@ BUILTIN_DIRS = [
     f"String/prototype/{m}" for m in "at charAt slice substring split trim trimStart trimEnd startsWith endsWith "
     "includes indexOf lastIndexOf toLowerCase toUpperCase replace replaceAll padStart padEnd repeat concat "
     "localeCompare".split()
-]
+] + [f"Promise/{m}" for m in MEMBERS["Promise"].split()] + ["Promise/prototype/then", "Promise/prototype/catch"]
 OUT_FEATURES = {"class": "class", "generators": "generator", "regexp-named-groups": "regex"}
-FLAGS = {"onlyStrict", "generated"}
-INCLUDES = {"assert.js", "sta.js", "compareArray.js"}
+FLAGS = {"onlyStrict", "generated", "async"}
+INCLUDES = {"assert.js", "sta.js", "compareArray.js", "asyncHelpers.js"}
 REFUSED = [
     ("syntax:var", r"\bvar\b", "var"),
     ("syntax:this", r"\bthis\b", "this"),
@@ -63,7 +65,7 @@ REFUSED = [
     ("syntax:switch", r"\bswitch\s*\(", "switch"),
     ("syntax:do", r"\bdo\b", "do"),
     ("syntax:for-in", r"\bfor\s*\((?:\s*(?:let|const)\s+)?\w+\s+in\b", "for … in"),
-    ("syntax:finally", r"\bfinally\b", "finally"),
+    ("syntax:finally", r"\bfinally\s*\{", "finally"),
     ("syntax:with", r"\bwith\s*\(", "with"),
     ("syntax:delete", r"\bdelete\b", "delete"),
     ("syntax:void", r"\bvoid\b", "void"),
@@ -78,7 +80,6 @@ REFUSED = [
     ("syntax:debugger", r"\bdebugger\b", "debugger"),
     ("syntax:escape", r"\\u", "'\\\\'"),
     ("syntax:bitwise", r"~", "bitwise"),
-    ("syntax:await", r"\bawait\b", "await"),
 ]
 DIFFERS = [
     ("differs: no temporal dead zone", r"before-initiali[sz]ation|tdz"),
@@ -100,9 +101,11 @@ DIFFERS = [
      r"|supplementary_plane))"),
     ("differs: no prototypes", r"rest-parameters/rest-parameters-produce-an-array"),
     ("differs: a key is a string or a number", r"optional-chain-expression-optional-expression"
-     r"|cpn-obj-lit-computed-property-name-from-(?:arrow-function-expression|function-declaration"
+     r"|cpn-obj-lit-computed-property-name-from-(?:async-)?(?:arrow-function-expression|function-declaration"
      r"|function-expression|null)\.js"),
     ("differs: a name is declared once in a block", r"recursive-array-and-object-patterns"),
+    ("differs: await is a reserved word everywhere", r"await/await-in-function\.js"),
+    ("differs: for … of declares its binding", r"for-of/head-lhs-"),
     ("syntax:tagged-template", r"tagged-template/"),
     ("harness:eval", r"^language/eval-code/"),
 ]
@@ -120,10 +123,9 @@ SKIPPED = [
     ("differs: functions have no .name or .length",
      rf"\.\s*(?:{METHODS.replace(' ', '|')})\s*\.\s*(?:length|name)\b"),
     ("harness:eval", r"\beval\b|\bFunction\s*\("),
-    ("harness:$DONE", r"\$DONE|\basyncTest\b"),
     ("syntax:comma", r"\bfor\s*\([^;)]*,[^;)]*;"),
     ("builtins: one the subset lacks",
-     r"\b(?:Promise|Symbol|Reflect|Proxy|Map|Set|WeakMap|WeakSet|WeakRef|Function|Date|RegExp|BigInt|ArrayBuffer"
+     r"\b(?:Symbol|Reflect|Proxy|Map|Set|WeakMap|WeakSet|WeakRef|Function|Date|RegExp|BigInt|ArrayBuffer"
      r"|SharedArrayBuffer|DataView|Atomics|globalThis|isFinite|encodeURI|encodeURIComponent|decodeURI"
      r"|decodeURIComponent|escape|unescape|arguments|\w*Int\d+Array|Uint8ClampedArray|Float\d+Array|TypedArray"
      r"|Iterator|AggregateError|EvalError|URIError|console)\b"),
@@ -132,8 +134,8 @@ SKIPPED = [
         rf"\b{owner}\s*\.\s*(?!(?:{names.replace(' ', '|')})\b)[\w$]+" for owner, names in MEMBERS.items())),
     ("builtins: a method the subset lacks",
      rf"(?:\b(?!assert\b)[\w$]+|[\])'])\s*\.\s*(?!(?:{METHODS.replace(' ', '|')})\b)[\w$]+\s*\("),
-    ("promises (slice 5)", r"\bawait\b|\basync\b"),
     ("bitwise", r"[^&|]&[^&=]|[^|&]\|[^|=]|\^|~|<<|>>"),
+    ("differs: an object with a then method is a value, not a promise", r"\bthen\s*\(\s*resolve|\bthen\s*:"),
 ]
 
 

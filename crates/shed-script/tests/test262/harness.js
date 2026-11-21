@@ -35,3 +35,22 @@ const assert = {
 const $DONOTEVALUATE = () => {
   throw fail("this test should not have been evaluated")
 }
+const $async = { done: false, error: undefined }
+const $DONE = (error) => {
+  $async.done = true
+  $async.error = error
+}
+const asyncTest = (f) => {
+  f().then(() => $DONE(), (e) => $DONE(e ?? fail("rejected with nothing")))
+}
+assert.throwsAsync = async (expected, f, message) => {
+  try {
+    await f()
+  } catch (e) {
+    if (e === null || typeof e !== "object" || e.name !== expected.name) {
+      throw fail(`expected a ${expected.name}, got ${show(e?.name ?? e)}: ${message ?? ""}`)
+    }
+    return
+  }
+  throw fail(`expected a ${expected.name} to be rejected: ${message ?? ""}`)
+}

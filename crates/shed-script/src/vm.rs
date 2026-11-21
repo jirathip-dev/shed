@@ -1,6 +1,7 @@
 //! The machine: frames kept as data, the step loop in slices, fuel and depth, errors thrown and caught.
 
 use std::cmp::Ordering;
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use serde_json::Value as Json;
@@ -10,8 +11,9 @@ use crate::builtins::{self, prelude};
 use crate::compile::{Code, Compiled, Op};
 use crate::heap::{Full, Heap};
 use crate::json;
-use crate::value::{Builtin, Cell, Handle, Value};
-use crate::{Program, ScriptError};
+use crate::task::Asked;
+use crate::value::{Builtin, Cell, Frame, Handle, Handler, Settled, Value};
+use crate::{Call, Host, HostError, Program, ScriptError};
 
 const SLICE: u64 = 10_000;
 
@@ -24,6 +26,8 @@ pub struct Limits {
     pub memory: usize,
     /// Frames in one task.
     pub depth: usize,
+    /// `shed` calls, refused ones included.
+    pub calls: u64,
     /// Bytes of `console` lines.
     pub logs: usize,
 }
@@ -34,6 +38,7 @@ impl Default for Limits {
             fuel: 50_000_000,
             memory: 64 << 20,
             depth: 200,
+            calls: 2_000,
             logs: 64 << 10,
         }
     }
@@ -50,6 +55,12 @@ pub enum Limit {
     Depth,
     /// Its `console` lines.
     Logs,
+    /// Its `shed` calls.
+    Calls,
+    /// The server's deadline.
+    Deadline,
+    /// The server's reply limit.
+    Reply,
 }
 
 /// What a run cost, exactly: the same program gives the same counts on every machine.
@@ -63,31 +74,19 @@ pub struct Counts {
     pub collections: u64,
     /// The cells and slots the largest collection visited.
     pub largest_collection: u64,
+    /// `shed` calls made, refused ones included.
+    pub calls: u64,
 }
 
 /// What one slice of a run came to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Step {
-    /// It has more to do: call [`Run::step`] again.
+    /// It has more to do: call [`Run::settle`], then [`Run::step`] again.
     More,
+    /// Every task waits on a call: [`Run::settle`] waits for one.
+    Waiting,
     /// It ended: what the program returned, as JSON, or why it stopped.
     Done(Result<Json, ScriptError>),
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Frame {
-    code: usize,
-    pc: usize,
-    base: usize,
-    env: Option<Handle>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Handler {
-    frame: usize,
-    pc: usize,
-    stack: usize,
-    env: Option<Handle>,
 }
 
 pub(crate) enum Flow {
@@ -165,41 +164,65 @@ pub(crate) fn number_text(x: f64) -> String {
     format!("{sign}{body}")
 }
 
-/// One run of a program: its heap, frames and counters. Plain data: drop it to cancel.
-#[derive(Debug)]
-pub struct Run {
+/// One run of a program: its heap, tasks, calls in flight and counters. Drop it to cancel.
+pub struct Run<'h, H: Host> {
+    pub(crate) host: &'h H,
     program: Arc<Compiled>,
     pub(crate) limits: Limits,
     pub(crate) heap: Heap,
     pub(crate) stack: Vec<Value>,
-    frames: Vec<Frame>,
-    handlers: Vec<Handler>,
+    pub(crate) frames: Vec<Frame>,
+    pub(crate) handlers: Vec<Handler>,
+    pub(crate) promise: Handle,
+    pub(crate) main: Handle,
+    pub(crate) main_task: Option<Handle>,
+    pub(crate) ready: VecDeque<(Handle, Settled)>,
+    pub(crate) queued: VecDeque<(Asked, Json)>,
+    pub(crate) flight: Vec<(Asked, Call<'h>)>,
+    pub(crate) answered: VecDeque<(Asked, Result<Json, HostError>)>,
+    pub(crate) calls: u64,
     strings: Vec<Handle>,
     pub(crate) logs: Vec<String>,
     pub(crate) logged: usize,
     pub(crate) steps: u64,
-    retries: u8,
-    done: Option<Result<Json, ScriptError>>,
+    pub(crate) result_pos: Pos,
+    pub(crate) retries: u8,
+    pub(crate) done: Option<Result<Json, ScriptError>>,
 }
 
-impl Run {
-    /// A run of `program`, stopped by `limits`; nothing runs until [`Run::step`].
+impl<'h, H: Host> Run<'h, H> {
+    /// A run of `program`, stopped by `limits`, reaching out through `host`; nothing runs until [`Run::step`].
     #[must_use]
-    pub fn new(program: &Program, limits: Limits) -> Self {
+    pub fn new(program: &Program, limits: Limits, host: &'h H) -> Self {
         let mut run = Self {
+            host,
             program: Arc::clone(&program.compiled),
             limits,
             heap: Heap::new(limits.memory),
             stack: Vec::new(),
             frames: Vec::new(),
             handlers: Vec::new(),
+            promise: Handle(0),
+            main: Handle(0),
+            main_task: None,
+            ready: VecDeque::new(),
+            queued: VecDeque::new(),
+            flight: Vec::new(),
+            answered: VecDeque::new(),
+            calls: 0,
             strings: Vec::new(),
             logs: Vec::new(),
             logged: 0,
             steps: 0,
+            result_pos: Pos { line: 1, column: 1 },
             retries: 0,
             done: None,
         };
+        let Ok(main) = run.promise_cell(0) else {
+            run.stop(Limit::Memory);
+            return run;
+        };
+        (run.promise, run.main) = (main, main);
         let program = Arc::clone(&run.program);
         for text in &program.strings {
             let Ok(handle) = run.heap.alloc(Cell::Str(text.as_ref().into())) else {
@@ -218,7 +241,9 @@ impl Run {
         });
         run
     }
+}
 
+impl<H: Host> Run<'_, H> {
     /// Runs one slice: at most 10,000 steps or units of collecting.
     pub fn step(&mut self) -> Step {
         let (start, mut collected) = (self.steps, 0);
@@ -236,6 +261,12 @@ impl Run {
                 collected += self.heap.collect(&roots, SLICE - units).max(1);
                 continue;
             }
+            if self.frames.is_empty() {
+                if self.resume() {
+                    continue;
+                }
+                break;
+            }
             if self.steps >= self.limits.fuel {
                 self.stop(Limit::Fuel);
                 break;
@@ -248,6 +279,7 @@ impl Run {
         }
         match &self.done {
             Some(done) => Step::Done(done.clone()),
+            None if self.waiting() => Step::Waiting,
             None => Step::More,
         }
     }
@@ -267,16 +299,33 @@ impl Run {
             peak_bytes: heap.peak_bytes.max(self.heap.bytes()),
             collections: heap.collections,
             largest_collection: heap.largest_collection,
+            calls: self.calls,
         }
     }
 
-    fn roots(&self) -> Vec<Handle> {
+    pub(crate) fn roots(&self) -> Vec<Handle> {
         let refs = self.stack.iter().filter_map(|v| v.handle());
         let envs = self.frames.iter().filter_map(|f| f.env);
         let handlers = self.handlers.iter().filter_map(|h| h.env);
+        let ready = self.ready.iter().flat_map(|(task, outcome)| {
+            let value = match outcome {
+                Settled::Fulfilled(v) | Settled::Rejected(v) => v.handle(),
+                Settled::Pending => None,
+            };
+            [Some(*task), value].into_iter().flatten()
+        });
+        let queued = self.queued.iter().map(|(a, _)| a.promise);
+        let flight = self.flight.iter().map(|(a, _)| a.promise);
+        let answered = self.answered.iter().map(|(a, _)| a.promise);
         refs.chain(envs)
             .chain(handlers)
             .chain(self.strings.iter().copied())
+            .chain([self.promise, self.main])
+            .chain(self.main_task)
+            .chain(ready)
+            .chain(queued)
+            .chain(flight)
+            .chain(answered)
             .collect()
     }
 
@@ -294,7 +343,11 @@ impl Run {
     }
 
     pub(crate) fn pos(&self) -> Pos {
-        self.frames
+        self.pos_in(&self.frames)
+    }
+
+    pub(crate) fn pos_in(&self, frames: &[Frame]) -> Pos {
+        frames
             .iter()
             .rev()
             .find(|f| f.code < self.program.code.len())
@@ -302,7 +355,13 @@ impl Run {
             .unwrap_or(Pos { line: 1, column: 1 })
     }
 
-    fn stop(&mut self, limit: Limit) {
+    pub(crate) fn stop(&mut self, limit: Limit) {
+        let pos = match limit {
+            Limit::Deadline | Limit::Reply => self.main_pos(),
+            _ if self.frames.is_empty() => self.main_pos(),
+            _ => self.pos(),
+        };
+        let in_flight = self.drop_calls();
         let (code, message) = match limit {
             Limit::Fuel => (
                 "FUEL",
@@ -332,35 +391,43 @@ impl Run {
                     self.limits.logs
                 ),
             ),
+            Limit::Calls => (
+                "CALLS",
+                format!(
+                    "stopped at {} shed calls: do more in each call, or split the script",
+                    self.limits.calls
+                ),
+            ),
+            Limit::Deadline if in_flight.is_empty() => {
+                ("DEADLINE", "stopped at the deadline".into())
+            }
+            Limit::Deadline => (
+                "DEADLINE",
+                format!(
+                    "stopped at the deadline; in flight: {}",
+                    in_flight.join(", ")
+                ),
+            ),
+            Limit::Reply => (
+                "REPLY_LIMIT",
+                "the reply is over its limit: return less".into(),
+            ),
         };
-        let pos = self.pos();
         self.done = Some(Err(ScriptError {
             name: "LimitError".into(),
             message,
             line: pos.line,
             column: pos.column,
             code: Some(code.into()),
+            method: None,
         }));
     }
 
-    fn flow(&mut self, flow: Flow) {
+    pub(crate) fn flow(&mut self, flow: Flow) {
         let thrown = match flow {
             Flow::Collect => return self.retry(),
             Flow::Limit(limit) => return self.stop(limit),
-            Flow::Return(value) => {
-                let pos = self.pos();
-                self.done = Some(
-                    self.json(value, "result", 0)
-                        .map_err(|message| ScriptError {
-                            name: "TypeError".into(),
-                            message,
-                            line: pos.line,
-                            column: pos.column,
-                            code: None,
-                        }),
-                );
-                return;
-            }
+            Flow::Return(value) => return self.end_task(Settled::Fulfilled(value)),
             Flow::Throw(value) => value,
             Flow::Error(name, message) => match self.error(name, &message) {
                 Ok(value) => value,
@@ -369,9 +436,7 @@ impl Run {
             },
         };
         let Some(h) = self.handlers.pop() else {
-            let pos = self.pos();
-            self.done = Some(Err(self.uncaught(thrown, pos)));
-            return;
+            return self.end_task(Settled::Rejected(thrown));
         };
         self.frames.truncate(h.frame + 1);
         self.stack.truncate(h.stack);
@@ -382,7 +447,7 @@ impl Run {
         self.stack.push(thrown);
     }
 
-    fn retry(&mut self) {
+    pub(crate) fn retry(&mut self) {
         self.retries += 1;
         if self.retries > 2 {
             return self.stop(Limit::Memory);
@@ -417,7 +482,7 @@ impl Run {
         ]))
     }
 
-    fn uncaught(&self, value: Value, pos: Pos) -> ScriptError {
+    pub(crate) fn uncaught(&self, value: Value, pos: Pos) -> ScriptError {
         let field = |key: &str| match self.cell(value) {
             Some(Cell::Object(fields)) => fields
                 .iter()
@@ -425,6 +490,18 @@ impl Run {
                 .and_then(|(_, v)| self.str(*v))
                 .map(str::to_owned),
             _ => None,
+        };
+        let number = |key: &str| match self.cell(value) {
+            Some(Cell::Object(fields)) => match fields.iter().find(|(k, _)| &**k == key) {
+                Some((_, Value::Number(x))) => u32::try_from(index(*x)?).ok(),
+                _ => None,
+            },
+            _ => None,
+        };
+        let (code, method) = (field("code"), field("method"));
+        let (line, column) = match (&code, number("line"), number("column")) {
+            (Some(_), Some(line), Some(column)) => (line, column),
+            _ => (pos.line, pos.column),
         };
         let (name, message) = match (field("name"), field("message")) {
             (Some(name), Some(message)) => (name, message),
@@ -437,9 +514,10 @@ impl Run {
         ScriptError {
             name,
             message,
-            line: pos.line,
-            column: pos.column,
-            code: None,
+            line,
+            column,
+            code,
+            method,
         }
     }
 
@@ -467,6 +545,7 @@ impl Run {
             (_, Some(Cell::Array(_))) => "array",
             (_, Some(Cell::Closure { .. })) | (Value::Method(..), _) => "function",
             (Value::Native(b), _) => builtins::kind(b),
+            (_, Some(Cell::HostPath(_))) => "function",
             _ => "object",
         }
     }
@@ -522,7 +601,7 @@ impl Run {
             .unwrap_or(Value::Undefined)
     }
 
-    fn replace(&mut self, popped: usize, value: Value) {
+    pub(crate) fn replace(&mut self, popped: usize, value: Value) {
         self.stack.truncate(self.stack.len().saturating_sub(popped));
         self.stack.push(value);
     }
@@ -620,6 +699,7 @@ impl Run {
             | Op::RestArray(_)
             | Op::RestObject(_)
             | Op::NewError(_) => self.build_op(op),
+            Op::Await => self.await_value(self.peek(0)),
         }
     }
 
@@ -810,7 +890,15 @@ impl Run {
     fn object_op(&mut self, op: Op) -> Done {
         match op {
             Op::Get(at) => {
-                let v = self.get(self.peek(0), &self.name(at))?;
+                let v = match self.host_path(self.peek(0)) {
+                    Some(base) if base.is_empty() => {
+                        self.alloc(Cell::HostPath(self.name(at).as_ref().into()))?
+                    }
+                    Some(base) => {
+                        self.alloc(Cell::HostPath(format!("{base}.{}", self.name(at)).into()))?
+                    }
+                    None => self.get(self.peek(0), &self.name(at))?,
+                };
                 self.replace(1, v);
             }
             Op::GetIndex => {
@@ -1060,20 +1148,43 @@ impl Run {
         let callee = self.stack.get(at).copied().unwrap_or(Value::Undefined);
         let (function, scope) = match (callee, self.cell(callee)) {
             (_, Some(&Cell::Closure { function, scope })) => (function, scope),
+            (_, Some(Cell::HostPath(path))) => {
+                let path = path.clone();
+                return self.host_call(&path, at, args);
+            }
             (Value::Native(b), _) => return self.native(b, Value::Undefined, at, args),
             (Value::Method(b, this), _) => return self.native(b, Value::Ref(this), at, args),
             _ => return type_error(format!("{} is not a function", self.kind(callee))),
         };
+        self.invoke(function, scope, at, args)
+    }
+
+    pub(crate) fn invoke(
+        &mut self,
+        function: usize,
+        scope: Option<Handle>,
+        at: usize,
+        args: &[Value],
+    ) -> Done {
+        if self.code(function).is_some_and(|c| c.is_async) {
+            return self.spawn(function, scope, at, args);
+        }
         self.enter(function, scope, at, args)
     }
 
     fn native(&mut self, b: Builtin, this: Value, at: usize, args: &[Value]) -> Done {
         let (owner, name) = builtins::names(b);
-        if owner == "array"
-            && let Some(function) = prelude().function(name)
+        let written = if name == "catch" { "then" } else { name };
+        if matches!(owner, "array" | "promise" | "Promise")
+            && let Some(function) = prelude().function(written)
         {
-            let args: Vec<Value> = std::iter::once(this).chain(args.iter().copied()).collect();
-            return self.enter(self.program.code.len() + function, None, at, &args);
+            let lead = match (owner, name) {
+                ("Promise", _) => &[][..],
+                (_, "catch") => &[this, Value::Undefined][..],
+                _ => &[this][..],
+            };
+            let args: Vec<Value> = lead.iter().chain(args).copied().collect();
+            return self.invoke(self.program.code.len() + function, None, at, &args);
         }
         let v = self.builtin(owner, name, this, args)?;
         self.replace(self.stack.len().saturating_sub(at), v);
@@ -1210,6 +1321,7 @@ impl Run {
                 Err(_) => builtins::method("array", name, object),
             },
             Some(Cell::Str(_)) => builtins::method("string", name, object),
+            Some(Cell::Promise { .. }) => builtins::method("promise", name, object),
             _ if matches!(object, Value::Undefined | Value::Null) => {
                 return type_error(format!(
                     "cannot read .{name} of {}: guard it with ?.",
