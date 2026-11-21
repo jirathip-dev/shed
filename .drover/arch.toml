@@ -196,7 +196,7 @@ glob = "*.toml"
 
 [[collect]]
 dir = "docs/acp"
-glob = "**/*.md"
+glob = "**/[!R]*.md"
 
 [[collect]]
 dir = ".github/workflows"
