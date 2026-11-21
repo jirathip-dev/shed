@@ -16,6 +16,10 @@ const assert = {
   notSameValue: (actual, unexpected, message) => {
     if (isSame(actual, unexpected)) throw fail(`expected anything but ${show(unexpected)}: ${message ?? ""}`)
   },
+  compareArray: (actual, expected, message) => {
+    const same = actual.length === expected.length && actual.every((x, i) => isSame(x, expected[i]))
+    if (!same) throw fail(`expected [${expected.map(show)}], got [${actual.map(show)}]: ${message ?? ""}`)
+  },
   throws: (expected, f, message) => {
     try {
       f()

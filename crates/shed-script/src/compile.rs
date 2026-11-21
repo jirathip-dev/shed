@@ -7,7 +7,8 @@ use crate::ast::{
     Assign, Binary, Binding, Decl, Expr, Function, Item, Key, Logic, Pattern, Pos, Prop, Script,
     Stmt, Unary,
 };
-use crate::syntax;
+use crate::value::Builtin;
+use crate::{builtins, syntax};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Op {
@@ -68,6 +69,7 @@ pub(crate) enum Op {
     RestObject(u32),
     Destructure(bool),
     NewError(u32),
+    Native(Builtin),
 }
 
 #[derive(Debug, Default)]
@@ -830,7 +832,9 @@ impl Compiler {
                 "undefined" => Op::Undefined,
                 "NaN" => Op::Num(f64::NAN),
                 "Infinity" => Op::Num(f64::INFINITY),
-                _ => Op::Global(self.string(name)),
+                _ => {
+                    builtins::global(name).map_or_else(|| Op::Global(self.string(name)), Op::Native)
+                }
             },
         };
         self.emit(op);
@@ -841,6 +845,7 @@ impl Compiler {
             Some((_, _, true)) if !init => Op::ConstSet(self.string(name)),
             Some((Slot::Reg(r), ..)) => Op::SetReg(r),
             Some((Slot::Heap(slot), hops, _)) => Op::Store(hops, slot),
+            None if builtins::global(name).is_some() => Op::ConstSet(self.string(name)),
             None => Op::Global(self.string(name)),
         };
         self.emit(op);
@@ -979,6 +984,7 @@ impl Compiler {
             Expr::Unary(pos, op, x) => {
                 if let (Unary::Typeof, Expr::Name(_, name)) = (op, &**x)
                     && self.resolve(name).is_none()
+                    && builtins::global(name).is_none()
                     && !matches!(name.as_str(), "undefined" | "NaN" | "Infinity")
                 {
                     let s = self.string("undefined");

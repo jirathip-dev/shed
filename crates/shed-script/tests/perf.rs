@@ -1,4 +1,4 @@
-//! The fixed scripts' gate (exact counts, and ceilings) and `just script-bench`'s report of targets 3, 4 and 5.
+//! The fixed scripts' gate (exact counts, and ceilings) and `just script-bench`'s report of targets 3, 4 and 5, and big.js's hold.
 #![cfg(test)]
 
 use std::path::Path;
@@ -178,6 +178,18 @@ fn speed_report() {
         "target 3: spin.js, million steps a second",
         "at least 25",
         spins.iter().map(|t| t.steps_per_second / 1e6).collect(),
+    );
+    let shapes: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("shapes.js"))).collect();
+    report(
+        "target 3: shapes.js, million steps a second",
+        "at least 25",
+        shapes.iter().map(|t| t.steps_per_second / 1e6).collect(),
+    );
+    let bigs: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("big.js"))).collect();
+    report(
+        "big.js, the longest slice (one built-in's hold)",
+        "at most 30 ms",
+        bigs.iter().map(|t| ms(t.slice)).collect(),
     );
     let holds: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("hold.js"))).collect();
     report(
