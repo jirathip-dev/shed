@@ -20,11 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Two commits: on a pull request the merge commit and its base, for arch-check's --base.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
-      - uses: dtolnay/rust-toolchain@1.99.1
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           components: clippy, rustfmt
       - uses: taiki-e/install-action@v2
@@ -60,7 +60,7 @@ jobs:
     env:
       RUSTUP_TOOLCHAIN: stable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: test
         run: cargo test --workspace --locked
@@ -79,8 +79,8 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.120.0
       - run: cargo build --release --locked -p shed
       - name: 200 idle terminals
         run: ulimit -Sn 256 && scripts/bench-idle.sh target/release/shed 200
