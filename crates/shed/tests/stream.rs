@@ -359,3 +359,13 @@ fn mcp_servers_are_in_a_private_file_until_the_agent_s_first_line() {
     let shown = &get(&lab.dir, "p")["session"]["mcp_servers"][0]["env"][0]["value"];
     assert_eq!(shown, "***");
 }
+
+#[test]
+fn run_s_model_takes_the_stream_record_s_words() {
+    let lab = Lab::new("stream-run-model", &[]);
+    lab.run("m", &["--policy", "allow", "--model", "smart"]);
+    let (_, id) = lab.session("m");
+    lab.turn("m", "hi");
+    let want = ["--allow", "--model", "smart", "--session-id", &id];
+    assert_eq!(lab.starts(), [strings(&want)]);
+}

@@ -24,6 +24,8 @@ reason on stderr) on the first that does not fit. Prompts:
 - "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
 - "replay": with `--replay FILE`, FILE's recorded session updates (JSON lines) in order; a line
   `{"request_permission": {...}}` is sent as that request and waits for its answer.
+- "env NAME": the reply "NAME has N chars" (the length of its value, never the value), or "no NAME".
+- "args": the reply is this agent's arguments, joined by spaces.
 - anything else: the reply "you said: <prompt>" ("[<model>] you said: …" after a switch from "fast").
 
 It offers the models "fast" and "smart" (a `model` config option). `--history FILE` keeps the session's
@@ -343,6 +345,16 @@ def main():
                 update({"sessionUpdate": "brand_new_kind", "whatever": [1, 2]})
                 update({"sessionUpdate": "agent_message_chunk",
                         "content": {"type": "text", "text": "still here"}})
+                stop = "end_turn"
+            elif text.startswith("env "):
+                name = text[4:]
+                said = f"{name} has {len(os.environ[name])} chars" if name in os.environ else f"no {name}"
+                update({"sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": said}})
+                stop = "end_turn"
+            elif text == "args":
+                update({"sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": " ".join(sys.argv[1:])}})
                 stop = "end_turn"
             else:
                 said = f"you said: {text}" if MODEL == "fast" else f"[{MODEL}] you said: {text}"
