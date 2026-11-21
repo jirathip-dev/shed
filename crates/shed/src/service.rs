@@ -1,6 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context as _, bail};
+use farrier_service::{
+    Files, Job, Launchd, ProcessType, Restart, Schedule, Service, Status, Systemd,
+};
 use shed_client::{Conn, Error};
 use shed_server::Paths;
 use shed_server::proto::{BUILD, LONG_VERSION};
@@ -8,182 +12,115 @@ use shed_server::runner::ExitCode;
 
 const LABEL: &str = "dev.shed.serve";
 const UPDATE: &str = "dev.shed.update";
-const PLIST: &str = include_str!("../../../dist/launchd/shed.plist");
-const UPDATE_PLIST: &str = include_str!("../../../dist/launchd/dev.shed.update.plist");
-const UNIT: &str = include_str!("../../../dist/systemd/shed.service");
-const UPDATE_UNIT: &str = include_str!("../../../dist/systemd/shed-update.service");
-const UPDATE_TIMER: &str = include_str!("../../../dist/systemd/shed-update.timer");
 
-struct Job {
-    label: &'static str,
-    files: Vec<(PathBuf, String)>,
-    start: String,
-    kick: String,
-    stop: String,
-    log: PathBuf,
-    loaded: String,
-}
-
-fn jobs() -> anyhow::Result<[Job; 2]> {
-    let var = |k| {
-        shed_server::config::var_os(k)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
-    let home = var("HOME").context("HOME is not set")?;
+fn services() -> anyhow::Result<[Service; 2]> {
+    let env = farrier_service::Env::host().context("this host's job manager")?;
     let exe = std::env::current_exe().context("this binary's path")?;
-    let (h, e) = (home.display(), exe.display().to_string());
+    let h = env.home.display();
     let path =
         format!("{h}/.cargo/bin:{h}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin");
-    let fill = |text: &str, log: &Path| {
-        let text = text.replace("{exe}", &e).replace("{path}", &path);
-        text.replace("{log}", &log.display().to_string())
-    };
-    if cfg!(target_os = "macos") {
-        let job = |label, text, log: &str| {
-            let plist = home.join(format!("Library/LaunchAgents/{label}.plist"));
-            let log = home.join("Library/Logs").join(log);
-            let start = format!("launchctl bootstrap gui/$(id -u) {}", plist.display());
-            Job {
-                label,
-                files: vec![(plist, fill(text, &log))],
-                kick: format!("launchctl kickstart gui/$(id -u)/{label} 2>/dev/null || {start}"),
-                start,
-                stop: format!("launchctl bootout gui/$(id -u)/{label}"),
-                log,
-                loaded: format!("launchctl list {label}"),
-            }
-        };
-        return Ok([
-            job(LABEL, PLIST, "shed.log"),
-            job(UPDATE, UPDATE_PLIST, "shed-update.log"),
-        ]);
-    }
-    let units = var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|| home.join(".config"))
-        .join("systemd/user");
-    let job = |label, base: &str, texts: &[(&str, &str)]| {
-        let unit = texts
-            .last()
-            .map_or(String::new(), |(ext, _)| format!("{base}.{ext}"));
-        let log = PathBuf::from(format!("journalctl --user -u {base}"));
-        Job {
-            label,
-            files: (texts.iter())
-                .map(|(ext, text)| (units.join(format!("{base}.{ext}")), fill(text, &log)))
-                .collect(),
-            start: format!(
-                "systemctl --user daemon-reload && systemctl --user enable --now {unit}"
-            ),
-            kick: format!(
-                "systemctl --user reset-failed {unit} 2>/dev/null; systemctl --user start {unit}"
-            ),
-            stop: format!("systemctl --user disable --now {unit}"),
-            log,
-            loaded: format!("systemctl --user is-active --quiet {unit}"),
-        }
-    };
-    let update = [("service", UPDATE_UNIT), ("timer", UPDATE_TIMER)];
-    Ok([
-        job(LABEL, "shed", &[("service", UNIT)]),
-        job(UPDATE, "shed-update", &update),
-    ])
+    let keep = Schedule::KeepAlive(Restart::Always);
+    let serve = Job::new(LABEL, [exe.as_os_str(), "serve".as_ref()], keep)?
+        .path(&path)
+        .launchd(Launchd {
+            process_type: ProcessType::Interactive,
+            abandon_process_group: false,
+        })
+        .systemd(Systemd {
+            oom_policy_continue: true,
+        })
+        .supersedes(["shed"]);
+    let every = Schedule::Every(Duration::from_mins(5));
+    let update = Job::new(UPDATE, [exe.as_os_str(), "self-update".as_ref()], every)?
+        .path(&path)
+        .launchd(Launchd {
+            process_type: ProcessType::Background,
+            abandon_process_group: false,
+        })
+        .supersedes(["shed-update"]);
+    Ok([Service::new(serve, &env), Service::new(update, &env)])
 }
 
 pub fn install(force: bool) -> anyhow::Result<()> {
-    let jobs = jobs()?;
-    for (path, text) in jobs.iter().flat_map(|j| &j.files) {
-        let file = path.display();
-        match std::fs::read_to_string(path) {
-            Ok(old) if old == *text => crate::out::line(format_args!("{file} is up to date")),
-            Ok(_) if !force => {
-                bail!("{file} has other contents; `shed install --force` replaces it")
-            }
-            _ => {
-                let dir = path.parent().context("the job's directory")?;
-                std::fs::create_dir_all(dir).with_context(|| dir.display().to_string())?;
-                std::fs::write(path, text).with_context(|| file.to_string())?;
-                crate::out::line(format_args!("wrote {file}"));
-            }
+    let services = services()?;
+    for service in &services {
+        if !force && service.status()?.files == Files::Differs {
+            let label = service.label();
+            bail!("{label} has other contents; `shed install --force` replaces it");
         }
     }
-    for job in &jobs {
-        let restart = format!("{} 2>/dev/null; {}", job.stop, job.start);
-        sh(job.label, "restarting", &restart)?;
-        crate::out::line(format_args!("restarted {}:\n  {restart}", job.label));
-    }
-    Ok(())
-}
-
-fn sh(label: &str, what: &str, line: &str) -> anyhow::Result<()> {
-    let ran = shed_server::runner::output("sh", ["-c", line], &[])?;
-    if !ran.status.success() {
-        bail!(
-            "{what} {label} failed ({}): {}; run:\n  {line}",
-            ran.status,
-            String::from_utf8_lossy(&ran.stderr).trim()
-        );
+    for service in &services {
+        let done = service.install()?;
+        crate::out::line(format_args!("{}: {done}", service.label()));
     }
     Ok(())
 }
 
 pub fn start_job() -> anyhow::Result<bool> {
-    match jobs() {
-        Ok([job, _]) if job.files.iter().all(|(p, _)| p.exists()) => {
-            sh(LABEL, "starting", &job.kick).map(|()| true)
-        }
-        _ => Ok(false),
+    let Ok([serve, _]) = services() else {
+        return Ok(false);
+    };
+    if serve.files().iter().any(|(file, _)| !file.exists()) {
+        return Ok(false);
     }
+    serve.start()?;
+    Ok(true)
 }
 
 pub fn uninstall() -> anyhow::Result<()> {
-    crate::out::line("stop them and remove them with:");
-    for job in jobs()? {
-        crate::out::line(format_args!("  {}", job.stop));
-        for (path, _) in &job.files {
-            crate::out::line(format_args!("  rm {}", path.display()));
-        }
+    for service in services()? {
+        let done = service.uninstall()?;
+        crate::out::line(format_args!("{}: {done}", service.label()));
     }
     Ok(())
 }
 
-fn written(job: &Job) -> Result<String, String> {
-    let mut names = Vec::new();
-    for (path, text) in &job.files {
-        let file = path.display();
-        match std::fs::read_to_string(path) {
-            Ok(old) if old == *text => names.push(file.to_string()),
-            Ok(_) => return Err(format!("{file} differs; fix: shed install --force")),
-            Err(e) => return Err(format!("{file}: {e}; fix: shed install")),
-        }
+fn on_disk(
+    service: &Service,
+    status: &Result<Status, farrier_service::Error>,
+) -> Result<String, String> {
+    let files: Vec<String> = (service.files().iter())
+        .map(|(file, _)| file.display().to_string())
+        .collect();
+    let files = files.join(", ");
+    match status.as_ref().map(|s| s.files) {
+        Ok(Files::Same) => Ok(files),
+        Ok(Files::Differs) => Err(format!("{files} differs; fix: shed install --force")),
+        Ok(Files::Missing) => Err(format!("{files}: not written; fix: shed install")),
+        Err(e) => Err(format!("{files}: {e}")),
     }
-    Ok(names.join(", "))
+}
+
+fn loaded(
+    status: &Result<Status, farrier_service::Error>,
+    outside: Option<String>,
+    fix: &str,
+) -> Result<String, String> {
+    match (status, outside) {
+        (Ok(s), _) if s.loaded && s.refused.is_none() => Ok(LABEL.into()),
+        (
+            Ok(Status {
+                refused: Some(why), ..
+            }),
+            _,
+        ) => Err(format!("{why}; fix: shed install")),
+        (_, Some(server)) => Err(format!(
+            "a server outside {LABEL} answers on {server}; fix: stop that server, then {fix}"
+        )),
+        _ => Err(format!("not loaded; fix: {fix}")),
+    }
 }
 
 pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
-    let [job, update] = jobs()?;
-    let log = job.log.display();
+    let [job, update] = services()?;
+    let (status, commands) = (job.status(), job.commands());
     let socket = paths.socket.display();
-    let fix = format!("fix: {}", job.start);
-    let loaded = shed_server::runner::output("sh", ["-c", &job.loaded], &[])
-        .is_ok_and(|o| o.status.success());
+    let fix = format!("fix: {}", commands.load);
     let server = Conn::connect(&paths.socket);
-    let outside = format!(
-        "a server outside {LABEL} answers on {socket}; fix: stop that server, then {}",
-        job.kick
-    );
+    let outside = server.is_ok().then(|| socket.to_string());
     let checks = [
-        ("job", written(&job)),
-        (
-            "loaded",
-            if loaded {
-                Ok(LABEL.into())
-            } else if server.is_ok() {
-                Err(outside)
-            } else {
-                Err(format!("not loaded; {fix}"))
-            },
-        ),
+        ("job", on_disk(&job, &status)),
+        ("loaded", loaded(&status, outside, &commands.load)),
         (
             "socket",
             match &server {
@@ -207,7 +144,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
         ),
         (
             "update",
-            written(&update).and_then(|_| match crate::update::last(paths) {
+            on_disk(&update, &update.status()).and_then(|_| match crate::update::last(paths) {
                 Some(why) if why.starts_with("rejected") || why.starts_with("deferred") => {
                     Err(format!("{why}; see docs/self-update.md"))
                 }
@@ -219,10 +156,12 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
         ),
         (
             "log",
-            if job.log.is_relative() || job.log.exists() {
-                Ok(log.to_string())
-            } else {
-                Err(format!("{log} not written yet; {fix}"))
+            match commands.log.strip_prefix("tail -f ") {
+                Some(log) if !Path::new(log).exists() => {
+                    Err(format!("{log} not written yet; {fix}"))
+                }
+                Some(log) => Ok(log.to_owned()),
+                None => Ok(commands.log.clone()),
             },
         ),
     ];

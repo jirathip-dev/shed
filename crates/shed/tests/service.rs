@@ -25,8 +25,9 @@ fn shed_with(home: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     for ctl in ["launchctl", "systemctl"] {
         let file = bin.join(ctl);
         let log = "echo \"$(basename \"$0\") $*\" >> \"$(dirname \"$0\")/ctl.log\"\n\
-                   case \"$*\" in *\" start \"*|kickstart*) \"$SHED_BIN\" serve </dev/null >/dev/null 2>&1 & esac\n\
-                   [ -z \"$CTL_FAIL\" ] || case \"$*\" in *\"$CTL_FAIL\"*) exit 3; esac\n";
+                   [ -z \"$CTL_FAIL\" ] || case \"$*\" in *\"$CTL_FAIL\"*) exit 3; esac\n\
+                   case \"$*\" in *\" show \"*) printf 'ActiveState=active\\n\\nActiveState=active\\n'; esac\n\
+                   case \"$*\" in *\" start \"*|kickstart*) \"$SHED_BIN\" serve </dev/null >/dev/null 2>&1 & esac\n";
         std::fs::write(&file, format!("#!/bin/sh\n{log}")).expect("fake ctl");
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
@@ -56,7 +57,7 @@ fn job_file(home: &Path) -> PathBuf {
     if cfg!(target_os = "macos") {
         home.join("Library/LaunchAgents/dev.shed.serve.plist")
     } else {
-        home.join(".config/systemd/user/shed.service")
+        home.join(".config/systemd/user/dev.shed.serve.service")
     }
 }
 
@@ -71,37 +72,30 @@ fn install_writes_the_five_minute_update_job() {
         .collect::<Result<String, _>>();
     let update = update.expect("the update job's files");
     let every = if cfg!(target_os = "macos") {
-        "<key>StartInterval</key><integer>300</integer>"
+        "<key>StartInterval</key>\n  <integer>300</integer>"
     } else {
-        "OnUnitActiveSec=5min"
+        "OnUnitActiveSec=300\n"
     };
     assert!(update.contains(every), "{update}");
     assert!(
-        update.contains(&format!("{SHED}</string><string>self-update<"))
+        update.contains(&format!("{SHED}</string>\n    <string>self-update<"))
             || update.contains(&format!("ExecStart={SHED} self-update\n")),
         "{update}"
     );
 }
 
-fn restarted(home: &Path) -> String {
-    let file = job_file(home);
-    let uid = Command::new("id").arg("-u").output().expect("id -u").stdout;
-    let uid = String::from_utf8_lossy(&uid).trim().to_owned();
-    let update = update_files(home);
-    if cfg!(target_os = "macos") {
-        format!(
-            "launchctl bootout gui/{uid}/dev.shed.serve\nlaunchctl bootstrap gui/{uid} {}\n\
-             launchctl bootout gui/{uid}/dev.shed.update\nlaunchctl bootstrap gui/{uid} {}\n",
-            file.display(),
-            update.first().expect("the update job").display()
-        )
+fn loads(home: &Path) -> usize {
+    let verb = if cfg!(target_os = "macos") {
+        " bootstrap "
     } else {
-        "systemctl --user disable --now shed.service\nsystemctl --user daemon-reload\n\
-         systemctl --user enable --now shed.service\n\
-         systemctl --user disable --now shed-update.timer\nsystemctl --user daemon-reload\n\
-         systemctl --user enable --now shed-update.timer\n"
-            .to_owned()
-    }
+        " enable --now "
+    };
+    ctl_log(home).lines().filter(|l| l.contains(verb)).count()
+}
+
+fn uid() -> String {
+    let uid = Command::new("id").arg("-u").output().expect("id -u").stdout;
+    String::from_utf8_lossy(&uid).trim().to_owned()
 }
 
 fn update_files(home: &Path) -> Vec<PathBuf> {
@@ -110,30 +104,22 @@ fn update_files(home: &Path) -> Vec<PathBuf> {
     } else {
         let units = home.join(".config/systemd/user");
         vec![
-            units.join("shed-update.service"),
-            units.join("shed-update.timer"),
+            units.join("dev.shed.update.service"),
+            units.join("dev.shed.update.timer"),
         ]
     }
 }
 
 #[test]
-fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
+fn install_writes_and_loads_both_jobs_once_and_refuses_other_contents_without_force() {
     let home = temp_dir("install");
     let file = job_file(&home);
-    let restarted = restarted(&home);
 
     let out = shed(&home, &["install"]);
     assert!(out.status.success(), "{out:?}");
-    assert!(
-        text(&out).contains(&format!("wrote {}", file.display())),
-        "{out:?}"
-    );
-    assert!(text(&out).contains("restarted dev.shed.serve"), "{out:?}");
-    assert_eq!(
-        ctl_log(&home),
-        restarted,
-        "install stops and starts the job"
-    );
+    assert!(text(&out).contains("dev.shed.serve: written"), "{out:?}");
+    assert!(text(&out).contains("dev.shed.update: written"), "{out:?}");
+    assert_eq!(loads(&home), 2, "{}", ctl_log(&home));
     let job = std::fs::read_to_string(&file).expect("the job file");
     assert!(job.contains(&format!(
         "{}/.cargo/bin:{}/.local/bin",
@@ -142,25 +128,29 @@ fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
     )));
     if cfg!(target_os = "macos") {
         for want in [
-            "<key>RunAtLoad</key><true/>",
-            "<key>KeepAlive</key><true/>",
+            "<key>RunAtLoad</key>\n  <true/>",
+            "<key>KeepAlive</key>\n  <true/>",
+            "<key>ProcessType</key>\n  <string>Interactive</string>",
             "<string>serve</string>",
         ] {
             assert!(job.contains(want), "{want} in {job}");
         }
-        let log = home.join("Library/Logs/shed.log");
+        let log = home.join("Library/Logs/dev.shed.serve.log");
         assert!(job.contains(&format!(
-            "<key>StandardOutPath</key><string>{}</string>",
+            "<key>StandardOutPath</key>\n  <string>{}</string>",
             log.display()
         )));
         if let Ok(lint) = Command::new("plutil").arg("-lint").arg(&file).output() {
             assert!(lint.status.success(), "plutil -lint: {lint:?}");
         }
     } else {
-        assert!(
-            job.contains(" serve\n") && job.contains("WantedBy=default.target"),
-            "{job}"
-        );
+        for want in [
+            " serve\n",
+            "OOMPolicy=continue\n",
+            "WantedBy=default.target",
+        ] {
+            assert!(job.contains(want), "{want} in {job}");
+        }
     }
 
     let before = std::fs::metadata(&file)
@@ -168,12 +158,8 @@ fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
         .expect("mtime");
     let out = shed(&home, &["install"]);
     assert!(out.status.success(), "{out:?}");
-    assert!(text(&out).contains("is up to date"), "{out:?}");
-    assert_eq!(
-        ctl_log(&home),
-        restarted.repeat(2),
-        "an up-to-date install still restarts the server on this binary"
-    );
+    assert!(text(&out).contains("dev.shed.serve: unchanged"), "{out:?}");
+    assert_eq!(loads(&home), 2, "an up-to-date, loaded job is left alone");
     assert_eq!(
         std::fs::metadata(&file)
             .and_then(|m| m.modified())
@@ -186,29 +172,33 @@ fn install_writes_the_job_once_and_refuses_other_contents_without_force() {
     assert!(!out.status.success(), "{out:?}");
     assert!(text(&out).contains("--force"), "{out:?}");
     assert_eq!(std::fs::read_to_string(&file).expect("job"), "hand-made\n");
-    assert_eq!(
-        ctl_log(&home),
-        restarted.repeat(2),
-        "a refused install restarts nothing"
-    );
+    assert_eq!(loads(&home), 2, "a refused install loads nothing");
     let out = shed(&home, &["install", "--force"]);
     assert!(out.status.success(), "{out:?}");
     assert_eq!(std::fs::read_to_string(&file).expect("job"), job);
-    assert_eq!(ctl_log(&home), restarted.repeat(3));
+    assert_eq!(loads(&home), 3, "only the rewritten job is loaded again");
 
     let out = shed(&home, &["uninstall"]);
     assert!(out.status.success(), "{out:?}");
-    let stop = if cfg!(target_os = "macos") {
-        "launchctl bootout gui/$(id -u)/dev.shed.serve"
+    assert!(text(&out).contains("dev.shed.serve: removed"), "{out:?}");
+    assert!(text(&out).contains("dev.shed.update: removed"), "{out:?}");
+    let stops = if cfg!(target_os = "macos") {
+        ["dev.shed.serve", "dev.shed.update"]
+            .map(|l| format!("launchctl bootout gui/{}/{l}\n", uid()))
     } else {
-        "systemctl --user disable --now shed.service"
+        ["dev.shed.serve.service", "dev.shed.update.timer"]
+            .map(|u| format!("systemctl --user disable --now {u}\n"))
     };
-    assert!(text(&out).contains(stop), "{out:?}");
-    assert!(
-        text(&out).contains(&format!("rm {}", file.display())),
-        "{out:?}"
-    );
-    assert!(file.exists(), "uninstall only prints the lines");
+    for stop in stops {
+        assert!(
+            ctl_log(&home).contains(&stop),
+            "{stop} in {}",
+            ctl_log(&home)
+        );
+    }
+    for gone in std::iter::once(file).chain(update_files(&home)) {
+        assert!(!gone.exists(), "{} removed", gone.display());
+    }
 }
 
 #[test]
@@ -359,16 +349,30 @@ fn setup_hooks_report_nothing_outside_shed_and_doctor_lists_them() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn install_force_over_a_unit_without_the_oom_policy_leaves_one_with_it() {
+fn install_replaces_the_old_unit_names_with_the_label_named_ones() {
     let home = temp_dir("oom");
-    let file = job_file(&home);
-    std::fs::create_dir_all(file.parent().expect("unit dir")).expect("unit dir");
-    std::fs::write(&file, "[Service]\nExecStart=shed serve\nRestart=always\n").expect("old unit");
-    let out = shed(&home, &["install", "--force"]);
+    let units = home.join(".config/systemd/user");
+    std::fs::create_dir_all(&units).expect("unit dir");
+    let old = ["shed.service", "shed-update.service", "shed-update.timer"].map(|u| units.join(u));
+    for file in &old {
+        std::fs::write(file, "[Service]\nExecStart=shed serve\n").expect("old unit");
+    }
+    let out = shed(&home, &["install"]);
     assert!(out.status.success(), "{out:?}");
-    let unit = std::fs::read_to_string(&file).expect("the unit");
+    for file in &old {
+        assert!(!file.exists(), "{} removed", file.display());
+    }
+    let log = ctl_log(&home);
+    assert!(
+        log.contains("systemctl --user disable --now shed.service\n"),
+        "{log}"
+    );
+    assert!(
+        log.contains("disable --now shed-update.timer shed-update.service\n"),
+        "{log}"
+    );
+    let unit = std::fs::read_to_string(job_file(&home)).expect("the unit");
     assert!(unit.contains("\nOOMPolicy=continue\n"), "{unit}");
-    assert!(ctl_log(&home).contains("daemon-reload"), "reloaded");
 }
 
 fn autostart(home: &Path) -> Output {
@@ -417,11 +421,11 @@ fn autostart_starts_the_installed_job_and_no_server_of_its_own() {
     assert!(out.status.success(), "{out:?}");
     assert!(!text(&out).contains("started"), "{out:?}");
     let kick = if cfg!(target_os = "macos") {
-        "launchctl kickstart gui/"
+        format!("launchctl kickstart gui/{}/dev.shed.serve\n", uid())
     } else {
-        "systemctl --user reset-failed shed.service\nsystemctl --user start shed.service\n"
+        "systemctl --user start dev.shed.serve.service\n".to_owned()
     };
-    assert!(ctl_log(&home).starts_with(kick), "{}", ctl_log(&home));
+    assert!(ctl_log(&home).contains(&kick), "{}", ctl_log(&home));
 }
 
 #[test]
@@ -440,9 +444,9 @@ fn doctor_flags_a_server_outside_a_failed_job() {
     assert!(shed(&home, &["install"]).status.success());
     let _server = Server::start(&home);
     let inactive = if cfg!(target_os = "macos") {
-        "list"
+        "print"
     } else {
-        "is-active"
+        "show"
     };
     let out = shed_with(&home, &["--dir", d, "doctor"], &[("CTL_FAIL", inactive)]);
     assert_eq!(out.status.code(), Some(1), "{out:?}");
