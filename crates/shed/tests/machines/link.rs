@@ -17,6 +17,7 @@ fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_versi
     let (_remote, _local) = linked(&root);
     let remote = root.join("remote");
     let remote_arg = remote.to_str().expect("utf-8 dir");
+    common::eventually("old's refusal", || link(&root, "old")["error"].is_string());
     let refused = link(&root, "old");
     assert_eq!(refused["state"], "down", "{refused}");
     let error = refused["error"].as_str().expect("why it is down");
