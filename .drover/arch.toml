@@ -1,6 +1,6 @@
 # `drover arch-check` (just arch): the generated files, the layers, the banned calls and the size limits.
 # A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
-generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json"]
+generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crates/shed-script/tests/perf/counts.json"]
 generate = "just generate"
 
 [[layer]]

@@ -1,0 +1,4 @@
+{
+  "hold.js": {"steps": 39760023, "peak_bytes": 64749640, "collections": 19, "largest_collection": 2722546},
+  "spin.js": {"steps": 4997012, "peak_bytes": 32, "collections": 0, "largest_collection": 0}
+}

@@ -1,5 +1,7 @@
 //! What a script holds: `Copy` values, and the cells in the heap that everything which can grow lives in.
 
+use std::sync::Arc;
+
 /// A cell's place in the heap; only the heap makes one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Handle(pub(crate) usize);
@@ -27,13 +29,20 @@ pub enum Cell {
     /// An array.
     Array(Vec<Value>),
     /// An object: string keys in insertion order, no prototype.
-    Object(Vec<(Box<str>, Value)>),
+    Object(Vec<(Arc<str>, Value)>),
     /// A scope: its variables, and the scope it is inside.
     Scope {
         /// The enclosing scope.
         parent: Option<Handle>,
         /// Its variables, by slot.
         slots: Vec<Value>,
+    },
+    /// A function with the scope it was made in.
+    Closure {
+        /// Its code, by index in the program.
+        function: usize,
+        /// The scope it closes over.
+        scope: Option<Handle>,
     },
 }
 
@@ -52,6 +61,7 @@ impl Cell {
             Self::Object(fields) => fields.iter().fold(0, |sum, (key, _)| {
                 sum.saturating_add(key.len()).saturating_add(SLOT)
             }),
+            Self::Closure { .. } => 0,
         })
     }
 
@@ -64,6 +74,9 @@ impl Cell {
                 None => Some(parent.map_or(Value::Undefined, Value::Ref)),
                 Some(slot) => slots.get(slot).copied(),
             },
+            Self::Closure { scope, .. } => {
+                (at == 0).then(|| scope.map_or(Value::Undefined, Value::Ref))
+            }
         }
     }
 }

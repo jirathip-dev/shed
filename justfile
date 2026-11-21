@@ -2,11 +2,13 @@
 check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch protocol lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
-# CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json.
+# CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
+# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json).
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
     SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
+    SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
 
 fmt:
     cargo fmt --all --check
@@ -119,6 +121,10 @@ temp-left:
 bench:
     cargo test -p shed --locked --test cli timing_report -- --nocapture
     cargo test -p shed-core --locked --test history throughput_report -- --nocapture
+
+# The script engine's speed report (#214): targets 3, 4 and 5, each the median and range of 5 runs.
+script-bench:
+    cargo test -p shed-script --release --locked --test perf speed_report -- --ignored --nocapture
 
 # Build shed and install it to BIN_DIR/shed (default ~/.cargo/bin), signed on macOS with "herdsman-local" (#56).
 install *BIN_DIR:

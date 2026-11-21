@@ -8,8 +8,11 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[dependencies]
+serde_json.workspace = true
+
 [package.metadata.gate]
-test_secs = 5
+test_secs = 10
 
 [lints]
 workspace = true
