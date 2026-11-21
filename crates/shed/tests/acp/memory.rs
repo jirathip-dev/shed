@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use serde_json::Value;
 use shed_core::proctree::{self, ProcessTable as _};
 
@@ -190,6 +188,8 @@ fn a_limited_terminal_runs_in_its_own_scope_its_children_ranked_first_and_none_o
     server.0.kill().expect("kill shed serve");
     server.0.wait().expect("reap shed serve");
     let _again = Server::sampling(&dir, "0.2");
-    common::eventually("the sleeper's scope gone", || !Path::new(&sleeper).exists());
+    common::eventually("the sleeper's scope gone", || {
+        !std::path::Path::new(&sleeper).exists()
+    });
     ok(&dir, &["kill", "g"]);
 }
