@@ -17,11 +17,11 @@ jobs:
   bench-drain:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           path: base
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
       - name: drain bench, base vs head
         run: BENCH_TARGET="$RUNNER_TEMP/bench" scripts/bench-drain.sh base .

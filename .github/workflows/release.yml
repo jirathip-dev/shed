@@ -22,10 +22,10 @@ jobs:
     outputs:
       ok: ${{ steps.build.outputs.ok }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: x86_64-unknown-linux-gnu
       - id: build
@@ -38,7 +38,7 @@ jobs:
             echo "::error::the Linux build (or its --version sha check) failed; nothing is published"
           fi
       - if: steps.build.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux
           path: shed-x86_64-unknown-linux-gnu
@@ -50,10 +50,10 @@ jobs:
     outputs:
       ok: ${{ steps.sign.outputs.ok }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: aarch64-apple-darwin
       - id: build
@@ -80,7 +80,7 @@ jobs:
             echo "::error::signing, notarization or its check failed; nothing is published"
           fi
       - if: steps.sign.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos
           path: shed-aarch64-apple-darwin
@@ -95,7 +95,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: publish
