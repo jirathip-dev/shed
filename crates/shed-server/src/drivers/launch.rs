@@ -83,6 +83,13 @@ pub(crate) fn bridge(
     Ok(())
 }
 
+pub(crate) const LANE_ONLY: [&str; 4] = [
+    "SHED_ACP_RESUME",
+    "SHED_ACP_MCP",
+    "SHED_ACP_META",
+    "SHED_ACP_HIBERNATE_AFTER",
+];
+
 pub(crate) fn vars(p: &RunParams, name: &str) -> serde_json::Result<Vec<(String, String)>> {
     let mut vars: Vec<_> = p.env.clone().into_iter().collect();
     vars.push(("SHED".to_owned(), name.to_owned()));

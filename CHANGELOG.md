@@ -304,3 +304,6 @@ All notable changes to this project are documented here. The format follows
   that answers while the job is not loaded.
 - `shed state` (and the agent hooks that run it) gives up after 2 s with a nonzero exit when the server
   accepts but never answers, instead of hanging; `$SHED_STATE_TIMEOUT` sets the seconds.
+- An ACP or stream agent no longer inherits its lane's own variables (`SHED_ACP_HIBERNATE_AFTER`,
+  `SHED_ACP_RESUME`, `SHED_ACP_MCP`, `SHED_ACP_META`), so a `shed serve` the agent starts, such as one in its
+  tests, no longer picks up the lane's `--no-hibernate`.

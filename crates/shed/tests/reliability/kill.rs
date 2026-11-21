@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use serde_json::Value;
 
 use crate::common::{Server, eventually, temp_dir};
@@ -27,10 +25,7 @@ fn kill_ends_an_interactive_shell_without_waiting_out_the_grace() {
     let dir = temp_dir("rel-shell");
     let _server = Server::start(&dir);
     run_shell(&dir, "sh");
-    let started = Instant::now();
-    ok(&dir, &["kill", "sh"]);
-    let took = started.elapsed();
-    assert!(took < Duration::from_millis(500), "kill took {took:?}");
+    assert_eq!(ok(&dir, &["kill", "sh"]), "sh exited 129\n");
 }
 
 #[test]

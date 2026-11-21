@@ -521,9 +521,8 @@ fn start(
     let (program, args) = cmd
         .split_first()
         .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
-    let mut child =
-        shed_core::runner::piped(program, args, cwd, &["SHED_ACP_MCP", "SHED_ACP_META"])
-            .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
+    let mut child = shed_core::runner::piped(program, args, cwd, &super::launch::LANE_ONLY)
+        .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
