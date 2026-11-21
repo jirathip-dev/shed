@@ -86,7 +86,7 @@ pub fn piped<A: AsRef<OsStr>>(
 
 /// Runs `cmd` in `cwd` without a terminal, in a process group of its own that is ended when it
 /// returns or after `timeout`, `stdin` fed to it; its status, and stdout and stderr each read up
-/// to one byte past `limit`.
+/// to one byte past `limit`. Dropping the future ends the group too.
 ///
 /// # Errors
 /// When `cmd` is empty or cannot start, or `TimedOut` after `timeout`.
@@ -107,10 +107,7 @@ pub async fn exec(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
-    let group = child
-        .id()
-        .and_then(|id| Pid::from_raw(i32::try_from(id).ok()?));
-    let end = move || group.map(|g| kill_process_group(g, Signal::KILL));
+    let group = Group::of(&child);
     let (input, out, err) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let feed = async move {
         if let Some(mut pipe) = input {
@@ -119,14 +116,74 @@ pub async fn exec(
     };
     let ran = async {
         let status = child.wait().await;
-        end();
+        group.end();
         status
     };
     let all = async { tokio::join!(feed, capture(out, limit), capture(err, limit), ran) };
     let done = tokio::time::timeout(timeout, all).await;
-    end();
     let ((), stdout, stderr, status) = done.map_err(|_| io::ErrorKind::TimedOut)?;
     Ok((status?, stdout?, stderr?))
+}
+
+struct Group(Option<Pid>);
+
+impl Group {
+    fn of(child: &tokio::process::Child) -> Self {
+        Self(
+            child
+                .id()
+                .and_then(|id| Pid::from_raw(i32::try_from(id).ok()?)),
+        )
+    }
+
+    fn end(&self) {
+        if let Some(group) = self.0 {
+            kill_process_group(group, Signal::KILL).ok();
+        }
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
+/// A process started by [`held`]: dropping it ends its whole group.
+pub struct Held {
+    _child: tokio::process::Child,
+    _group: Group,
+}
+
+/// Starts `cmd` in a process group of its own, its stdin and stdout piped and its stderr ours, for a
+/// conversation of lines; the group is ended when the [`Held`] is dropped.
+///
+/// # Errors
+/// When `cmd` is empty or cannot start.
+pub fn held(
+    cmd: &[String],
+) -> io::Result<(
+    Held,
+    tokio::process::ChildStdin,
+    tokio::process::ChildStdout,
+)> {
+    let (program, args) = cmd.split_first().ok_or(io::ErrorKind::InvalidInput)?;
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .process_group(0)
+        .kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+    let group = Group::of(&child);
+    let pipes = child.stdin.take().zip(child.stdout.take());
+    let (stdin, stdout) = pipes.ok_or(io::ErrorKind::BrokenPipe)?;
+    let held = Held {
+        _child: child,
+        _group: group,
+    };
+    Ok((held, stdin, stdout))
 }
 
 async fn capture(pipe: Option<impl AsyncRead + Unpin>, limit: u64) -> io::Result<Vec<u8>> {

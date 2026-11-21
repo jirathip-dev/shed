@@ -232,6 +232,9 @@ All notable changes to this project are documented here. The format follows
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or
   256 MiB it is the new error `LIMIT`, naming the limit, its value and the file.
 - `shed file read --lines N-M` (`file.read` with `lines`) returns just that span of lines.
+- The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
+  called as they are, and every call that acts is first asked of the guard named in `[script]` of the
+  config file (refused when none is named); the reply lists every acting call with its result.
 
 ### Changed
 

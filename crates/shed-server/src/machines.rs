@@ -66,27 +66,30 @@ pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
         text => text?,
     };
     let mut machines = Vec::new();
-    let mut in_machines = false;
+    let mut table = None;
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         let fail = |what: &str| Error::Config(format!("{}:{}: {what}", path.display(), n + 1));
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(table) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            if table.trim() != "machines" {
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            if !["machines", "script"].contains(&name.trim()) {
                 return Err(fail(&format!(
-                    "unknown table [{table}]; shed knows [machines]"
+                    "unknown table [{name}]; shed knows [machines] and [script]"
                 )));
             }
-            in_machines = true;
+            table = Some(name.trim() == "machines");
+            continue;
+        }
+        if table == Some(false) {
             continue;
         }
         let Some((name, value)) = line.split_once('=') else {
             return Err(fail("expected name = \"ssh-target\""));
         };
         let (name, value) = (name.trim(), value.trim());
-        if !in_machines {
+        if table.is_none() {
             return Err(fail(&format!(
                 "unknown key {name}; put machines under [machines]"
             )));
@@ -111,6 +114,20 @@ pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     let mut text = String::from("# shed machines; edit with `shed machine add|rm`.\n[machines]\n");
     for m in machines {
         writeln!(text, "{} = \"{}\"", m.name, m.target).ok();
+    }
+    let old = fs::read_to_string(path).unwrap_or_default();
+    let mut script = false;
+    for line in old.lines() {
+        if let Some(name) = line
+            .trim()
+            .strip_prefix('[')
+            .and_then(|l| l.strip_suffix(']'))
+        {
+            script = name.trim() == "script";
+        }
+        if script {
+            writeln!(text, "{line}").ok();
+        }
     }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
@@ -306,6 +323,21 @@ mod tests {
 
     fn dir(name: &str) -> std::path::PathBuf {
         crate::temp_dir(&format!("machines-{name}"))
+    }
+
+    #[test]
+    fn the_script_table_is_skipped_and_kept() {
+        let path = dir("script").join("config.toml");
+        let script = "[script]\nguard = [\n  \"drover\", \"guard\",\n]\nguard_timeout = 5\n";
+        fs::write(
+            &path,
+            format!("[machines]\nbox = \"box.example\"\n{script}"),
+        )
+        .unwrap();
+        add(&path, "b2", "b2.example").unwrap();
+        let names: Vec<String> = load(&path).unwrap().into_iter().map(|m| m.name).collect();
+        assert_eq!(names, ["box", "b2"]);
+        assert!(fs::read_to_string(&path).unwrap().ends_with(script));
     }
 
     #[test]
