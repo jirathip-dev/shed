@@ -1,8 +1,37 @@
 # `drover arch-check` (just arch): the generated files, the layers, the banned calls and the size limits.
 # A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
-generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crates/shed-script/tests/perf/counts.json", "crates/shed/tests/golden/**"]
-shared = ["crates/shed/tests/*/main.rs", "crates/shed/tests/fake_acp.py"]
+# A frozen file takes no new line, a `shared` one stays under its `[[size]]` limit, and a row of a `[[collect]]`
+# folder is a new file there (#246).
+frozen = ["ci/cap.toml", "docs/acp/README.md"]
+generated = [
+    "CHANGELOG.md",
+    "docs/protocol.md",
+    "docs/shed.openrpc.json",
+    "crates/shed-script/tests/perf/counts.json",
+    "Cargo.lock",
+    "crates/shed/tests/golden/**",
+]
 generate = "just generate"
+shared = [
+    ".drover/arch.toml",
+    ".drover/rules.md",
+    ".github/workflows/ci.yml",
+    "Cargo.toml",
+    "justfile",
+    "crates/shed-core/Cargo.toml",
+    "crates/shed-core/src/lib.rs",
+    "crates/shed-core/src/runner.rs",
+    "crates/shed-core/tests/terminal.rs",
+    "crates/shed-proto/tests/protocol_doc/acp.rs",
+    "crates/shed-proto/tests/protocol_doc/terminal.rs",
+    "crates/shed-server/Cargo.toml",
+    "crates/shed-server/src/links.rs",
+    "crates/shed-server/src/providers.rs",
+    "crates/shed-server/src/providers/claude.rs",
+    "crates/shed/tests/acp_bench.rs",
+    "crates/shed/tests/*/main.rs",
+    "crates/shed/tests/fake_acp.py",
+]
 
 [[layer]]
 name = "core"
@@ -175,6 +204,78 @@ reason = "#238: jobs are written, loaded and restarted only by farrier-service"
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
 max_fn_lines = 150
+
+[[collect]]
+dir = "ci/cap.d"
+glob = "*.toml"
+
+[[collect]]
+dir = "docs/acp"
+glob = "**/[!R]*.md"
+
+[[collect]]
+dir = ".github/workflows"
+glob = "bench-*.yml"
+
+[[collect]]
+dir = "crates/shed-core/tests"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-server/src/providers"
+glob = "*.rs"
+
+[[size]]
+paths = [".drover/rules.md", "crates/shed-core/Cargo.toml"]
+max_file_lines = 30
+
+[[size]]
+paths = ["crates/shed-core/src/lib.rs"]
+max_file_lines = 45
+
+[[size]]
+paths = ["crates/shed-server/Cargo.toml"]
+max_file_lines = 55
+
+[[size]]
+paths = ["Cargo.toml"]
+max_file_lines = 70
+
+[[size]]
+paths = [".github/workflows/ci.yml"]
+max_file_lines = 100
+
+[[size]]
+paths = ["justfile"]
+max_file_lines = 135
+
+[[size]]
+paths = ["crates/shed-core/tests/terminal.rs"]
+max_file_lines = 170
+
+[[size]]
+paths = ["crates/shed-core/src/runner.rs"]
+max_file_lines = 200
+
+[[size]]
+paths = ["crates/shed-server/src/providers.rs", "crates/shed-proto/tests/protocol_doc/terminal.rs"]
+max_file_lines = 230
+
+[[size]]
+paths = ["crates/shed-server/src/links.rs"]
+max_file_lines = 250
+
+[[size]]
+paths = ["crates/shed-proto/tests/protocol_doc/acp.rs"]
+max_file_lines = 300
+
+[[size]]
+paths = ["crates/shed-server/src/providers/claude.rs", "crates/shed/tests/acp_bench.rs"]
+max_file_lines = 340
+
+[[size]]
+paths = [".drover/arch.toml"]
+max_file_lines = 400
 
 [[collect]]
 dir = "crates/shed/tests"

@@ -97,7 +97,7 @@ shed runs them as a second kind of terminal, through the same API:
 
 `shed events` adds `turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply` and `session`, and
 `shed wait --until done` is exact. The PTY mode stays for agents without ACP. shed never handles provider
-credentials: each agent logs in its own way. See [docs/acp.md](docs/acp.md), including the Claude adapter caveat.
+credentials: each agent logs in its own way. See [docs/acp/accounts.md](docs/acp/accounts.md), including the Claude adapter caveat.
 
 ## Integration with herdsman
 

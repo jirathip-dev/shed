@@ -4204,7 +4204,7 @@
             "default": null
           }
         },
-        "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp.md`)."
+        "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp/provider-records.md`)."
       },
       "Hooks": {
         "type": "object",
