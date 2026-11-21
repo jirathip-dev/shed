@@ -1,6 +1,7 @@
 # `drover arch-check` (just arch): the generated files, the layers, the banned calls and the size limits.
 # A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
-generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crates/shed-script/tests/perf/counts.json"]
+generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crates/shed-script/tests/perf/counts.json", "crates/shed/tests/golden/**"]
+shared = ["crates/shed/tests/*/main.rs", "crates/shed/tests/fake_acp.py"]
 generate = "just generate"
 
 [[layer]]
@@ -174,3 +175,19 @@ reason = "#238: jobs are written, loaded and restarted only by farrier-service"
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
 max_fn_lines = 150
+
+[[collect]]
+dir = "crates/shed/tests"
+glob = "*/*.rs"
+
+[[collect]]
+dir = "crates/shed/tests/fake_acp"
+glob = "*.py"
+
+[[size]]
+paths = ["crates/shed/tests/fake_acp.py"]
+max_file_lines = 260
+
+[[size]]
+paths = ["crates/shed/tests/*/main.rs"]
+max_file_lines = 300
