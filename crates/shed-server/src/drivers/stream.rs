@@ -159,7 +159,7 @@ impl Agent {
             args.extend(with(&record.mcp, "{file}", &file.to_string_lossy()));
         }
         let (program, args) = args.split_first().ok_or("empty agent command")?;
-        let unset = ["SHED_ACP_MCP", "SHED_ACP_META"];
+        let unset = super::launch::LANE_ONLY;
         let mut child = shed_core::runner::piped(program, args, &launch.cwd, &unset)
             .map_err(|e| format!("{program}: {e}"))?;
         let (Some(mut stdin), Some(stdout), Some(stderr)) =

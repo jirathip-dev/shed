@@ -70,7 +70,7 @@ fn probe() -> (f64, u64, u64, u64) {
         "kern.boottime",
     ];
     parse_sysctl(
-        &stdout("sysctl", std::iter::once("-n").chain(keys)),
+        &stdout("/usr/sbin/sysctl", std::iter::once("-n").chain(keys)),
         unix_now(),
     )
 }
