@@ -87,8 +87,8 @@ Order and undo:
 6. **The updater only stages, checks, swaps and asks.** It reads main's head, fetches `SHA256SUMS` and
    the asset of `build-<sha7>`, verifies the sum and that `--version` names the sha, asks
    `handover.check`, renames into place, asks `handover`. It never stops, starts or signals serve.
-7. **`shed install` installs both jobs** (serve and the 5-minute update), with the job texts read from
-   `dist/` so the files to copy by hand and the installed ones are one text. `--pause` is a marker file.
+7. **`shed install` installs both jobs** (serve and the 5-minute update), with the job texts rendered
+   by farrier-service since #238 (golden copies in farrier's `fixtures/units/`). `--pause` is a marker file.
 
 ## Consequences
 

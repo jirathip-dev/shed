@@ -159,6 +159,18 @@ paths = ["crates/shed-search/src/**", "crates/shed-pattern/src/**"]
 except = []
 reason = "search and patterns open no socket"
 
+[[ban]]
+pattern = "launchctl"
+paths = ["crates/*/src/**"]
+except = []
+reason = "#238: jobs are written, loaded and restarted only by farrier-service"
+
+[[ban]]
+pattern = "systemctl"
+paths = ["crates/*/src/**"]
+except = []
+reason = "#238: jobs are written, loaded and restarted only by farrier-service"
+
 [[size]]
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000

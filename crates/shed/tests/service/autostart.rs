@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use crate::common::{self, temp_dir};
-use crate::{ctl_log, shed, text};
+use crate::{ctl_log, shed, text, uid};
 
 fn autostart(home: &Path) -> Output {
     let out = shed(
@@ -50,11 +50,11 @@ fn autostart_starts_the_installed_job_and_no_server_of_its_own() {
     assert!(out.status.success(), "{out:?}");
     assert!(!text(&out).contains("started"), "{out:?}");
     let kick = if cfg!(target_os = "macos") {
-        "launchctl kickstart gui/"
+        format!("launchctl kickstart gui/{}/dev.shed.serve\n", uid())
     } else {
-        "systemctl --user reset-failed shed.service\nsystemctl --user start shed.service\n"
+        "systemctl --user start dev.shed.serve.service\n".to_owned()
     };
-    assert!(ctl_log(&home).starts_with(kick), "{}", ctl_log(&home));
+    assert!(ctl_log(&home).contains(&kick), "{}", ctl_log(&home));
 }
 
 #[test]

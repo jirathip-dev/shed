@@ -161,9 +161,9 @@ fn doctor_flags_a_server_outside_a_failed_job() {
     assert!(shed(&home, &["install"]).status.success());
     let _server = Server::start(&home);
     let inactive = if cfg!(target_os = "macos") {
-        "list"
+        "print"
     } else {
-        "is-active"
+        "show"
     };
     let out = shed_with(&home, &["--dir", d, "doctor"], &[("CTL_FAIL", inactive)]);
     assert_eq!(out.status.code(), Some(1), "{out:?}");

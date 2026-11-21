@@ -24,8 +24,9 @@ fn shed_with(home: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
     for ctl in ["launchctl", "systemctl"] {
         let file = bin.join(ctl);
         let log = "echo \"$(basename \"$0\") $*\" >> \"$(dirname \"$0\")/ctl.log\"\n\
-                   case \"$*\" in *\" start \"*|kickstart*) \"$SHED_BIN\" serve </dev/null >/dev/null 2>&1 & esac\n\
-                   [ -z \"$CTL_FAIL\" ] || case \"$*\" in *\"$CTL_FAIL\"*) exit 3; esac\n";
+                   [ -z \"$CTL_FAIL\" ] || case \"$*\" in *\"$CTL_FAIL\"*) exit 3; esac\n\
+                   case \"$*\" in *\" show \"*) printf 'ActiveState=active\\n\\nActiveState=active\\n'; esac\n\
+                   case \"$*\" in *\" start \"*|kickstart*) \"$SHED_BIN\" serve </dev/null >/dev/null 2>&1 & esac\n";
         std::fs::write(&file, format!("#!/bin/sh\n{log}")).expect("fake ctl");
         std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     }
@@ -55,6 +56,11 @@ fn job_file(home: &Path) -> PathBuf {
     if cfg!(target_os = "macos") {
         home.join("Library/LaunchAgents/dev.shed.serve.plist")
     } else {
-        home.join(".config/systemd/user/shed.service")
+        home.join(".config/systemd/user/dev.shed.serve.service")
     }
+}
+
+fn uid() -> String {
+    let uid = Command::new("id").arg("-u").output().expect("id -u").stdout;
+    String::from_utf8_lossy(&uid).trim().to_owned()
 }
