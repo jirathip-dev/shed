@@ -237,7 +237,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
     crate::out::line(format_args!("ok    memory   {memory}"));
     let home = shed_server::config::var("HOME").unwrap_or_default();
     let dir = paths.providers();
-    let bad = shed_server::providers::load(&dir).1;
+    let bad = shed_server::providers::Catalog::load(&dir).1;
     for e in &bad {
         crate::out::line(format_args!("FAIL  provider {e}; skipped"));
     }

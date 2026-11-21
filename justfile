@@ -96,6 +96,7 @@ arch:
     cd ci/fixtures/arch-search-net && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-search-layer && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-client && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-catalog && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-hello && ! drover arch-check --config ../../../.drover/arch.toml
 
 # A change that drops or retypes a method, field or type in docs/shed.openrpc.json raises PROTOCOL (against ARCH_BASE, else HEAD); the fixture proves the check bites.

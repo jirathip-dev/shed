@@ -1,5 +1,4 @@
-//! Builds in every provider record in `src/providers/*.toml` and every line format in
-//! `src/providers/*.rs`, so a new agent is one data file and, for the stream driver, one Rust file.
+//! Builds in every line format in `src/providers/*.rs`, so a stream driver's agent is one Rust file.
 
 use std::path::{Path, PathBuf};
 use std::{env, fs, io};
@@ -23,18 +22,11 @@ fn main() -> io::Result<()> {
             .collect();
         entries.concat()
     };
-    let records = of("toml", &|name, path| {
-        format!("({name:?}, include_str!({path:?})), ")
-    });
     let mods = of("rs", &|name, path| {
         format!("#[path = {path:?}]\nmod {name};\n")
     });
     let wires = of("rs", &|name, _| format!("({name:?}, {name}::wire), "));
     let out = env::var_os("OUT_DIR").ok_or_else(|| io::Error::other("OUT_DIR is unset"))?;
-    fs::write(
-        Path::new(&out).join("providers.rs"),
-        format!("&[{records}]\n"),
-    )?;
     let wires = format!("{mods}const WIRES: &[(&str, MakeWire)] = &[{wires}];\n");
     fs::write(Path::new(&out).join("wires.rs"), wires)
 }

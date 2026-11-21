@@ -8,8 +8,12 @@ login = "claude auth login"
 status = "claude auth status"
 logout = "claude auth logout"
 config_dir_var = "CLAUDE_CONFIG_DIR"
+install = "curl -fsSL https://claude.ai/install.sh | bash"
+token_var = "CLAUDE_CODE_OAUTH_TOKEN"
+models = [["opus", "Opus"], ["fable", "Fable"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]]
+model_env = "ANTHROPIC_MODEL"
 effort_args = ["--effort", "{effort}"]
-efforts = ["low", "medium", "high", "xhigh"]
+efforts = ["low", "medium", "high", "xhigh", "max"]
 
 [quota]
 path = ["quota", "token_count"]
@@ -68,7 +72,7 @@ launchers = ["npx", "-y", "node"]
 new = ["--session-id", "{session}"]
 resume = ["--resume", "{session}"]
 model = ["--model", "{model}"]
-models = [["opus", "Opus"], ["fable", "Fable"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]]
+effort = ["--effort", "{effort}"]
 mcp = ["--mcp-config", "{file}"]
 plan = ["TodoWrite", "todos"]
 

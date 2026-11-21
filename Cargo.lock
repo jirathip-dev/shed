@@ -1017,6 +1017,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "shed-catalog"
+version = "0.0.0"
+dependencies = [
+ "shed-proto",
+ "toml",
+]
+
+[[package]]
 name = "shed-client"
 version = "0.0.0"
 dependencies = [
@@ -1072,6 +1080,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "shed-catalog",
  "shed-client",
  "shed-core",
  "shed-pattern",
