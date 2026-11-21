@@ -20,3 +20,4 @@
 - Don't push a GitHub workflow actionlint rejects (enforced by: `just actionlint`)
 - Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo (enforced by: `just self-hosted` (scripts/self-hosted.py))
 - Don't fail an active lesson check in this file (a shadow one only reports) (enforced by: `just lessons` (drover lesson-check))
+- Don't assert that a test's measured time stays under a ceiling: it goes red on Linux CI or a loaded host (enforced by: wall-clock-bound `scripts/wall-clock-bound.py`, shadow since 2026-11-21)
