@@ -2,6 +2,7 @@
 # A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
 generated = ["CHANGELOG.md", "docs/protocol.md", "docs/shed.openrpc.json", "crates/shed-script/tests/perf/counts.json"]
 generate = "just generate"
+shared = ["crates/shed-core/src/terminal/mod.rs"]
 
 [[layer]]
 name = "core"
@@ -162,3 +163,15 @@ reason = "search and patterns open no socket"
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
 max_fn_lines = 150
+
+[[collect]]
+dir = "crates/shed-core/src/terminal"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-core/src/screen"
+glob = "*.rs"
+
+[[size]]
+paths = ["crates/shed-core/src/terminal/mod.rs"]
+max_file_lines = 350
