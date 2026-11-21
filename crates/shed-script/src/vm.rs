@@ -126,7 +126,6 @@ fn index(x: f64) -> Option<usize> {
     usize::try_from(mantissa >> 52_u64.checked_sub(exp)?).ok()
 }
 
-/// A number as JavaScript writes it: `1`, `0.5`, `1e+21`, `NaN`.
 pub(crate) fn number_text(x: f64) -> String {
     if x.is_nan() {
         return "NaN".into();
@@ -971,21 +970,7 @@ impl Run {
                 }
                 self.stack.push(Value::Number(0.0));
             }
-            Op::Next(exit) => {
-                let Value::Number(at) = self.peek(0) else {
-                    return type_error("for … of lost its place");
-                };
-                if let Some(v) = self.element(self.peek(1), index(at).unwrap_or(usize::MAX))? {
-                    self.replace(1, Value::Number(at + 1.0));
-                    self.stack.push(v);
-                } else {
-                    {
-                        self.replace(2, Value::Undefined);
-                        self.pop();
-                        self.frame()?.pc = ix(exit);
-                    }
-                }
-            }
+            Op::Next(exit) => self.next(exit)?,
             Op::Destructure(array) => {
                 let from = self.peek(0);
                 if array && !matches!(self.cell(from), Some(Cell::Array(_) | Cell::Str(_))) {
@@ -1039,6 +1024,36 @@ impl Run {
             }
             _ => {}
         }
+        Ok(())
+    }
+
+    fn next(&mut self, exit: u32) -> Done {
+        let Value::Number(at) = self.peek(0) else {
+            return type_error("for … of lost its place");
+        };
+        let offset = index(at).unwrap_or(usize::MAX);
+        let next = match self.cell(self.peek(1)) {
+            Some(Cell::Array(items)) => items.get(offset).map(|v| (Ok(*v), 1)),
+            Some(Cell::Str(s)) => s
+                .get(offset..)
+                .and_then(|rest| rest.chars().next())
+                .map(|c| (Err(c), c.len_utf8())),
+            _ => None,
+        };
+        let Some((item, width)) = next else {
+            self.stack.truncate(self.stack.len().saturating_sub(2));
+            self.frame()?.pc = ix(exit);
+            return Ok(());
+        };
+        let v = match item {
+            Ok(v) => v,
+            Err(c) => self.string(c.to_string())?,
+        };
+        self.replace(
+            1,
+            Value::Number(at + f64::from(u32::try_from(width).unwrap_or(1))),
+        );
+        self.stack.push(v);
         Ok(())
     }
 

@@ -11,9 +11,7 @@ pub mod heap;
 mod lex;
 mod parse;
 pub mod value;
-mod vm;
-
-pub use vm::{Counts, Limit, Limits, Run, Step};
+pub mod vm;
 
 /// Parses a program, the body of an async function, into its tree.
 ///
@@ -25,7 +23,7 @@ pub fn parse(code: &str) -> Result<ast::Script, ScriptError> {
     parse::Parser::new(&chars)?.script()
 }
 
-/// A program parsed and compiled: code and constants, no state; each [`Run`] has its own.
+/// A program parsed and compiled: code and constants, no state; each [`vm::Run`] has its own.
 #[derive(Debug, Clone)]
 pub struct Program {
     compiled: Arc<compile::Compiled>,

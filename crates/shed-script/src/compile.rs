@@ -1,5 +1,3 @@
-//! The tree to instructions: names resolved to registers or heap slots, jumps, handlers, destructuring.
-
 use std::collections::{HashMap, HashSet};
 use std::{iter, mem, slice};
 

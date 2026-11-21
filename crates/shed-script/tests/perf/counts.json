@@ -1,14 +1,4 @@
 {
-  "hold.js": {
-    "collections": 19,
-    "largest_collection": 3442560,
-    "peak_bytes": 64694736,
-    "steps": 39760023
-  },
-  "spin.js": {
-    "collections": 0,
-    "largest_collection": 0,
-    "peak_bytes": 32,
-    "steps": 4997012
-  }
+  "hold.js": {"steps": 39760023, "peak_bytes": 64694736, "collections": 19, "largest_collection": 3442560},
+  "spin.js": {"steps": 4997012, "peak_bytes": 32, "collections": 0, "largest_collection": 0}
 }

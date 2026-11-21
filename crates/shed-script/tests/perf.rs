@@ -4,8 +4,8 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use serde_json::json;
-use shed_script::{Counts, Limits, Program, Run, Step};
+use shed_script::Program;
+use shed_script::vm::{Counts, Limits, Run, Step};
 
 const RUNS: usize = 5;
 const SLICE: u64 = 10_000;
@@ -48,7 +48,7 @@ fn scripts() -> Vec<(String, String)> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-        .filter(|name| name.ends_with(".js"))
+        .filter(|name| Path::new(name).extension().is_some_and(|e| e == "js"))
         .collect();
     names.sort();
     names.into_iter().map(|name| (fixed(&name), name)).collect()
@@ -72,23 +72,18 @@ fn counts(code: &str) -> Counts {
 }
 
 fn table() -> String {
-    let mut all = serde_json::Map::new();
-    for (code, name) in scripts() {
-        if ceiling(&code).is_none() {
-            continue;
-        }
-        let c = counts(&code);
-        all.insert(
-            name,
-            json!({
-                "steps": c.steps,
-                "peak_bytes": c.peak_bytes,
-                "collections": c.collections,
-                "largest_collection": c.largest_collection,
-            }),
-        );
-    }
-    serde_json::to_string_pretty(&all).unwrap() + "\n"
+    let rows: Vec<String> = scripts()
+        .into_iter()
+        .filter(|(code, _)| ceiling(code).is_some())
+        .map(|(code, name)| {
+            let c = counts(&code);
+            format!(
+                "  \"{name}\": {{\"steps\": {}, \"peak_bytes\": {}, \"collections\": {}, \"largest_collection\": {}}}",
+                c.steps, c.peak_bytes, c.collections, c.largest_collection
+            )
+        })
+        .collect();
+    format!("{{\n{}\n}}\n", rows.join(",\n"))
 }
 
 #[test]

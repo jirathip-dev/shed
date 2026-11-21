@@ -3,7 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use shed_script::{Limits, Program, Run, ScriptError, Step};
+use shed_script::vm::{Limits, Run, Step};
+use shed_script::{Program, ScriptError};
 
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/test262")

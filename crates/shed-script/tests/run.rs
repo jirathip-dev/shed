@@ -2,7 +2,8 @@
 #![cfg(test)]
 
 use serde_json::{Value as Json, json};
-use shed_script::{Limits, Program, Run, ScriptError, Step};
+use shed_script::vm::{Limits, Run, Step};
+use shed_script::{Program, ScriptError};
 
 const SLICE: u64 = 10_000;
 
