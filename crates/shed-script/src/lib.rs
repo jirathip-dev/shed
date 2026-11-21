@@ -6,8 +6,10 @@ use std::sync::Arc;
 use crate::ast::Pos;
 
 pub mod ast;
+mod builtins;
 mod compile;
 pub mod heap;
+mod json;
 mod lex;
 mod parse;
 pub mod value;

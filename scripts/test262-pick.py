@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Vendors the test262 files shed's script subset runs (#214): `scripts/test262-pick.py <test262 checkout>`.
 
-Reads test/language/ of the checkout, and writes crates/shed-script/tests/test262/: `files/` with the
-picked files, `run.txt` (files that must end normally, or with their `negative:` error), `out.txt`
+Reads test/language/ of the checkout and test/built-ins/'s folders for the built-ins the subset has, and
+writes crates/shed-script/tests/test262/: `files/` with the picked files, `run.txt` (files that must end normally, or with their `negative:` error), `out.txt`
 (files that must fail with the SyntaxError naming a left-out construct, at most OUT_PER_TAG a tag),
 `skipped.txt` (every other file, by its first tag), the checkout's LICENSE and README.md with its commit.
 A file is skipped by its flags, includes, feature tags, or a construct or built-in this slice lacks;
@@ -21,11 +21,39 @@ FEATURES = {
     "arrow-function", "computed-property-names", "const", "default-parameters", "destructuring-binding",
     "let", "object-rest", "object-spread", "optional-catch-binding", "optional-chaining", "template",
     "coalesce-expression", "exponentiation", "logical-assignment-operators", "numeric-separator-literal",
-    "json-superset", "u180e", "rest-parameters", "string-trimming",
+    "json-superset", "u180e", "rest-parameters", "string-trimming", "stable-array-sort",
+    "String.prototype.at", "String.prototype.endsWith", "String.prototype.includes", "String.prototype.replaceAll",
+    "String.prototype.trimEnd", "String.prototype.trimStart", "Array.prototype.at", "Array.prototype.flat",
+    "Array.prototype.flatMap", "Array.prototype.includes", "Object.fromEntries", "Object.hasOwn",
 }
+MEMBERS = {
+    "Object": "keys values entries fromEntries assign hasOwn",
+    "Array": "isArray from",
+    "String": "fromBytes",
+    "Number": "isInteger isFinite",
+    "Math": "min max floor ceil round trunc abs sign sqrt pow",
+    "JSON": "parse stringify",
+}
+METHODS = (
+    "at charAt slice substring split trim trimStart trimEnd startsWith endsWith includes indexOf lastIndexOf "
+    "toLowerCase toUpperCase replace replaceAll padStart padEnd repeat concat localeCompare matches toBytes "
+    "push pop shift unshift join reverse flat entries map filter forEach find findIndex some every reduce "
+    "flatMap sort sameValue notSameValue throws compareArray " + " ".join(MEMBERS.values())
+)
+BUILTIN_DIRS = [
+    "Array/isArray", "Array/from", "Boolean", "JSON/parse", "JSON/stringify", "Number/isFinite", "Number/isInteger",
+    "isNaN", "parseFloat", "parseInt",
+] + [f"Math/{m}" for m in MEMBERS["Math"].split()] + [f"Object/{m}" for m in MEMBERS["Object"].split()] + [
+    f"Array/prototype/{m}" for m in "at push pop shift unshift slice concat join includes indexOf lastIndexOf "
+    "reverse flat entries map filter forEach find findIndex some every reduce flatMap sort".split()
+] + [
+    f"String/prototype/{m}" for m in "at charAt slice substring split trim trimStart trimEnd startsWith endsWith "
+    "includes indexOf lastIndexOf toLowerCase toUpperCase replace replaceAll padStart padEnd repeat concat "
+    "localeCompare".split()
+]
 OUT_FEATURES = {"class": "class", "generators": "generator", "regexp-named-groups": "regex"}
 FLAGS = {"onlyStrict", "generated"}
-INCLUDES = {"assert.js", "sta.js"}
+INCLUDES = {"assert.js", "sta.js", "compareArray.js"}
 REFUSED = [
     ("syntax:var", r"\bvar\b", "var"),
     ("syntax:this", r"\bthis\b", "this"),
@@ -58,8 +86,22 @@ DIFFERS = [
     ("differs: a script is a function body, not global code", r"^language/global-code/|statements/return/S12\.9_A1_T"),
     ("differs: ?? beside && or || is not refused", r"coalesce/cannot-chain"),
     ("differs: \"use strict\" and __proto__ are not special", r"strict-body|NSPL-with-USD|__proto__|use-strict-with-non-simple-param"),
-    ("differs: no implicit conversion", r"unary-minus/11\.4\.7-4-1|unary-plus/11\.4\.6-2-1|asi/S7\.9_A10_T[135]"),
-    ("differs: a key is a string or a number", r"optional-chain-expression-optional-expression"),
+    ("differs: no implicit conversion", r"unary-minus/11\.4\.7-4-1|unary-plus/11\.4\.6-2-1|asi/S7\.9_A10_T[135]"
+     r"|Math/m(?:ax|in)/(?:15\.8\.2\.1[12]-1|Math\.m(?:ax|in)_each-element-coerced)|indexOf/15\.4\.4\.14-5-1[57]"
+     r"|lastIndexOf/15\.4\.4\.15-5-1[57]|charAt/pos-coerce-string|indexOf/position-tointeger"
+     r"|indexOf/searchstring-tostring|pad(?:Start|End)/(?:fill-string-non-strings|max-length-not-greater-than-string)"
+     r"|parseInt/S15\.1\.2\.2_A3\.1_T[123]|Object/keys/15\.2\.3\.14-1-[123]|Object/hasOwn/hasown\.js"
+     r"|isNaN/tonumber-operations|JSON/parse/text-negative-zero"),
+    ("differs: Array.from takes an array or a string, and no map function",
+     r"Array/from/(?:array-like-has-length-but-no-indexes-with-values|mapfn-)"),
+    ("differs: JSON.stringify takes no replacer", r"JSON/stringify/replacer-"),
+    ("differs: a string is its code points, so no lone surrogate",
+     r"String/prototype/(?:pad(?:Start|End)/normal-operation|to(?:Lower|Upper)Case/(?:special_casing_conditional"
+     r"|supplementary_plane))"),
+    ("differs: no prototypes", r"rest-parameters/rest-parameters-produce-an-array"),
+    ("differs: a key is a string or a number", r"optional-chain-expression-optional-expression"
+     r"|cpn-obj-lit-computed-property-name-from-(?:arrow-function-expression|function-declaration"
+     r"|function-expression|null)\.js"),
     ("differs: a name is declared once in a block", r"recursive-array-and-object-patterns"),
     ("syntax:tagged-template", r"tagged-template/"),
     ("harness:eval", r"^language/eval-code/"),
@@ -67,19 +109,29 @@ DIFFERS = [
 KNOWN_OUT = [
     (r"init-hole", "array hole"),
     (r"optional-chain-prod-expression|statementList/.*arrow-function-boolean-literal", "comma"),
+    (r"let/syntax/let-closure-inside-(?:condition|next-expression)", "comma"),
+    (r"sort/precise-|indexOf/15\.4\.4\.14-9-b-1|lastIndexOf/15\.4\.4\.15-8-b-1", "array hole"),
+    (r"computed-property-name-from-assignment-expression-bitwise-or", "bitwise"),
     (r"statementList/.*with-labels|statementList/block-with-statment|block-scope/leave/(?:nested-block-let|verify-context-in-labelled|x-after-break)", "label"),
     (r"labeled/value-await-non-module\.js", "unexpected :"),
 ]
 SKIPPED = [
     ("harness:$262", r"\$262"),
+    ("differs: functions have no .name or .length",
+     rf"\.\s*(?:{METHODS.replace(' ', '|')})\s*\.\s*(?:length|name)\b"),
     ("harness:eval", r"\beval\b|\bFunction\s*\("),
     ("harness:$DONE", r"\$DONE|\basyncTest\b"),
     ("syntax:comma", r"\bfor\s*\([^;)]*,[^;)]*;"),
-    ("builtins (slice 4)",
-     r"\b(?:Object|Array|String|Number|Boolean|Math|JSON|Promise|Symbol|Reflect|Proxy|Map|Set|WeakMap|WeakSet"
-     r"|WeakRef|Function|Date|RegExp|BigInt|ArrayBuffer|DataView|Atomics|globalThis|isNaN|isFinite|parseInt|parseFloat"
-     r"|encodeURI|decodeURI|console|arguments|Int8Array|Uint8Array|Float64Array)\b"
-     r"|\.prototype\b|(?:\b(?!assert\b)[\w$]+|[\])])\s*\.\s*(?!sameValue\b|notSameValue\b|throws\b)\w+\s*\("),
+    ("builtins: one the subset lacks",
+     r"\b(?:Promise|Symbol|Reflect|Proxy|Map|Set|WeakMap|WeakSet|WeakRef|Function|Date|RegExp|BigInt|ArrayBuffer"
+     r"|SharedArrayBuffer|DataView|Atomics|globalThis|isFinite|encodeURI|encodeURIComponent|decodeURI"
+     r"|decodeURIComponent|escape|unescape|arguments|\w*Int\d+Array|Uint8ClampedArray|Float\d+Array|TypedArray"
+     r"|Iterator|AggregateError|EvalError|URIError|console)\b"),
+    ("builtins: a prototype, or this", r"\bprototype\b|__proto__|\.(?:call|apply|bind)\b"),
+    ("builtins: a member the subset lacks", "|".join(
+        rf"\b{owner}\s*\.\s*(?!(?:{names.replace(' ', '|')})\b)[\w$]+" for owner, names in MEMBERS.items())),
+    ("builtins: a method the subset lacks",
+     rf"(?:\b(?!assert\b)[\w$]+|[\])'])\s*\.\s*(?!(?:{METHODS.replace(' ', '|')})\b)[\w$]+\s*\("),
     ("promises (slice 5)", r"\bawait\b|\basync\b"),
     ("bitwise", r"[^&|]&[^&=]|[^|&]\|[^|=]|\^|~|<<|>>"),
 ]
@@ -162,7 +214,8 @@ def main():
     shutil.rmtree(os.path.join(dest, "files"), ignore_errors=True)
     run, out, skipped = [], collections.defaultdict(list), collections.defaultdict(list)
     root = os.path.join(src, "test")
-    for folder, _, names in sorted(os.walk(os.path.join(root, "language"))):
+    walks = [os.path.join(root, "language")] + [os.path.join(root, "built-ins", d) for d in BUILTIN_DIRS]
+    for folder, _, names in sorted(f for top in walks for f in os.walk(top)):
         for name in sorted(names):
             if not name.endswith(".js"):
                 continue

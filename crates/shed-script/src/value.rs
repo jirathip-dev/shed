@@ -19,6 +19,28 @@ pub enum Value {
     Number(f64),
     /// A cell in the heap.
     Ref(Handle),
+    /// A built-in: a global, or a function of one.
+    Native(Builtin),
+    /// A built-in method bound to the string or array it was read from.
+    Method(Builtin, Handle),
+}
+
+/// A built-in by its owner's row and its place in the row; only the built-ins' table makes one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Builtin {
+    pub(crate) owner: u8,
+    pub(crate) at: u8,
+}
+
+impl Value {
+    /// The cell it holds on to, if any.
+    #[must_use]
+    pub fn handle(self) -> Option<Handle> {
+        match self {
+            Self::Ref(h) | Self::Method(_, h) => Some(h),
+            _ => None,
+        }
+    }
 }
 
 /// What a handle points at.

@@ -6,13 +6,14 @@ use std::sync::Arc;
 use serde_json::Value as Json;
 
 use crate::ast::{Binary, Pos};
+use crate::builtins::{self, prelude};
 use crate::compile::{Code, Compiled, Op};
 use crate::heap::{Full, Heap};
-use crate::value::{Cell, Handle, Value};
+use crate::json;
+use crate::value::{Builtin, Cell, Handle, Value};
 use crate::{Program, ScriptError};
 
 const SLICE: u64 = 10_000;
-const JSON_DEPTH: usize = 200;
 
 /// What a run may use before it is stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,6 +24,8 @@ pub struct Limits {
     pub memory: usize,
     /// Frames in one task.
     pub depth: usize,
+    /// Bytes of `console` lines.
+    pub logs: usize,
 }
 
 impl Default for Limits {
@@ -31,6 +34,7 @@ impl Default for Limits {
             fuel: 50_000_000,
             memory: 64 << 20,
             depth: 200,
+            logs: 64 << 10,
         }
     }
 }
@@ -44,6 +48,8 @@ pub enum Limit {
     Memory,
     /// Its call depth.
     Depth,
+    /// Its `console` lines.
+    Logs,
 }
 
 /// What a run cost, exactly: the same program gives the same counts on every machine.
@@ -84,7 +90,7 @@ struct Handler {
     env: Option<Handle>,
 }
 
-enum Flow {
+pub(crate) enum Flow {
     Throw(Value),
     Error(&'static str, String),
     Collect,
@@ -92,13 +98,13 @@ enum Flow {
     Return(Value),
 }
 
-type Done<T = ()> = Result<T, Flow>;
+pub(crate) type Done<T = ()> = Result<T, Flow>;
 
-fn type_error<T>(message: impl Into<String>) -> Done<T> {
+pub(crate) fn type_error<T>(message: impl Into<String>) -> Done<T> {
     Err(Flow::Error("TypeError", message.into()))
 }
 
-fn full(full: Full) -> Flow {
+pub(crate) fn full(full: Full) -> Flow {
     match full {
         Full::Collect => Flow::Collect,
         Full::Memory => Flow::Limit(Limit::Memory),
@@ -109,11 +115,11 @@ fn ix(at: u32) -> usize {
     usize::try_from(at).unwrap_or(usize::MAX)
 }
 
-fn count(len: usize) -> Value {
+pub(crate) fn count(len: usize) -> Value {
     Value::Number(u32::try_from(len).map_or(f64::INFINITY, f64::from))
 }
 
-fn index(x: f64) -> Option<usize> {
+pub(crate) fn index(x: f64) -> Option<usize> {
     if x == 0.0 {
         return Some(0);
     }
@@ -163,13 +169,15 @@ pub(crate) fn number_text(x: f64) -> String {
 #[derive(Debug)]
 pub struct Run {
     program: Arc<Compiled>,
-    limits: Limits,
-    heap: Heap,
-    stack: Vec<Value>,
+    pub(crate) limits: Limits,
+    pub(crate) heap: Heap,
+    pub(crate) stack: Vec<Value>,
     frames: Vec<Frame>,
     handlers: Vec<Handler>,
     strings: Vec<Handle>,
-    steps: u64,
+    pub(crate) logs: Vec<String>,
+    pub(crate) logged: usize,
+    pub(crate) steps: u64,
     retries: u8,
     done: Option<Result<Json, ScriptError>>,
 }
@@ -186,6 +194,8 @@ impl Run {
             frames: Vec::new(),
             handlers: Vec::new(),
             strings: Vec::new(),
+            logs: Vec::new(),
+            logged: 0,
             steps: 0,
             retries: 0,
             done: None,
@@ -211,15 +221,19 @@ impl Run {
 
     /// Runs one slice: at most 10,000 steps or units of collecting.
     pub fn step(&mut self) -> Step {
-        let mut units = 0;
-        while self.done.is_none() && units < SLICE {
+        let (start, mut collected) = (self.steps, 0);
+        loop {
+            let units = self.steps.saturating_sub(start) + collected;
+            if self.done.is_some() || units >= SLICE {
+                break;
+            }
             if self.heap.collecting() || self.heap.wants_collection() {
                 let roots = if self.heap.collecting() {
                     Vec::new()
                 } else {
                     self.roots()
                 };
-                units += self.heap.collect(&roots, SLICE - units).max(1);
+                collected += self.heap.collect(&roots, SLICE - units).max(1);
                 continue;
             }
             if self.steps >= self.limits.fuel {
@@ -227,7 +241,6 @@ impl Run {
                 break;
             }
             self.steps += 1;
-            units += 1;
             match self.exec() {
                 Ok(()) => self.retries = 0,
                 Err(flow) => self.flow(flow),
@@ -237,6 +250,12 @@ impl Run {
             Some(done) => Step::Done(done.clone()),
             None => Step::More,
         }
+    }
+
+    /// The `console` lines so far, one an entry.
+    #[must_use]
+    pub fn logs(&self) -> &[String] {
+        &self.logs
     }
 
     /// What the run has cost so far.
@@ -252,10 +271,7 @@ impl Run {
     }
 
     fn roots(&self) -> Vec<Handle> {
-        let refs = self.stack.iter().filter_map(|v| match v {
-            Value::Ref(h) => Some(*h),
-            _ => None,
-        });
+        let refs = self.stack.iter().filter_map(|v| v.handle());
         let envs = self.frames.iter().filter_map(|f| f.env);
         let handlers = self.handlers.iter().filter_map(|h| h.env);
         refs.chain(envs)
@@ -265,12 +281,23 @@ impl Run {
     }
 
     fn code(&self, at: usize) -> Option<&Code> {
-        self.program.code.get(at)
+        self.program.code.get(at).or_else(|| {
+            let at = at.checked_sub(self.program.code.len())?;
+            prelude().compiled.code.get(at)
+        })
     }
 
-    fn pos(&self) -> Pos {
+    fn in_prelude(&self) -> bool {
         self.frames
             .last()
+            .is_some_and(|f| f.code >= self.program.code.len())
+    }
+
+    pub(crate) fn pos(&self) -> Pos {
+        self.frames
+            .iter()
+            .rev()
+            .find(|f| f.code < self.program.code.len())
             .and_then(|f| self.code(f.code)?.at.get(f.pc.checked_sub(1)?).copied())
             .unwrap_or(Pos { line: 1, column: 1 })
     }
@@ -296,6 +323,13 @@ impl Run {
                 format!(
                     "stopped at {} nested calls: recursion too deep, use a loop",
                     self.limits.depth
+                ),
+            ),
+            Limit::Logs => (
+                "LOGS",
+                format!(
+                    "stopped at {} bytes of console lines: log less",
+                    self.limits.logs
                 ),
             ),
         };
@@ -363,15 +397,15 @@ impl Run {
         }
     }
 
-    fn alloc(&mut self, cell: Cell) -> Done<Value> {
+    pub(crate) fn alloc(&mut self, cell: Cell) -> Done<Value> {
         self.heap.alloc(cell).map(Value::Ref).map_err(full)
     }
 
-    fn string(&mut self, text: impl Into<Box<str>>) -> Done<Value> {
+    pub(crate) fn string(&mut self, text: impl Into<Box<str>>) -> Done<Value> {
         self.alloc(Cell::Str(text.into()))
     }
 
-    fn error(&mut self, name: &str, message: &str) -> Done<Value> {
+    pub(crate) fn error(&mut self, name: &str, message: &str) -> Done<Value> {
         let pos = self.pos();
         let name = self.string(name)?;
         let message = self.string(message)?;
@@ -409,21 +443,21 @@ impl Run {
         }
     }
 
-    fn cell(&self, value: Value) -> Option<&Cell> {
+    pub(crate) fn cell(&self, value: Value) -> Option<&Cell> {
         match value {
             Value::Ref(h) => self.heap.get(h),
             _ => None,
         }
     }
 
-    fn str(&self, value: Value) -> Option<&str> {
+    pub(crate) fn str(&self, value: Value) -> Option<&str> {
         match self.cell(value) {
             Some(Cell::Str(s)) => Some(s),
             _ => None,
         }
     }
 
-    fn kind(&self, value: Value) -> &'static str {
+    pub(crate) fn kind(&self, value: Value) -> &'static str {
         match (value, self.cell(value)) {
             (Value::Undefined, _) => "undefined",
             (Value::Null, _) => "null",
@@ -431,12 +465,13 @@ impl Run {
             (Value::Number(_), _) => "number",
             (_, Some(Cell::Str(_))) => "string",
             (_, Some(Cell::Array(_))) => "array",
-            (_, Some(Cell::Closure { .. })) => "function",
+            (_, Some(Cell::Closure { .. })) | (Value::Method(..), _) => "function",
+            (Value::Native(b), _) => builtins::kind(b),
             _ => "object",
         }
     }
 
-    fn a(&self, value: Value) -> String {
+    pub(crate) fn a(&self, value: Value) -> String {
         match self.kind(value) {
             kind @ ("undefined" | "null") => kind.into(),
             kind @ ("array" | "object") => format!("an {kind}"),
@@ -444,79 +479,32 @@ impl Run {
         }
     }
 
-    fn truthy(&self, value: Value) -> bool {
+    pub(crate) fn truthy(&self, value: Value) -> bool {
         match value {
             Value::Undefined | Value::Null => false,
             Value::Bool(b) => b,
             Value::Number(x) => x != 0.0 && !x.is_nan(),
             Value::Ref(_) => self.str(value).is_none_or(|s| !s.is_empty()),
+            Value::Native(_) | Value::Method(..) => true,
         }
     }
 
-    fn same(&self, a: Value, b: Value) -> bool {
+    pub(crate) fn same(&self, a: Value, b: Value) -> bool {
         match (self.str(a), self.str(b)) {
             (Some(x), Some(y)) => x == y,
             _ => a == b,
         }
     }
 
-    fn text(&self, value: Value) -> Result<String, String> {
+    pub(crate) fn text(&self, value: Value) -> Result<String, String> {
         Ok(match value {
             Value::Undefined => "undefined".into(),
             Value::Null => "null".into(),
             Value::Bool(b) => b.to_string(),
             Value::Number(x) => number_text(x),
-            Value::Ref(_) => match self.str(value) {
+            Value::Ref(_) | Value::Native(_) | Value::Method(..) => match self.str(value) {
                 Some(s) => s.into(),
-                None => self.json(value, "the value", 0)?.to_string(),
-            },
-        })
-    }
-
-    fn json(&self, value: Value, path: &str, depth: usize) -> Result<Json, String> {
-        if depth > JSON_DEPTH {
-            return Err(format!(
-                "{path} is nested over {JSON_DEPTH} deep (does it hold itself?)"
-            ));
-        }
-        Ok(match value {
-            Value::Undefined | Value::Null => Json::Null,
-            Value::Bool(b) => Json::Bool(b),
-            Value::Number(x) if x.is_finite() => {
-                if x.fract() == 0.0 && x.abs() <= 9_007_199_254_740_992.0 {
-                    number_text(x).parse::<i64>().map_or(Json::Null, Json::from)
-                } else {
-                    serde_json::Number::from_f64(x).map_or(Json::Null, Json::Number)
-                }
-            }
-            Value::Number(x) => {
-                return Err(format!(
-                    "{path} is {}: JSON has no such number",
-                    number_text(x)
-                ));
-            }
-            Value::Ref(_) => match self.cell(value) {
-                Some(Cell::Str(s)) => Json::String(s.to_string()),
-                Some(Cell::Array(items)) => Json::Array(
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(at, v)| self.json(*v, &format!("{path}[{at}]"), depth + 1))
-                        .collect::<Result<_, _>>()?,
-                ),
-                Some(Cell::Object(fields)) => {
-                    let mut map = serde_json::Map::new();
-                    for (key, v) in fields {
-                        if *v != Value::Undefined {
-                            map.insert(
-                                key.to_string(),
-                                self.json(*v, &format!("{path}.{key}"), depth + 1)?,
-                            );
-                        }
-                    }
-                    Json::Object(map)
-                }
-                _ => return Err(format!("{path} is {}: JSON cannot carry it", self.a(value))),
+                None => json::write(&self.json(value, "the value", 0)?, ""),
             },
         })
     }
@@ -557,8 +545,12 @@ impl Run {
     }
 
     fn name(&self, at: u32) -> Arc<str> {
-        self.program
-            .strings
+        let unit = if self.in_prelude() {
+            &prelude().compiled
+        } else {
+            &*self.program
+        };
+        unit.strings
             .get(ix(at))
             .map_or_else(|| "".into(), Arc::clone)
     }
@@ -583,10 +575,8 @@ impl Run {
             | Op::Dup2
             | Op::Nip
             | Op::Reg(_)
-            | Op::SetReg(_) => {
-                self.stack_op(op, base);
-                Ok(())
-            }
+            | Op::SetReg(_)
+            | Op::Native(_) => self.stack_op(op, base),
             Op::Load(..)
             | Op::Store(..)
             | Op::Global(_)
@@ -633,9 +623,13 @@ impl Run {
         }
     }
 
-    fn stack_op(&mut self, op: Op, base: usize) {
+    fn stack_op(&mut self, op: Op, base: usize) -> Done {
         match op {
             Op::Num(x) => self.stack.push(Value::Number(x)),
+            Op::Str(at) if self.in_prelude() => {
+                let s = self.string(&*self.name(at))?;
+                self.stack.push(s);
+            }
             Op::Str(at) => {
                 let s = self
                     .strings
@@ -673,8 +667,10 @@ impl Run {
                     *slot = v;
                 }
             }
+            Op::Native(b) => self.stack.push(Value::Native(b)),
             _ => {}
         }
+        Ok(())
     }
 
     fn scope_op(&mut self, op: Op) -> Done {
@@ -697,9 +693,10 @@ impl Run {
                 }
             }
             Op::Global(at) => {
+                let name = self.name(at);
                 return Err(Flow::Error(
                     "ReferenceError",
-                    format!("{} is not defined", self.name(at)),
+                    format!("{name} is not defined{}", builtins::hint(&name)),
                 ));
             }
             Op::ConstSet(at) => {
@@ -732,8 +729,13 @@ impl Run {
             }
             Op::Closure(function) => {
                 let scope = self.frames.last().and_then(|f| f.env);
+                let offset = if self.in_prelude() {
+                    self.program.code.len()
+                } else {
+                    0
+                };
                 let closure = self.alloc(Cell::Closure {
-                    function: ix(function),
+                    function: ix(function) + offset,
                     scope,
                 })?;
                 self.stack.push(closure);
@@ -1056,9 +1058,35 @@ impl Run {
 
     fn call(&mut self, at: usize, args: &[Value]) -> Done {
         let callee = self.stack.get(at).copied().unwrap_or(Value::Undefined);
-        let Some(&Cell::Closure { function, scope }) = self.cell(callee) else {
-            return type_error(format!("{} is not a function", self.kind(callee)));
+        let (function, scope) = match (callee, self.cell(callee)) {
+            (_, Some(&Cell::Closure { function, scope })) => (function, scope),
+            (Value::Native(b), _) => return self.native(b, Value::Undefined, at, args),
+            (Value::Method(b, this), _) => return self.native(b, Value::Ref(this), at, args),
+            _ => return type_error(format!("{} is not a function", self.kind(callee))),
         };
+        self.enter(function, scope, at, args)
+    }
+
+    fn native(&mut self, b: Builtin, this: Value, at: usize, args: &[Value]) -> Done {
+        let (owner, name) = builtins::names(b);
+        if owner == "array"
+            && let Some(function) = prelude().function(name)
+        {
+            let args: Vec<Value> = std::iter::once(this).chain(args.iter().copied()).collect();
+            return self.enter(self.program.code.len() + function, None, at, &args);
+        }
+        let v = self.builtin(owner, name, this, args)?;
+        self.replace(self.stack.len().saturating_sub(at), v);
+        Ok(())
+    }
+
+    pub(crate) fn enter(
+        &mut self,
+        function: usize,
+        scope: Option<Handle>,
+        at: usize,
+        args: &[Value],
+    ) -> Done {
         let (params, rest, locals) = self
             .code(function)
             .map_or((0, false, 0), |c| (c.params, c.rest, c.locals));
@@ -1143,7 +1171,7 @@ impl Run {
         ))
     }
 
-    fn key(&self, key: Value) -> Done<Arc<str>> {
+    pub(crate) fn key(&self, key: Value) -> Done<Arc<str>> {
         match key {
             Value::Number(x) => Ok(number_text(x).into()),
             _ => match self.str(key) {
@@ -1166,7 +1194,10 @@ impl Run {
         self.get(object, &key)
     }
 
-    fn get(&self, object: Value, name: &str) -> Done<Value> {
+    pub(crate) fn get(&self, object: Value, name: &str) -> Done<Value> {
+        if let Value::Native(b) = object {
+            return Ok(builtins::member(b, name));
+        }
         Ok(match self.cell(object) {
             Some(Cell::Object(fields)) => fields
                 .iter()
@@ -1174,11 +1205,11 @@ impl Run {
                 .map_or(Value::Undefined, |(_, v)| *v),
             Some(Cell::Array(items)) if name == "length" => count(items.len()),
             Some(Cell::Str(s)) if name == "length" => count(s.chars().count()),
-            Some(Cell::Array(items)) => name
-                .parse::<usize>()
-                .ok()
-                .and_then(|at| items.get(at).copied())
-                .unwrap_or(Value::Undefined),
+            Some(Cell::Array(items)) => match name.parse::<usize>() {
+                Ok(at) => items.get(at).copied().unwrap_or(Value::Undefined),
+                Err(_) => builtins::method("array", name, object),
+            },
+            Some(Cell::Str(_)) => builtins::method("string", name, object),
             _ if matches!(object, Value::Undefined | Value::Null) => {
                 return type_error(format!(
                     "cannot read .{name} of {}: guard it with ?.",
@@ -1225,14 +1256,14 @@ impl Run {
         }
     }
 
-    fn field(&mut self, object: Value, key: &Arc<str>, v: Value) -> Done {
+    pub(crate) fn field(&mut self, object: Value, key: &Arc<str>, v: Value) -> Done {
         if let Value::Ref(handle) = object {
             self.heap.set_field(handle, key, v).map_err(full)?;
         }
         Ok(())
     }
 
-    fn element(&mut self, from: Value, at: usize) -> Done<Option<Value>> {
+    pub(crate) fn element(&mut self, from: Value, at: usize) -> Done<Option<Value>> {
         match self.cell(from) {
             Some(Cell::Array(items)) => Ok(items.get(at).copied()),
             Some(Cell::Str(s)) => match s.chars().nth(at) {
@@ -1243,7 +1274,7 @@ impl Run {
         }
     }
 
-    fn items(&mut self, from: Value) -> Done<Vec<Value>> {
+    pub(crate) fn items(&mut self, from: Value) -> Done<Vec<Value>> {
         match self.cell(from) {
             Some(Cell::Array(items)) => Ok(items.clone()),
             Some(Cell::Str(s)) => {

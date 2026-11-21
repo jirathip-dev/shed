@@ -1066,6 +1066,7 @@ name = "shed-script"
 version = "0.0.0"
 dependencies = [
  "serde_json",
+ "shed-pattern",
 ]
 
 [[package]]

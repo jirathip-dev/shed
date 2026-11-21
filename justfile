@@ -124,7 +124,7 @@ bench:
 
 # The script engine's speed report (#214): targets 3, 4 and 5, each the median and range of 5 runs.
 script-bench:
-    cargo test -p shed-script --release --locked --test perf speed_report -- --ignored --nocapture
+    cargo test -p shed-script --release --locked --test perf speed_report -- --ignored --nocapture --test-threads 1
 
 # Build shed and install it to BIN_DIR/shed (default ~/.cargo/bin), signed on macOS with "herdsman-local" (#56).
 install *BIN_DIR:
