@@ -5,8 +5,10 @@ use std::fmt;
 use crate::ast::Pos;
 
 pub mod ast;
+pub mod heap;
 mod lex;
 mod parse;
+pub mod value;
 
 /// Parses a program, the body of an async function, into its tree.
 ///
