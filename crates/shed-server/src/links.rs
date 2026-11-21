@@ -9,7 +9,8 @@ use serde_json::Value;
 
 use crate::machines::{self, Machine};
 use crate::proto::{ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, RpcError};
-use crate::{Client, Error, Shared, blocking, lock};
+use crate::{Error, Shared, blocking, lock};
+use shed_client::Conn;
 
 #[derive(Default)]
 pub(crate) struct Links {
@@ -20,7 +21,7 @@ pub(crate) struct Links {
 
 struct Held {
     machine: Machine,
-    calls: Mutex<Option<Client>>,
+    calls: Mutex<Option<Conn>>,
     link: Mutex<Link>,
 }
 
@@ -138,8 +139,8 @@ impl Links {
         let mut value = blocking(move || {
             if method == Method::Wait && lock(&held.link).state == LinkState::Up {
                 let waiting = machines::connect(&held.machine, &control, false);
-                return match waiting.and_then(|mut c| c.call(method, &params)) {
-                    Err(Error::Rpc(e)) => Err(e),
+                return match waiting.and_then(|mut c| Ok(c.call(method, &params)?)) {
+                    Err(Error::Client(shed_client::Error::Rpc(e))) => Err(e),
                     Err(e) => Err(no_link(&e.to_string())),
                     Ok(value) => Ok(value),
                 };
@@ -157,7 +158,7 @@ impl Links {
                 });
             };
             match client.call(method, &params) {
-                Err(Error::Rpc(e)) => Err(e),
+                Err(shed_client::Error::Rpc(e)) => Err(e),
                 Err(e) => {
                     *calls = None;
                     Err(no_link(&e.to_string()))
@@ -222,7 +223,7 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
 }
 
 fn beat(mut writer: &UnixStream) {
-    let line = crate::notification(Method::Heartbeat, &serde_json::json!({}));
+    let line = shed_client::notification(Method::Heartbeat, &serde_json::json!({}));
     let line = line.unwrap_or_default();
     while writer.write_all(&line).is_ok() {
         shed_core::clock::sleep(crate::HEARTBEAT);

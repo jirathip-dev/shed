@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
-use shed_server::{Client, Error, Paths};
+use shed_client::{Conn, Error};
+use shed_server::Paths;
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
@@ -329,24 +330,24 @@ impl Drop for Limited {
     }
 }
 
-fn connect(dir: &Path) -> Client {
-    Client::connect(&Paths::in_dir(dir).socket).expect("connect")
+fn connect(dir: &Path) -> Conn {
+    Conn::connect(&Paths::in_dir(dir).socket).expect("connect")
 }
 
-fn spawn(client: &mut Client, dir: &Path, name: &str, cmd: &[&str]) -> Result<Value, Error> {
+fn spawn(client: &mut Conn, dir: &Path, name: &str, cmd: &[&str]) -> Result<Value, Error> {
     client.call(
         shed_server::proto::Method::Run,
         &json!({"name": name, "cwd": dir, "cmd": cmd}),
     )
 }
 
-fn list(client: &mut Client) -> Vec<Value> {
+fn list(client: &mut Conn) -> Vec<Value> {
     client
         .call(shed_server::proto::Method::Ls, &json!({}))
         .expect("ls")
 }
 
-fn running_count(client: &mut Client) -> usize {
+fn running_count(client: &mut Conn) -> usize {
     list(client)
         .iter()
         .filter(|t| t["state"] == "running")

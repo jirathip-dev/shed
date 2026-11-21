@@ -1011,8 +1011,19 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "shed-client",
  "shed-core",
  "shed-server",
+]
+
+[[package]]
+name = "shed-client"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shed-proto",
+ "thiserror",
 ]
 
 [[package]]
@@ -1061,6 +1072,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "shed-client",
  "shed-core",
  "shed-pattern",
  "shed-proto",

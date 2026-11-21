@@ -11,5 +11,8 @@ publish.workspace = true
 [dependencies]
 shed-proto.workspace = true
 
+[package.metadata.gate]
+test_secs = 5
+
 [lints]
 workspace = true

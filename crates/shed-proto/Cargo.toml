@@ -20,5 +20,8 @@ schema = ["dep:schemars", "serde_json/preserve_order"]
 name = "protocol_doc"
 required-features = ["schema"]
 
+[package.metadata.gate]
+test_secs = 5
+
 [lints]
 workspace = true

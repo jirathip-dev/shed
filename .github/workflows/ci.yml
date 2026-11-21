@@ -14,78 +14,37 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Every gate on the MSRV toolchain (rust-toolchain.toml), on Linux; macOS runs the stable tests.
-  msrv:
+  # Every gate in one step, `just check`, as it runs locally: on the MSRV toolchain (rust-toolchain.toml),
+  # on Linux, with drover (arch-check and the lesson checks) built on 1.99.1. macOS runs the stable tests.
+  gate:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.97.1
-        with:
-          components: clippy, rustfmt
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-deny
-      - name: fmt
-        run: just fmt
-      - name: clippy (pedantic, at most 10 allows)
-        run: just clippy
-      - name: banned APIs (one fixture per ban; clippy rejects each)
-        run: just banned
-      - name: a live shed's folder in the system temp dir, which temp-left must not see (#220)
-        run: mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"
-      - name: test
-        run: just test
-      - name: tests leave no temp folders (no shed-* in the temp dir)
-        run: just temp-left
-      - name: timing report (soft, < 20 ms per non-waiting call)
-        run: just bench
-      - name: doc
-        run: just doc
-      - name: deny (licences, advisories, duplicate versions)
-        run: just deny
-      - name: line cap (≤ 5,000 non-test lines in crates/*/src)
-        run: just cap
-      - name: dependency direction (shed-core has no workspace deps)
-        run: just deps
-      - name: public hygiene (ci/denylist.txt)
-        run: just hygiene
-      - name: neutral core (no agent or provider names outside providers/)
-        run: just neutral
-      - name: comment rule (no //; /// on public API only)
-        run: just comments
-
-  # The fleet-wide rules: actionlint, drover's arch-check (layers, banned calls, size limits in
-  # .drover/arch.toml) and lesson checks (.drover/rules.md), each with the fixtures that break it.
-  rules:
-    runs-on: ubuntu-latest
-    env:
-      RUSTUP_TOOLCHAIN: 1.99.1
     steps:
       # Two commits: on a pull request the merge commit and its base, for arch-check's --base.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: clippy, rustfmt
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-deny
       - name: install actionlint 1.7.12
         run: |
           curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz |
             tar -xz -C "$RUNNER_TEMP" actionlint
           echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: install drover (herdsman's renamed CLI)
+        env:
+          RUSTUP_TOOLCHAIN: 1.99.1
         run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging drover
-      - name: actionlint (.github/workflows)
-        run: just actionlint
-      - name: arch-check (.drover/arch.toml; generated files rerun `just generate`)
+      - name: a live shed's folder in the system temp dir, which temp-left must not see (#220)
+        run: mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"
+      - name: just check
         env:
           ARCH_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
-        run: just arch
-      - name: lesson checks (active fail, shadow report)
-        run: just lessons
-      - name: self-hosted runners gated to same-repo code
-        run: just self-hosted
+        run: just check
 
   # macOS runs on the self-hosted runner in vars.CI_RUNNER (a JSON label list, docs/ci.md) for same-repo
   # code only; fork PRs, or an unset variable, get macos-latest.
@@ -105,6 +64,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: test
         run: cargo test --workspace --locked
+      - uses: taiki-e/install-action@v2
+        if: matrix.os == 'ubuntu'
+        with:
+          tool: just
+      - name: timing report (soft, < 20 ms per non-waiting call)
+        if: matrix.os == 'ubuntu'
+        run: just bench
 
   # The event fan-out bench at the PR's base and head on one runner, median of 5 each; fails if the
   # head is more than 10% slower.

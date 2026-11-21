@@ -210,6 +210,10 @@ All notable changes to this project are documented here. The format follows
 - `read` returns a `cursor`, and `read` with `since: <cursor>` returns only what is new: the lines that
   scrolled off since, then the screen only when it changed (`changed`). Lines scrollback dropped before
   they were read are counted in `lost`. ACP terminals take `since` for their events by `seq`.
+- `shed-client`, the one client for shed's socket: the handshake, a pool of idle connections with a call
+  timeout, the typed calls and the streams, blocking and with no async runtime. shed's own CLI, machine
+  links and ACP bridge run on it. A server shed cannot speak to is named in one `SHED_VERSION` line that
+  says which side to update.
 - `shed code outline FILE` (`code.outline`, with `machine` over a held link): a file's functions, types,
   sections and blocks in file order, each with its kind, name, line range and depth, by line rules for Rust,
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or

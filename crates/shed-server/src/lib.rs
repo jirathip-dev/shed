@@ -1,7 +1,7 @@
 //! shed's per-user server: the socket, JSON-RPC, the events stream and machines over SSH.
 //!
 //! [`serve`] owns the terminals and answers newline-delimited JSON-RPC 2.0 ([`shed_proto`]) on a
-//! Unix socket, one tokio task per connection. [`Client`] is the other end.
+//! Unix socket, one tokio task per connection. `shed_client` is the other end.
 #![forbid(unsafe_code)]
 
 pub mod agents;
@@ -24,7 +24,7 @@ mod stats;
 use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, BufRead as _, BufReader, BufWriter, Read as _, Write as _};
+use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::os::unix::net::UnixStream;
@@ -64,15 +64,9 @@ pub enum Error {
     /// A server already answers on the socket.
     #[error("a shed server already runs on {0}")]
     AlreadyRunning(PathBuf),
-    /// The server answered with an error (including the `SHED_VERSION` refusal).
-    #[error("{0}")]
-    Rpc(RpcError),
-    /// The server closed the connection or sent something that is not a response.
-    #[error("bad response from the server: {0}")]
-    BadResponse(String),
-    /// The server sent no answer within the client's deadline (`$SHED_STATE_TIMEOUT` for `shed state`).
-    #[error("no answer from the server within {0:?} ($SHED_STATE_TIMEOUT)")]
-    Deadline(Duration),
+    /// A call to a server failed.
+    #[error(transparent)]
+    Client(#[from] shed_client::Error),
     /// The ACP agent could not start or failed the handshake.
     #[error("acp: {0}")]
     Acp(String),
@@ -1004,119 +998,6 @@ async fn wait_children(
     }
 }
 
-/// A connection to a server, past the version handshake.
-pub struct Client {
-    reader: BufReader<UnixStream>,
-    writer: BufWriter<UnixStream>,
-    next_id: u64,
-    server: Hello,
-}
-
-impl Client {
-    /// Connects to the server on `socket` and checks it speaks this protocol.
-    ///
-    /// # Errors
-    /// [`Error::Rpc`] with `SHED_VERSION: client <sha> protocol <a>-<b> / server <sha> protocol <c>-<d>; update <side>`
-    /// when the protocol ranges do not overlap; [`Error::Io`] when nothing listens.
-    pub fn connect(socket: &Path) -> Result<Self, Error> {
-        Self::over(UnixStream::connect(socket)?)
-    }
-
-    /// As [`Client::connect`], but each answer, the handshake's too, must come within `deadline`.
-    /// # Errors
-    /// As [`Client::connect`]; [`Error::Deadline`] when an answer is late.
-    pub fn connect_within(socket: &Path, deadline: Option<Duration>) -> Result<Self, Error> {
-        let stream = UnixStream::connect(socket)?;
-        stream.set_read_timeout(deadline)?;
-        Self::over(stream)
-    }
-
-    /// Speaks the protocol over `writer`, a connected stream (a socket, or one end of a socketpair
-    /// whose other end is `ssh … shed connect`), and checks the server speaks this protocol.
-    ///
-    /// # Errors
-    /// As [`Client::connect`].
-    pub fn over(writer: UnixStream) -> Result<Self, Error> {
-        let mut client = Self {
-            reader: BufReader::new(writer.try_clone()?),
-            writer: BufWriter::new(writer),
-            next_id: 1,
-            server: Hello::ours(),
-        };
-        client.server = client.call(Method::Hello, &Hello::ours())?;
-        if !client.server.compatible() {
-            return Err(Error::Rpc(RpcError::version(
-                &Hello::ours(),
-                &client.server,
-            )));
-        }
-        Ok(client)
-    }
-
-    /// The server's answer to `hello`: its version, build and protocol.
-    #[must_use]
-    pub fn server(&self) -> &Hello {
-        &self.server
-    }
-
-    /// Calls `method` with `params` and decodes its result.
-    ///
-    /// # Errors
-    /// [`Error::Rpc`] when the server answers with an error; [`Error::BadResponse`],
-    /// [`Error::Json`] or [`Error::Io`] when the exchange itself fails.
-    pub fn call<P: Serialize, R: DeserializeOwned>(
-        &mut self,
-        method: Method,
-        params: &P,
-    ) -> Result<R, Error> {
-        let request = Request::new(self.next_id, method, serde_json::to_value(params)?);
-        self.next_id += 1;
-        serde_json::to_writer(&mut self.writer, &request)?;
-        self.writer.write_all(b"\n")?;
-        self.writer.flush()?;
-        let mut reply = String::new();
-        let read = self.reader.read_line(&mut reply);
-        if read.map_err(|e| self.late(e))? == 0 {
-            return Err(Error::BadResponse("connection closed".to_owned()));
-        }
-        let response: Response = serde_json::from_str(&reply)?;
-        if response.id != request.id.unwrap_or_default() {
-            return Err(Error::BadResponse(format!("id {}", response.id)));
-        }
-        match (response.result, response.error) {
-            (_, Some(e)) => Err(Error::Rpc(e)),
-            (Some(result), None) => Ok(serde_json::from_value(result)?),
-            (None, None) => Err(Error::BadResponse("neither result nor error".to_owned())),
-        }
-    }
-
-    fn late(&self, e: io::Error) -> Error {
-        match self.reader.get_ref().read_timeout() {
-            Ok(Some(d)) if e.kind() == io::ErrorKind::WouldBlock => Error::Deadline(d),
-            _ => Error::Io(e),
-        }
-    }
-
-    /// The connection's reader (with anything it buffered) and writer: after `attach`, the reader
-    /// carries the terminal's output and the writer takes [`notification`]s.
-    #[must_use]
-    pub fn split(self) -> (BufReader<UnixStream>, UnixStream) {
-        (self.reader, self.writer.into_parts().0)
-    }
-}
-
-/// One notification line (a request without an id, so no response) for `method` with `params`.
-///
-/// # Errors
-/// [`Error::Json`] when `params` cannot be serialised.
-pub fn notification<P: Serialize>(method: Method, params: &P) -> Result<Vec<u8>, Error> {
-    let name = method.name();
-    let mut line = format!(r#"{{"jsonrpc":"2.0","method":"{name}","params":"#).into_bytes();
-    serde_json::to_writer(&mut line, params)?;
-    line.extend_from_slice(b"}\n");
-    Ok(line)
-}
-
 /// `shed connect`: carries the protocol between stdin/stdout and the server on `socket` (for
 /// `ssh host shed connect`) until either side closes.
 ///
@@ -1187,7 +1068,7 @@ mod tests {
             .expect("a hello back");
         assert!(answer.contains(r#""result""#), "{answer}");
         if beat {
-            let heartbeat = notification(Method::Heartbeat, &empty()).expect("json");
+            let heartbeat = shed_client::notification(Method::Heartbeat, &empty()).expect("json");
             write.write_all(&heartbeat).await.expect("heartbeat sent");
         }
         (conn, write)
@@ -1207,7 +1088,7 @@ mod tests {
     async fn a_beating_peer_is_kept_and_one_that_never_beat_is_never_timed_out() {
         let (beating, mut write) = peer("beating", true).await;
         let (quiet, _write) = peer("quiet", false).await;
-        let heartbeat = notification(Method::Heartbeat, &empty()).expect("json");
+        let heartbeat = shed_client::notification(Method::Heartbeat, &empty()).expect("json");
         for _ in 0..8 {
             tokio::time::sleep(HEARTBEAT).await;
             write.write_all(&heartbeat).await.expect("heartbeat sent");

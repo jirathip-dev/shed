@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: generate fmt clippy banned test doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
+check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json.
@@ -20,7 +20,8 @@ clippy:
 banned:
     scripts/banned.sh
 
-# The tests, in a fresh private temp dir that target/test-tmp links to, so temp-left sees only what they leave.
+# The tests, crate by crate within each one's `[package.metadata.gate] test_secs` (scripts/budget.py), in a
+# fresh private temp dir that target/test-tmp links to, so temp-left sees only what they leave.
 test:
     #!/bin/sh
     set -eu
@@ -28,7 +29,11 @@ test:
     mkdir -p target
     dir=$(mktemp -d /tmp/shed-test.XXXXXX)
     ln -sfn "$dir" target/test-tmp
-    TMPDIR="$dir" cargo test --workspace --locked
+    TMPDIR="$dir" scripts/budget.py
+
+# The tests within their time budgets (`just test`); the fixture crate, with a budget of 0, proves it bites.
+budget: test
+    ! scripts/budget.py ci/fixtures/budget
 
 doc:
     RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
@@ -72,8 +77,8 @@ self-hosted:
     ! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
 
 # Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
-# environment only in shed_server::config), size limits and generated files in .drover/arch.toml; one
-# fixture breaks each. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
+# environment only in shed_server::config, a hello only in shed_client and the server's dispatch), size
+# limits and generated files in .drover/arch.toml; one fixture breaks each. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
 arch:
     drover arch-check ${ARCH_BASE:+--base "$ARCH_BASE"}
     cd ci/fixtures/arch-layer && ! drover arch-check --config ../../../.drover/arch.toml
@@ -90,6 +95,8 @@ arch:
     cd ci/fixtures/arch-search-fs && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-search-net && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-search-layer && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-client && ! drover arch-check --config ../../../.drover/arch.toml
+    cd ci/fixtures/arch-hello && ! drover arch-check --config ../../../.drover/arch.toml
 
 # The lesson checks in .drover/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:

@@ -3,13 +3,13 @@
 # (plain, colour, redraw; $SHED_DRAIN_MB MB, default 100) `cat` into a fresh serve's terminal, timed until
 # `read` shows its last line, with serve's peak RSS and CPU time; median of 5 interleaved release runs. Fails if the
 # head is more than 10% slower on any stream. Then the raw-read ceiling at each side
-# (crates/shed-core/tests/drain_raw.rs), reported only. Both sides run the head's bench. Builds go to
+# (crates/shed-core/tests/drain_raw.rs), reported only. A base without a bench file gets the head's. Builds go to
 # $BENCH_TARGET/drain-{base,head}.
 set -euo pipefail
 base=$(cd "$1" && pwd) head=$(cd "$2" && pwd)
 target=${BENCH_TARGET:-$head/target}
 for f in crates/shed/tests/drain_bench.rs crates/shed/tests/drain/fixture.rs crates/shed-core/tests/drain_raw.rs; do
-  [ "$base" = "$head" ] || { mkdir -p "$(dirname "$base/$f")" && cp "$head/$f" "$base/$f"; }
+  [ -f "$base/$f" ] || { mkdir -p "$(dirname "$base/$f")" && cp "$head/$f" "$base/$f"; }
 done
 run() {
   (cd "${!1}" && CARGO_TARGET_DIR="$target/drain-$1" cargo test -q -p "$2" --release --locked --test "$3" \

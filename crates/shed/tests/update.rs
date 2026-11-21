@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use common::{Server, eventually, temp_dir};
+use shed_client::Conn;
+use shed_server::Paths;
 use shed_server::proto::{BUILD, LsParams, Method, TerminalInfo};
-use shed_server::{Client, Paths};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 const ASSET: &str = if cfg!(target_os = "macos") {
@@ -146,7 +147,7 @@ impl Host {
     }
 
     fn serving(&self) -> String {
-        Client::connect(&self.socket())
+        Conn::connect(&self.socket())
             .expect("serve")
             .server()
             .build
@@ -154,7 +155,7 @@ impl Host {
     }
 
     fn terminals(&self) -> Vec<TerminalInfo> {
-        let mut client = Client::connect(&self.socket()).expect("serve");
+        let mut client = Conn::connect(&self.socket()).expect("serve");
         client.call(Method::Ls, &LsParams::default()).expect("ls")
     }
 }
@@ -251,7 +252,7 @@ fn one_pass_installs_mains_release_and_hands_serve_over_keeping_the_terminals() 
     assert!(says(&out).contains(&line), "{out:?}");
     assert!(host.version().ends_with(&format!("({})", host.main)));
     eventually("serve on the new build", || {
-        Client::connect(&host.socket()).is_ok_and(|c| c.server().build == host.main)
+        Conn::connect(&host.socket()).is_ok_and(|c| c.server().build == host.main)
     });
     assert_eq!(
         host.serve.as_mut().map(|s| s.0.try_wait().ok().flatten()),

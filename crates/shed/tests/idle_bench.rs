@@ -9,8 +9,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use shed_client::Conn;
+use shed_server::Paths;
 use shed_server::proto::{EventsParams, Method};
-use shed_server::{Client, Paths};
 
 const CLIENTS: usize = 500;
 
@@ -45,12 +46,12 @@ fn idle_connections() {
     while UnixStream::connect(&socket).is_err() {
         std::thread::sleep(Duration::from_millis(20));
     }
-    let mut client = Client::connect(&socket).expect("connect");
+    let mut client = Conn::connect(&socket).expect("connect");
     let run = json!({"name": "t", "cmd": ["sleep", "100"], "cwd": "/"});
     let _: Value = client.call(Method::Run, &run).expect("run");
     let mut readers: Vec<_> = (0..CLIENTS)
         .map(|_| {
-            let mut c = Client::connect(&socket).expect("connect");
+            let mut c = Conn::connect(&socket).expect("connect");
             let _: Value = c
                 .call(Method::Events, &EventsParams::default())
                 .expect("events");

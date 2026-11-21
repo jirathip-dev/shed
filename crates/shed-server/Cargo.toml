@@ -13,6 +13,7 @@ agent-client-protocol.workspace = true
 futures.workspace = true
 shed-core.workspace = true
 shed-pattern.workspace = true
+shed-client.workspace = true
 shed-search.workspace = true
 shed-proto = { workspace = true, features = ["schema"] }
 serde.workspace = true
@@ -32,6 +33,9 @@ tokio = { workspace = true, features = [
     "sync",
     "time",
 ] }
+
+[package.metadata.gate]
+test_secs = 45
 
 [lints]
 workspace = true

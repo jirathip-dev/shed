@@ -13,10 +13,11 @@ use std::path::{Path, PathBuf};
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
+use shed_client::Conn as Client;
+use shed_server::Paths;
 use shed_server::proto::{
     BUILD, Hello, Method, PROTOCOL, ReadParams, ReadResult, SendParams, State, TerminalInfo,
 };
-use shed_server::{Client, Paths};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
