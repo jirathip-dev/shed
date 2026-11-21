@@ -1090,6 +1090,7 @@ dependencies = [
  "shed-core",
  "shed-pattern",
  "shed-proto",
+ "shed-script",
  "shed-search",
  "thiserror",
  "tokio",

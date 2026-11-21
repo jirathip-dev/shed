@@ -14,7 +14,7 @@ use shed_client::Conn;
 
 #[derive(Default)]
 pub(crate) struct Links {
-    config: PathBuf,
+    pub(crate) config: PathBuf,
     control: PathBuf,
     held: Mutex<BTreeMap<String, Arc<Held>>>,
 }
@@ -37,9 +37,12 @@ impl Held {
 
 pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value)> {
     let field = match method {
-        Method::Run | Method::Exec | Method::FileRead | Method::FileWrite | Method::CodeOutline => {
-            "machine"
-        }
+        Method::Run
+        | Method::Exec
+        | Method::FileRead
+        | Method::FileWrite
+        | Method::CodeOutline
+        | Method::Script => "machine",
         Method::Get
         | Method::Read
         | Method::Send
