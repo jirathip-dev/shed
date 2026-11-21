@@ -46,7 +46,7 @@ only the ready time (no network) separates the modes reliably. Per awake session
   50 MB, likely because macOS had compressed its idle pages), and about 0.9 s of start.
 - A direct bridge saves the adapter on top: 114 MB (424 → 310 MB) over `node`, 264 MB over `npx`.
 
-The 7 processes `docs/acp.md` counted for adapter 0.100.0 are not reproduced: at 0.107.0 the tree is the 3 above
+The 7 processes `docs/acp/hibernation.md` counted for adapter 0.100.0 are not reproduced: at 0.107.0 the tree is the 3 above
 plus the bridge, with no MCP servers configured. The old run's list is not recoverable.
 
 ## What the adapter gives shed, and what the stream gives directly
@@ -95,5 +95,5 @@ What shed's states and events use today (#88, #117, `crates/shed-server/src/acp.
   #129). Revisit only if an adapter change grows it well past 110 MB, or the CLI gains documented session listing
   and history replay. Before any such build, check that Anthropic's current terms still allow a plan login in the
   unmodified `claude` binary driven this way.
-- An awake lane stays about 425 MB after the `npx` change; hibernation (about 8 MB, `docs/acp.md`) remains the
+- An awake lane stays about 425 MB after the `npx` change; hibernation (about 8 MB, `docs/acp/hibernation.md`) remains the
   big saving for idle lanes.

@@ -106,7 +106,7 @@
   reason, `read` renders the JSONL transcript (prompts, one line per tool call, replies), and `events` gains
   `turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved` and `reply`. `shed agents
   [add|rm]` installs agents from the ACP registry, pinned. The protocol gains `emit`; a terminal carries
-  `acp`. See docs/acp.md.
+  `acp`. See docs/acp/.
 - Events and resources (M2b): `shed events [--label k=v] [--since N]` streams `started`, `state`,
   `exited {code}`, `killed` and `resources {rss_mb, cpu_pct}` as JSON lines, each with a `seq`; `--since`
   replays from a ring of the last 1,000. `shed serve --sample S` (default 2) samples every process
