@@ -9,6 +9,7 @@ generated = [
     "docs/shed.openrpc.json",
     "crates/shed-script/tests/perf/counts.json",
     "Cargo.lock",
+    "crates/shed/tests/golden/**",
 ]
 generate = "just generate"
 shared = [
@@ -28,6 +29,8 @@ shared = [
     "crates/shed-server/src/providers.rs",
     "crates/shed-server/src/providers/claude.rs",
     "crates/shed/tests/acp_bench.rs",
+    "crates/shed/tests/*/main.rs",
+    "crates/shed/tests/fake_acp.py",
 ]
 
 [[layer]]
@@ -185,6 +188,18 @@ paths = ["crates/shed-search/src/**", "crates/shed-pattern/src/**"]
 except = []
 reason = "search and patterns open no socket"
 
+[[ban]]
+pattern = "launchctl"
+paths = ["crates/*/src/**"]
+except = []
+reason = "#238: jobs are written, loaded and restarted only by farrier-service"
+
+[[ban]]
+pattern = "systemctl"
+paths = ["crates/*/src/**"]
+except = []
+reason = "#238: jobs are written, loaded and restarted only by farrier-service"
+
 [[size]]
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
@@ -261,3 +276,19 @@ max_file_lines = 340
 [[size]]
 paths = [".drover/arch.toml"]
 max_file_lines = 400
+
+[[collect]]
+dir = "crates/shed/tests"
+glob = "*/*.rs"
+
+[[collect]]
+dir = "crates/shed/tests/fake_acp"
+glob = "*.py"
+
+[[size]]
+paths = ["crates/shed/tests/fake_acp.py"]
+max_file_lines = 260
+
+[[size]]
+paths = ["crates/shed/tests/*/main.rs"]
+max_file_lines = 300

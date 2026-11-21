@@ -3,13 +3,15 @@ check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comme
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
-# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json), then
+# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json), then the
+# goldens the CLI, ACP, server and machines tests write (crates/shed/tests/golden/, their `golden.rs`), then
 # Cargo.lock from the manifests.
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
     SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
     SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
+    SHED_BLESS=1 cargo test -p shed --locked --test cli --test acp --test server --test machines golden::
     cargo metadata --format-version 1 > /dev/null
 
 fmt:
