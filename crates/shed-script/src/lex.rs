@@ -190,6 +190,7 @@ impl<'a> Lexer<'a> {
             (Some('0'), Some('b')) => 2,
             _ => 10,
         };
+        let mut raw = String::new();
         let value = if radix == 10 {
             let mut text = String::new();
             while let Some(c) = self.peek() {
@@ -200,7 +201,17 @@ impl<'a> Lexer<'a> {
                 if c != '_' {
                     text.push(c);
                 }
+                raw.push(c);
                 self.bump();
+            }
+            if raw.len() > 1
+                && raw.starts_with('0')
+                && raw
+                    .chars()
+                    .nth(1)
+                    .is_some_and(|c| c.is_ascii_digit() || c == '_')
+            {
+                return syntax(pos, "a number may not start with 0: write 0o10 for octal");
             }
             text.parse::<f64>()
                 .or_else(|_| syntax(pos, format!("{text} is not a number")))?
@@ -215,6 +226,7 @@ impl<'a> Lexer<'a> {
                     };
                     value = Some(value.unwrap_or(0.0) * f64::from(radix) + f64::from(digit));
                 }
+                raw.push(c);
                 self.bump();
             }
             match value {
@@ -222,6 +234,16 @@ impl<'a> Lexer<'a> {
                 None => return syntax(pos, "a number has no digits after its 0x, 0o or 0b"),
             }
         };
+        let chars: Vec<char> = raw.chars().collect();
+        let digit = |at: Option<usize>| {
+            at.and_then(|at| chars.get(at))
+                .is_some_and(|c| c.is_digit(radix))
+        };
+        if (0..chars.len()).any(|at| {
+            chars.get(at) == Some(&'_') && !(digit(at.checked_sub(1)) && digit(Some(at + 1)))
+        }) {
+            return syntax(pos, "a _ in a number goes between two digits");
+        }
         match self.peek() {
             Some('n') => syntax(
                 pos,
@@ -243,7 +265,7 @@ impl<'a> Lexer<'a> {
                     self.bump();
                     return Ok(text);
                 }
-                Some(c) if is_newline(c) => {
+                Some('\n' | '\r') => {
                     return syntax(
                         start,
                         "a string is not closed on its line: use a template string for several lines",

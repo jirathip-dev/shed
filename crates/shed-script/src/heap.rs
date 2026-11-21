@@ -134,20 +134,34 @@ impl Heap {
     ///
     /// [`Full`] while a collection runs, or when the slot would pass the limit.
     pub fn push(&mut self, array: Handle, value: Value) -> Result<bool, Full> {
+        self.extend(array, &[value])
+    }
+
+    /// Appends values to an array, all or none; `false` when the handle is not one.
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] while a collection runs, or when the slots would pass the limit.
+    pub fn extend(&mut self, array: Handle, values: &[Value]) -> Result<bool, Full> {
         if !matches!(self.get(array), Some(Cell::Array(_))) {
             return Ok(false);
         }
-        self.reserve(SLOT)?;
+        let grow = values.len().saturating_mul(SLOT);
+        self.reserve(grow)?;
         if let Some(Slot {
             cell: Cell::Array(items),
             bytes,
             ..
         }) = self.slot_mut(array)
         {
-            items.push(value);
-            *bytes = bytes.saturating_add(SLOT);
+            items.extend_from_slice(values);
+            *bytes = bytes.saturating_add(grow);
         }
         Ok(true)
+    }
+
+    pub(crate) fn cell_mut(&mut self, handle: Handle) -> Option<&mut Cell> {
+        self.slot_mut(handle).map(|slot| &mut slot.cell)
     }
 
     /// Sets an object's field, adding it last when it is new; `false` when the handle is not an object.

@@ -2,11 +2,13 @@
 check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch protocol lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
-# CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json.
+# CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
+# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json).
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
     SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
+    SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
 
 fmt:
     cargo fmt --all --check

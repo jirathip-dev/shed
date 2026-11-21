@@ -1,5 +1,6 @@
+// ceiling: steps 43736025, peak_bytes 71164210
 const kept = []
-for (let i = 0; i < 380000; i++) {
+for (let i = 0; i < 360000; i++) {
   kept[i] = { n: i, pair: [i, i] }
 }
 let made = 0

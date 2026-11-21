@@ -35,6 +35,13 @@ pub enum Cell {
         /// Its variables, by slot.
         slots: Vec<Value>,
     },
+    /// A function with the scope it was made in.
+    Closure {
+        /// Its code, by index in the program.
+        function: usize,
+        /// The scope it closes over.
+        scope: Option<Handle>,
+    },
 }
 
 const CELL: usize = 32;
@@ -52,6 +59,7 @@ impl Cell {
             Self::Object(fields) => fields.iter().fold(0, |sum, (key, _)| {
                 sum.saturating_add(key.len()).saturating_add(SLOT)
             }),
+            Self::Closure { .. } => 0,
         })
     }
 
@@ -64,6 +72,9 @@ impl Cell {
                 None => Some(parent.map_or(Value::Undefined, Value::Ref)),
                 Some(slot) => slots.get(slot).copied(),
             },
+            Self::Closure { scope, .. } => {
+                (at == 0).then(|| scope.map_or(Value::Undefined, Value::Ref))
+            }
         }
     }
 }

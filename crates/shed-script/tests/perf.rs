@@ -1,11 +1,11 @@
-//! The speed report of `just script-bench`: targets 3, 4 and 5, each the median and range of 5 runs.
+//! The fixed scripts' gate (exact counts, and ceilings) and `just script-bench`'s report of targets 3, 4 and 5.
 #![cfg(test)]
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use shed_script::heap::{Full, Heap};
-use shed_script::value::{Cell, Handle, Value};
+use serde_json::json;
+use shed_script::{Counts, Limits, Program, Run, Step};
 
 const RUNS: usize = 5;
 const SLICE: u64 = 10_000;
@@ -35,7 +35,7 @@ fn parse_ms(code: &str) -> f64 {
     let mut times: Vec<f64> = (0..1000)
         .map(|_| {
             let start = Instant::now();
-            shed_script::parse(code).unwrap();
+            Program::parse(code).unwrap();
             ms(start.elapsed())
         })
         .collect();
@@ -43,65 +43,129 @@ fn parse_ms(code: &str) -> f64 {
     times[500]
 }
 
-#[derive(Default)]
-struct Pauses {
+fn scripts() -> Vec<(String, String)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/perf");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.ends_with(".js"))
+        .collect();
+    names.sort();
+    names.into_iter().map(|name| (fixed(&name), name)).collect()
+}
+
+fn ceiling(code: &str) -> Option<(u64, usize)> {
+    let line = code.lines().next()?.strip_prefix("// ceiling: steps ")?;
+    let (steps, bytes) = line.split_once(", peak_bytes ")?;
+    Some((steps.parse().unwrap(), bytes.parse().unwrap()))
+}
+
+fn counts(code: &str) -> Counts {
+    let program = Program::parse(code).unwrap();
+    let mut run = Run::new(&program, Limits::default());
+    loop {
+        if let Step::Done(outcome) = run.step() {
+            outcome.unwrap();
+            return run.counts();
+        }
+    }
+}
+
+fn table() -> String {
+    let mut all = serde_json::Map::new();
+    for (code, name) in scripts() {
+        if ceiling(&code).is_none() {
+            continue;
+        }
+        let c = counts(&code);
+        all.insert(
+            name,
+            json!({
+                "steps": c.steps,
+                "peak_bytes": c.peak_bytes,
+                "collections": c.collections,
+                "largest_collection": c.largest_collection,
+            }),
+        );
+    }
+    serde_json::to_string_pretty(&all).unwrap() + "\n"
+}
+
+#[test]
+fn counts_match_the_baseline() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/perf/counts.json");
+    let first = table();
+    assert_eq!(first, table(), "the counts differ between two runs");
+    if std::env::var_os("SHED_BLESS").is_some() {
+        std::fs::write(&path, &first).unwrap();
+    }
+    let committed = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(
+        committed, first,
+        "counts.json is stale: run `just generate`"
+    );
+}
+
+#[test]
+fn counts_stay_under_their_ceilings() {
+    let mut checked = 0;
+    for (code, name) in scripts() {
+        let Some((steps, peak_bytes)) = ceiling(&code) else {
+            continue;
+        };
+        let c = counts(&code);
+        assert!(
+            c.steps <= steps,
+            "{name}: {} steps, over its ceiling of {steps}",
+            c.steps
+        );
+        assert!(
+            c.peak_bytes <= peak_bytes,
+            "{name}: {} peak bytes, over its ceiling of {peak_bytes}",
+            c.peak_bytes
+        );
+        checked += 1;
+    }
+    assert!(checked >= 2, "only {checked} fixed scripts have a ceiling");
+}
+
+struct Timed {
+    steps_per_second: f64,
     slice: Duration,
     collection: Duration,
 }
 
-fn collect(heap: &mut Heap, roots: &[Handle], pauses: &mut Pauses) {
-    let started = Instant::now();
+fn timed(code: &str) -> Timed {
+    let program = Program::parse(code).unwrap();
+    let mut run = Run::new(&program, Limits::default());
+    let (started, mut slice, mut collection, mut longest) = (
+        Instant::now(),
+        Duration::ZERO,
+        Duration::ZERO,
+        Duration::ZERO,
+    );
     loop {
-        let slice = Instant::now();
-        heap.collect(roots, SLICE);
-        pauses.slice = pauses.slice.max(slice.elapsed());
-        if !heap.collecting() {
+        let (at, before) = (Instant::now(), run.counts().steps);
+        let step = run.step();
+        let took = at.elapsed();
+        slice = slice.max(took);
+        if run.counts().steps - before < SLICE {
+            collection += took;
+            longest = longest.max(collection);
+        } else {
+            collection = Duration::ZERO;
+        }
+        if let Step::Done(outcome) = step {
+            outcome.unwrap();
             break;
         }
     }
-    pauses.collection = pauses.collection.max(started.elapsed());
-}
-
-fn alloc(heap: &mut Heap, roots: &[Handle], cell: &Cell, pauses: &mut Pauses) -> Handle {
-    if heap.wants_collection() {
-        collect(heap, roots, pauses);
+    let steps = f64::from(u32::try_from(run.counts().steps).unwrap());
+    Timed {
+        steps_per_second: steps / started.elapsed().as_secs_f64(),
+        slice,
+        collection: longest,
     }
-    loop {
-        match heap.alloc(cell.clone()) {
-            Ok(handle) => return handle,
-            Err(Full::Collect) => collect(heap, roots, pauses),
-            Err(Full::Memory) => panic!("hold's heap is over its limit"),
-        }
-    }
-}
-
-fn pair(heap: &mut Heap, roots: &[Handle], at: u32, pauses: &mut Pauses) -> Handle {
-    let n = Value::Number(at.into());
-    let array = alloc(heap, roots, &Cell::Array(vec![n, n]), pauses);
-    let mut held = roots.to_vec();
-    held.push(array);
-    let object = Cell::Object(vec![("n".into(), n), ("pair".into(), Value::Ref(array))]);
-    alloc(heap, &held, &object, pauses)
-}
-
-fn hold_from_rust() -> Pauses {
-    let mut pauses = Pauses::default();
-    let mut heap = Heap::new(64 << 20);
-    let kept = heap.alloc(Cell::Array(Vec::new())).unwrap();
-    for at in 0..380_000 {
-        let item = pair(&mut heap, &[kept], at, &mut pauses);
-        loop {
-            match heap.push(kept, Value::Ref(item)) {
-                Ok(_) => break,
-                Err(Full::Collect) => collect(&mut heap, &[kept, item], &mut pauses),
-                Err(Full::Memory) => panic!("hold's heap is over its limit"),
-            }
-        }
-    }
-    for at in 0..1_400_000 {
-        pair(&mut heap, &[kept], at, &mut pauses);
-    }
-    pauses
 }
 
 #[test]
@@ -110,20 +174,25 @@ fn speed_report() {
     println!("script engine, {RUNS} runs each; times in ms");
     let ten_kb = fixed("ten-kb.js");
     report(
-        "target 4: ten-kb.js parsed (median of 1,000)",
+        "target 4: ten-kb.js parsed and compiled (median of 1,000)",
         "at most 2 ms",
         (0..RUNS).map(|_| parse_ms(&ten_kb)).collect(),
     );
-    let holds: Vec<Pauses> = (0..RUNS).map(|_| hold_from_rust()).collect();
+    let spins: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("spin.js"))).collect();
     report(
-        "target 5: hold, from Rust: the longest slice",
+        "target 3: spin.js, million steps a second",
+        "at least 25",
+        spins.iter().map(|t| t.steps_per_second / 1e6).collect(),
+    );
+    let holds: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("hold.js"))).collect();
+    report(
+        "target 5: hold.js, the longest slice",
         "at most 1 ms",
-        holds.iter().map(|p| ms(p.slice)).collect(),
+        holds.iter().map(|t| ms(t.slice)).collect(),
     );
     report(
-        "target 5: hold, from Rust: the longest collection",
+        "target 5: hold.js, the longest collection",
         "at most 150 ms",
-        holds.iter().map(|p| ms(p.collection)).collect(),
+        holds.iter().map(|t| ms(t.collection)).collect(),
     );
-    println!("{:<52} new: the base runs no script", "target 3: spin.js");
 }

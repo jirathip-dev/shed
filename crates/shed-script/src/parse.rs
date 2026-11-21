@@ -407,11 +407,15 @@ impl<'a> Parser<'a> {
     }
 
     fn body(&mut self) -> Parsed<Box<Stmt>> {
+        let pos = self.cur.pos;
         let stmt = if self.is("{") {
             Stmt::Block(self.block()?)
         } else {
             self.nested(Self::statement)?
         };
+        if matches!(stmt, Stmt::Decl(..) | Stmt::Function(_)) {
+            return syntax(pos, "a declaration here needs a block: wrap it in { … }");
+        }
         Ok(Box::new(stmt))
     }
 
