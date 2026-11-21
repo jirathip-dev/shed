@@ -1,22 +1,19 @@
 //! The globals, the methods of strings and arrays, `JSON` and `console`, run on the machine.
 #![cfg(test)]
 
+mod common;
+
 use serde_json::{Value as Json, json};
-use shed_script::vm::{Limits, Run, Step};
+use shed_script::vm::{Limits, Run};
 use shed_script::{Program, ScriptError};
 
-fn finish(run: &mut Run) -> Result<Json, ScriptError> {
-    loop {
-        if let Step::Done(outcome) = run.step() {
-            return outcome;
-        }
-    }
-}
+use common::{Fixture, drive};
 
-fn run_with(code: &str, limits: Limits) -> (Result<Json, ScriptError>, Run) {
+fn run_with(code: &str, limits: Limits) -> (Result<Json, ScriptError>, Run<'static, Fixture>) {
     let program = Program::parse(code).unwrap();
-    let mut run = Run::new(&program, limits);
-    (finish(&mut run), run)
+    let host: &'static Fixture = Box::leak(Box::default());
+    let mut run = Run::new(&program, limits, host);
+    (drive(&mut run, host), run)
 }
 
 fn run(code: &str) -> Json {

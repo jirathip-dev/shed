@@ -70,6 +70,7 @@ pub(crate) enum Op {
     Destructure(bool),
     NewError(u32),
     Native(Builtin),
+    Await,
 }
 
 #[derive(Debug, Default)]
@@ -79,6 +80,7 @@ pub(crate) struct Code {
     pub(crate) params: usize,
     pub(crate) rest: bool,
     pub(crate) locals: usize,
+    pub(crate) is_async: bool,
 }
 
 #[derive(Debug, Default)]
@@ -513,7 +515,10 @@ impl Compiler {
         self.out.code.push(Code::default());
         let code = self.body(&f.params, f.rest.as_ref(), &f.body)?;
         if let Some(slot) = self.out.code.get_mut(at) {
-            *slot = code;
+            *slot = Code {
+                is_async: f.is_async,
+                ..code
+            };
         }
         Ok(n(at))
     }
@@ -1040,7 +1045,11 @@ impl Compiler {
                     self.patch(at);
                 }
             }
-            Expr::Await(_, x) => self.expr(x)?,
+            Expr::Await(pos, x) => {
+                self.expr(x)?;
+                self.pos = *pos;
+                self.emit(Op::Await);
+            }
         }
         Ok(())
     }

@@ -9,8 +9,9 @@ Open questions: none. The first three are decided as recommended and the cap by 
 The question, the options with their line estimates, the decision and its consequences are in
 [adr.md](adr.md), with the performance targets. This file has how it reads, the language, the shapes, the
 boundaries, the statecharts, the errors, the guard, the limits, how the speed is measured and gated, the
-tests and the slices. [check.mjs](check.mjs) runs the four examples below against a fixture host and fails
-when a reply differs from the one shown (`node check.mjs`).
+tests and the slices. check.mjs, since slice 5
+[make.mjs](../../../crates/shed-script/tests/golden/make.mjs), runs the four examples below against a fixture
+host and writes their replies beside them; `examples_match_their_goldens` holds the engine to them.
 
 ## How it reads
 

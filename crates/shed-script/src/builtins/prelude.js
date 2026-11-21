@@ -74,3 +74,26 @@ function sort(xs, f) {
   for (let k = 0; k < from.length; k++) xs[k] = from[k]
   return xs
 }
+
+async function then(p, f, g) {
+  let v
+  try {
+    v = await p
+  } catch (e) {
+    if (g == null) throw e
+    return g(e)
+  }
+  return f == null ? v : f(v)
+}
+
+function allSettled(xs) {
+  return Promise.all(
+    xs.map(async (p) => {
+      try {
+        return { status: "fulfilled", value: await p }
+      } catch (e) {
+        return { status: "rejected", reason: e }
+      }
+    }),
+  )
+}

@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use crate::Host;
 use crate::ast::Stmt;
 use crate::compile::{Compiled, Compiler, Op};
 use crate::value::{Builtin, Value};
@@ -11,7 +12,8 @@ mod string;
 const ROWS: &[(&str, &str)] = &[
     (
         "",
-        "console JSON Math Object Array String Number Boolean Error parseInt parseFloat isNaN",
+        "console JSON Math Object Array String Number Boolean Error parseInt parseFloat isNaN \
+         Promise shed",
     ),
     ("console", "log info warn error debug"),
     ("JSON", "parse stringify"),
@@ -20,6 +22,8 @@ const ROWS: &[(&str, &str)] = &[
     ("Array", "isArray from"),
     ("String", "fromBytes"),
     ("Number", "isInteger isFinite"),
+    ("Promise", "all allSettled race resolve reject"),
+    ("promise", "then catch"),
     (
         "string",
         "at charAt slice substring split trim trimStart trimEnd startsWith endsWith includes indexOf \
@@ -51,7 +55,7 @@ pub(crate) fn names(b: Builtin) -> (&'static str, &'static str) {
 pub(crate) fn global(name: &str) -> Option<Builtin> {
     match name {
         "console" | "JSON" | "Math" | "Object" | "Array" | "String" | "Number" | "Boolean"
-        | "Error" | "parseInt" | "parseFloat" | "isNaN" => find("", name),
+        | "Error" | "parseInt" | "parseFloat" | "isNaN" | "Promise" | "shed" => find("", name),
         _ => None,
     }
 }
@@ -72,7 +76,7 @@ pub(crate) fn method(owner: &str, name: &str, this: Value) -> Value {
 
 pub(crate) fn kind(b: Builtin) -> &'static str {
     match names(b) {
-        ("", "console" | "JSON" | "Math") => "object",
+        ("", "console" | "JSON" | "Math" | "shed") => "object",
         _ => "function",
     }
 }
@@ -165,7 +169,7 @@ pub(crate) fn place(x: f64, len: usize) -> usize {
     crate::vm::index(at).unwrap_or(len)
 }
 
-impl Run {
+impl<H: Host> Run<'_, H> {
     pub(crate) fn room(&self, bytes: usize) -> Done {
         self.heap.fits(bytes.saturating_add(32)).map_err(full)
     }
@@ -366,6 +370,7 @@ impl Run {
                 let items = self.items(v)?;
                 self.copy(items)?
             }
+            ("Promise", _) => self.promise_static(name, args)?,
             _ => self.object_call(name, args)?,
         })
     }

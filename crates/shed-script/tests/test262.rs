@@ -1,10 +1,14 @@
 //! test262's files for the constructs the machine runs: `run.txt` passes, `out.txt` is refused by name.
 #![cfg(test)]
 
+mod common;
+
 use std::path::{Path, PathBuf};
 
-use shed_script::vm::{Limits, Run, Step};
+use shed_script::vm::{Limits, Run};
 use shed_script::{Program, ScriptError};
+
+use common::{Fixture, drive};
 
 fn dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/test262")
@@ -31,6 +35,14 @@ fn bare_asserts(code: &str) -> String {
     out
 }
 
+const AWAIT_DONE: &str = "\nfor (let $i = 0; $i < 1000 && !$async.done; $i++) await null\nif (!$async.done) throw fail(\"$DONE was not called\")\nif ($async.error !== undefined) throw $async.error\n";
+
+fn is_async(code: &str) -> bool {
+    let meta = code.split("---*/").next().unwrap_or_default();
+    meta.lines()
+        .any(|line| line.trim_start().starts_with("flags:") && line.contains("async"))
+}
+
 fn negative(code: &str) -> Option<(String, String)> {
     let meta = code.split("/*---").nth(1)?.split("---*/").next()?;
     let block = meta.split("negative:").nth(1)?;
@@ -49,12 +61,9 @@ fn negative(code: &str) -> Option<(String, String)> {
 
 fn outcome(code: &str) -> Result<(), ScriptError> {
     let program = Program::parse(code)?;
-    let mut run = Run::new(&program, Limits::default());
-    loop {
-        if let Step::Done(outcome) = run.step() {
-            return outcome.map(|_| ());
-        }
-    }
+    let host = Fixture::default();
+    let mut run = Run::new(&program, Limits::default(), &host);
+    drive(&mut run, &host).map(|_| ())
 }
 
 #[test]
@@ -64,7 +73,8 @@ fn test262_subset() {
     let run = read("run.txt");
     for rel in run.lines() {
         let code = read(&format!("files/{rel}"));
-        let source = format!("{harness}\n{}", bare_asserts(&code));
+        let tail = if is_async(&code) { AWAIT_DONE } else { "" };
+        let source = format!("{harness}\n{}{tail}", bare_asserts(&code));
         let got = outcome(&source);
         let ok = match (negative(&code), &got) {
             (None, Ok(())) => true,

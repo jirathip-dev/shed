@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use serde_json::Value as Json;
 
+use crate::Host;
 use crate::value::{Cell, Value};
 use crate::vm::{Done, Flow, Run, number_text};
 
 const DEPTH: usize = 200;
 
-impl Run {
+impl<H: Host> Run<'_, H> {
     pub(crate) fn json(&self, value: Value, path: &str, depth: usize) -> Result<Json, String> {
         Ok(self
             .to_json(value, path, depth, false)?
@@ -69,6 +70,11 @@ impl Run {
                     Json::Object(map)
                 }
                 _ if lenient => return Ok(None),
+                Some(Cell::Promise { .. }) => {
+                    return Err(format!(
+                        "{path} is a Promise: await it (Promise.all for a list)"
+                    ));
+                }
                 _ => return Err(format!("{path} is {}: JSON cannot carry it", self.a(value))),
             },
         }))
