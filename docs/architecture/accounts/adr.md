@@ -6,7 +6,9 @@ Decision: shed keeps the accounts on the main host: one config folder per accoun
 Slices: in shed, after the hotspots slices #248 to #250: (1) record keys, readers and redaction; (2) the account store, login, status and remove; (3) a run on a named account; (4) usage, `auto` and the switch on a limit; (5) the token proxy; (6) the machine, file and process APIs drover's split needs; (7) tagged client releases. Then cooee moves its accounts in, then drover. About 2,050 lines added in shed, about 2,200 removed from cooee and drover.
 Open questions: (1) shed switches between accounts of one agent; a chain that crosses agents (Claude, then Codex) stays a cooee card: accept (recommended)? (2) `auto` never picks the `default` login, which is the owner's own config folder: accept (recommended)? (3) the keys need SHA-256: add the `sha2` crate (recommended, drover uses it) or write it in shed? (4) one cap raise of about 2,100 lines in its own cap issue, sized by `drover cap shed` when filed. (5) `account login --token` reads the setup token off the screen and saves it, so nobody pastes one (recommended), or the hand-saved file only?
 
-**Status:** proposed (architect lane, 2026-11-22), read on shed `a1f3716`, drover staging `0dcf23a0f` and cooee
+**Status:** accepted by the owner (#256); the five open questions take the recommendations above (the issue's
+amendment of 2026-11-21: `sha2` for the key hashes, `--token` reads the token off the redacted screen).
+Proposed by the architect lane, 2026-11-22, read on shed `a1f3716`, drover staging `0dcf23a0f` and cooee
 staging `08e6fd2ad`. How the callers read, the API, the statecharts, the boundaries, the migration and the
 issues: [README.md](README.md). Types and record keys: [shapes.md](shapes.md). The security model:
 [security.md](security.md).
