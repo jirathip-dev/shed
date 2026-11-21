@@ -7950,7 +7950,7 @@ language/white-space/comment-single-horizontal-tab.js
 language/white-space/comment-single-nbsp.js
 language/white-space/comment-single-space.js
 language/white-space/comment-single-vertical-tab.js
-# flags:noStrict: 1482
+# flags:noStrict: 1479
 language/arguments-object/10.6-10-c-ii-1.js
 language/arguments-object/10.6-10-c-ii-2.js
 language/arguments-object/10.6-12-1.js
@@ -8228,7 +8228,6 @@ language/eval-code/direct/var-env-func-init-local-new-delete.js
 language/eval-code/direct/var-env-func-init-local-new.js
 language/eval-code/direct/var-env-func-init-local-update.js
 language/eval-code/direct/var-env-func-init-multi.js
-language/eval-code/direct/var-env-func-non-strict.js
 language/eval-code/direct/var-env-global-lex-non-strict.js
 language/eval-code/direct/var-env-lower-lex-non-strict.js
 language/eval-code/direct/var-env-var-init-global-exstng.js
@@ -9415,8 +9414,6 @@ language/statements/with/set-mutable-binding-binding-deleted-in-get-unscopables-
 language/statements/with/set-mutable-binding-binding-deleted-in-get-unscopables.js
 language/statements/with/set-mutable-binding-binding-deleted-with-typed-array-in-proto-chain-strict-mode.js
 language/statements/with/set-mutable-binding-binding-deleted-with-typed-array-in-proto-chain.js
-language/statements/with/set-mutable-binding-idref-compound-assign-with-proxy-env.js
-language/statements/with/set-mutable-binding-idref-with-proxy-env.js
 language/statements/with/strict-fn-decl-nested-1.js
 language/statements/with/strict-fn-decl-nested-2.js
 language/statements/with/strict-fn-decl.js
@@ -15876,7 +15873,7 @@ language/statements/class/elements/syntax/early-errors/delete/method-delete-twic
 language/statements/class/elements/syntax/early-errors/delete/method-delete-twice-covered-err-delete-member-expression-private-method.js
 language/statements/class/elements/syntax/valid/grammar-privatemeth-duplicate-get-set.js
 language/statements/class/elements/syntax/valid/grammar-privatemeth-duplicate-meth-nestedclassmeth.js
-# flags:module: 793
+# flags:module: 786
 language/comments/hashbang/module.js
 language/eval-code/direct/export.js
 language/eval-code/direct/import.js
@@ -15966,13 +15963,6 @@ language/import/import-defer/deferred-namespace-object/identity.js
 language/import/import-defer/deferred-namespace-object/json-module.js
 language/import/import-defer/deferred-namespace-object/reexport-deferred-ns-evaluation.js
 language/import/import-defer/deferred-namespace-object/to-string-tag.js
-language/import/import-defer/errors/get-self-while-evaluating.js
-language/import/import-defer/errors/get-other-while-dep-evaluating/main.js
-language/import/import-defer/errors/get-other-while-dep-evaluating-async/main.js
-language/import/import-defer/errors/get-other-while-evaluating/main.js
-language/import/import-defer/errors/get-other-while-evaluating-async/main.js
-language/import/import-defer/errors/get-self-while-defer-evaluating/main.js
-language/import/import-defer/errors/get-self-while-evaluating-async/main.js
 language/import/import-defer/errors/module-throws/defer-import-after-evaluation.js
 language/import/import-defer/errors/module-throws/third-party-evaluation-after-defer-import.js
 language/import/import-defer/errors/module-throws/trigger-evaluation.js
@@ -20138,7 +20128,7 @@ language/module-code/top-level-await/unobservable-global-async-evaluation-count-
 language/statements/await-using/initializer-Symbol.asyncDispose-disposed-at-end-of-imported-module_FIXTURE.js
 language/statements/await-using/initializer-Symbol.dispose-disposed-at-end-of-imported-module_FIXTURE.js
 language/statements/using/initializer-disposed-at-end-of-imported-module_FIXTURE.js
-# harness:eval: 266
+# harness:eval: 262
 language/arguments-object/10.5-1-s.js
 language/arguments-object/10.5-7-b-1-s.js
 language/comments/mongolian-vowel-separator-single-eval.js
@@ -20196,14 +20186,11 @@ language/eval-code/direct/switch-dflt-decl-eval-source-is-strict-onlystrict.js
 language/eval-code/direct/switch-dflt-decl-onlystrict.js
 language/eval-code/direct/this-value-func-strict-caller.js
 language/eval-code/direct/this-value-global.js
-language/eval-code/direct/var-env-func-strict-caller-2.js
 language/eval-code/direct/var-env-func-strict-caller.js
-language/eval-code/direct/var-env-func-strict-source.js
 language/eval-code/direct/var-env-gloabl-lex-strict-caller.js
 language/eval-code/direct/var-env-global-lex-strict-source.js
 language/eval-code/direct/var-env-lower-lex-strict-caller.js
 language/eval-code/direct/var-env-lower-lex-strict-source.js
-language/eval-code/direct/var-env-var-strict-caller-2.js
 language/eval-code/direct/var-env-var-strict-caller-3.js
 language/eval-code/direct/var-env-var-strict-caller.js
 language/eval-code/direct/var-env-var-strict-source.js
@@ -20253,7 +20240,6 @@ language/eval-code/indirect/this-value-func.js
 language/eval-code/indirect/this-value-global.js
 language/eval-code/indirect/var-env-func-init-multi.js
 language/eval-code/indirect/var-env-func-non-strict.js
-language/eval-code/indirect/var-env-func-strict.js
 language/eval-code/indirect/var-env-global-lex-non-strict.js
 language/eval-code/indirect/var-env-global-lex-strict.js
 language/eval-code/indirect/var-env-lower-lex-non-strict.js
@@ -22948,6 +22934,22 @@ language/statements/class/decorator/syntax/valid/decorator-member-expr-identifie
 language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js
 language/statements/class/elements/field-definition-accessor-no-line-terminator.js
 language/statements/class/elements/syntax/valid/grammar-field-accessor.js
+# hygiene: a name ci/denylist.txt keeps out of the repo: 15
+language/eval-code/direct/var-env-func-non-strict.js
+language/eval-code/direct/var-env-func-strict-caller-2.js
+language/eval-code/direct/var-env-func-strict-source.js
+language/eval-code/direct/var-env-var-strict-caller-2.js
+language/eval-code/indirect/var-env-func-strict.js
+language/expressions/call/trailing-comma.js
+language/import/import-defer/errors/get-self-while-evaluating.js
+language/import/import-defer/errors/get-other-while-dep-evaluating/main.js
+language/import/import-defer/errors/get-other-while-dep-evaluating-async/main.js
+language/import/import-defer/errors/get-other-while-evaluating/main.js
+language/import/import-defer/errors/get-other-while-evaluating-async/main.js
+language/import/import-defer/errors/get-self-while-defer-evaluating/main.js
+language/import/import-defer/errors/get-self-while-evaluating-async/main.js
+language/statements/with/set-mutable-binding-idref-compound-assign-with-proxy-env.js
+language/statements/with/set-mutable-binding-idref-with-proxy-env.js
 # feature:Symbol.toPrimitive: 11
 language/expressions/addition/coerce-symbol-to-prim-err.js
 language/expressions/addition/coerce-symbol-to-prim-invocation.js

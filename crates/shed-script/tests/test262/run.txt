@@ -336,7 +336,6 @@ language/expressions/call/spread-err-mult-err-obj-unresolvable.js
 language/expressions/call/spread-err-mult-err-unresolvable.js
 language/expressions/call/spread-err-sngl-err-obj-unresolvable.js
 language/expressions/call/spread-err-sngl-err-unresolvable.js
-language/expressions/call/trailing-comma.js
 language/expressions/compound-assignment/add-non-simple.js
 language/expressions/compound-assignment/btws-and-non-simple.js
 language/expressions/compound-assignment/btws-or-non-simple.js

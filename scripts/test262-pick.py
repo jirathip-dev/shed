@@ -107,7 +107,19 @@ def code_of(text):
     return re.sub(r"'(?:\\.|[^'\\\n])*'|\"(?:\\.|[^\"\\\n])*\"", "''", text)
 
 
+def denied():
+    rules = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ci/denylist.txt")
+    with open(rules) as f:
+        lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    return [re.compile(line.replace("[[:<:]]", r"\b")) for line in lines]
+
+
+DENIED = denied()
+
+
 def judge(path, text):
+    if any(rule.search(text) for rule in DENIED):
+        return ("skip", "hygiene: a name ci/denylist.txt keeps out of the repo")
     meta = front(text)
     for flag in meta["flags"]:
         if flag not in FLAGS:
