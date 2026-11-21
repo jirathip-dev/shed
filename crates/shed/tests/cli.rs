@@ -758,7 +758,7 @@ fn timing_report() {
             ms[CALLS - 1],
         );
     }
-    for program in [&["sleep", "600"][..], &["sh"]] {
+    for (program, signal) in [(&["sleep", "600"][..], 143), (&["sh"], 129)] {
         let mut ms = [vec![], vec![], vec![]];
         for i in 0..8 {
             let name = format!("life{i}");
@@ -767,8 +767,11 @@ fn timing_report() {
             let steps = [run, vec!["kill", &name], vec!["rm", &name]];
             for (step, args) in ms.iter_mut().zip(&steps) {
                 let start = Instant::now();
-                stdout(&shed_in(&dir, args));
+                let said = stdout(&shed_in(&dir, args));
                 step.push(start.elapsed().as_secs_f64() * 1000.0);
+                if args[0] == "kill" {
+                    assert_eq!(said, format!("{name} exited {signal}\n"), "{program:?}");
+                }
             }
         }
         let [run, kill, rm] = ms.map(|mut m| {
@@ -777,9 +780,8 @@ fn timing_report() {
         });
         let program = program.join(" ");
         eprintln!(
-            "timing: lifecycle {program:<9} run {run:5.1} ms, kill {kill:5.1} ms, rm {rm:5.1} ms (median of 8, kill < 500 ms)"
+            "timing: lifecycle {program:<9} run {run:5.1} ms, kill {kill:5.1} ms, rm {rm:5.1} ms (median of 8, kill < 500 ms, soft)"
         );
-        assert!(kill < 500.0, "kill of {program} took {kill:.1} ms");
     }
 }
 

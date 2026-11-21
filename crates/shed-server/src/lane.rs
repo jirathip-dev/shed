@@ -151,6 +151,7 @@ pub(crate) struct Lane {
     child: Option<String>,
     restart: bool,
     sleep_after: Option<Duration>,
+    hibernate_set: Option<String>,
 }
 
 impl Lane {
@@ -183,6 +184,7 @@ impl Lane {
             child: None,
             restart: false,
             sleep_after: None,
+            hibernate_set: None,
         }
     }
 
@@ -537,7 +539,7 @@ impl Lane {
             }
             self.input(input, driver)?;
         }
-        let set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+        let set = self.hibernate_set.clone();
         self.sleep_after =
             hibernate_after(set, self.shown.cache_lifetime).filter(|_| opened.resumable);
         let (mut typing, mut polled) = (true, shed_core::clock::tokio_now());
@@ -713,6 +715,7 @@ fn run(
     let writer = runtime.spawn(writer.run(outs));
     runtime.spawn(writer::read_input(typed));
     let mut lane = Lane::new(out, policy, rules, turn_idle_timeout());
+    lane.hibernate_set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
     if let Some(why) = why {
         lane.say(format!("shed: on ACP: {why}")).ok();
     }
