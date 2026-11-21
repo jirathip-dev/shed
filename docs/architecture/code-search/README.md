@@ -179,7 +179,7 @@ Paths in results are relative to `root`, with `/`. `start` and `end` are 1-based
 the first comment, attribute or decorator line directly above the header. `find` is the one place a list is
 shortened, and it says so: `files.len()` of `total`.
 
-`code.grep` on `pattern.rs` alone, `--json` (the full file: [golden/grep-retries-rs.json](golden/grep-retries-rs.json)):
+`code.grep` on `pattern.rs` alone, `--json` (the full file: [grep-retries-rs.json](../../../crates/shed-search/tests/golden/grep-retries-rs.json)):
 
 ```json
 {"files": [{"path": "crates/shed-core/src/pattern.rs", "lang": "rust", "count": 2, "groups": [
@@ -348,8 +348,9 @@ tabs and spaces.
 
 The outline inputs are in [crates/shed-search/tests/golden/](../../../crates/shed-search/tests/golden/),
 named `sample.<ext>.in` so `just comments` does not read the Rust one as source; each `.outline` beside them
-is the text outline, and the crate's test globs them as `lang::outline` on the text. The grep and find
-goldens stay in [golden/](golden/) until their slices move them; each runs on a temp copy without the `.in`.
+is the text outline, and the crate's test globs them as `lang::outline` on the text. The grep goldens
+(`grep-retries.*`) are beside them and run on a temp copy without the `.in`; the find golden stays in
+[golden/](golden/) until its slice moves it.
 
 <table><tr><td>
 
@@ -432,7 +433,7 @@ arrow property, a getter, a union type over three lines; Python, a module docstr
 decorator, a one-line `def`, a nested `def` left out, a comment at column 0 inside a body; Markdown, a `#`
 inside a fence and `#hashtag`; Go, the fallback.
 
-`shed code grep -w retries` over the six samples ([golden/grep-retries.txt](golden/grep-retries.txt)), in
+`shed code grep -w retries` over the six samples ([grep-retries.txt](../../../crates/shed-search/tests/golden/grep-retries.txt)), in
 part:
 
 ```text

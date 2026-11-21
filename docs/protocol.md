@@ -274,6 +274,15 @@ A file's functions, types, sections and blocks in file order, each with its kind
 {"jsonrpc":"2.0","id":1,"result":{"lang":"rust","lines":49,"path":"/home/user/project/src/job.rs","symbols":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9},{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}}
 ```
 
+### `code.grep`
+
+The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"code.grep","params":{"count":false,"fixed":false,"glob":["*.rs"],"hidden":false,"ignore_case":false,"pattern":"retries","root":"/home/user/project","word":true}}
+{"jsonrpc":"2.0","id":1,"result":{"files":[{"count":2,"groups":[{"lines":[{"n":13,"text":"    pub retries: usize,"}],"scope":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9}]},{"lines":[{"n":42,"text":"        let retries = self.retries.min(budget);"}],"scope":[{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}],"lang":"rust","path":"src/job.rs"}],"matches":2,"searched":12}}
+```
+
 ### `heartbeat`
 
 Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection.
