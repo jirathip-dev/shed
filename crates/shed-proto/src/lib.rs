@@ -637,6 +637,15 @@ pub struct RunParams {
     /// The program and its arguments; with `acp`, the agent's ACP adapter (empty: the installed
     /// agent's), which the server wraps in its own bridge.
     pub cmd: Vec<String>,
+    /// ACP: the model, in the words of the agent's record for the driver the server picks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// ACP: the effort, one of the record's `efforts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// Variables for the program, over the server's own. Kept in memory only; never saved or shown.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
     /// The ACP agent the program bridges (`shed run --acp`): `read` renders its transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acp: Option<String>,

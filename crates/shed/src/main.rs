@@ -400,6 +400,12 @@ struct RunArgs {
     no_hibernate: bool,
     #[arg(long, requires = "acp", conflicts_with = "resume")]
     warm: bool,
+    #[arg(long, requires = "acp")]
+    model: Option<String>,
+    #[arg(long, requires = "acp")]
+    effort: Option<String>,
+    #[arg(long = "env", value_name = "K=V", value_parser = label)]
+    env: Vec<(String, String)>,
     #[command(flatten)]
     parent: ParentArgs,
     #[arg(long, value_name = "RxC", value_parser = size)]
@@ -677,6 +683,9 @@ fn run_terminal(server: &Server, json: bool, args: RunArgs) -> anyhow::Result<()
         keep: args.keep,
         idle_after: args.idle_after,
         cmd: args.cmd,
+        model: args.model,
+        effort: args.effort,
+        env: args.env.into_iter().collect(),
         policy: args.acp.is_some().then_some(args.policy),
         acp: args.acp,
         resume: args.resume,

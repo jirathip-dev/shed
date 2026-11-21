@@ -220,6 +220,10 @@ All notable changes to this project are documented here. The format follows
   `Provider::pick` turns a model and an effort into the words or variables for the driver that runs. A
   gemini record is built in, and claude's efforts include `max`. Protocol 4: `Stream.models` moved to
   `Provider.models`.
+- `run` takes a `model`, an `effort` and an `env` (`shed run --model --effort --env K=V`): the server turns
+  the model and effort into the agent record's words or variables for the driver it picks, and gives the
+  variables to the program. Their values stay in the server's memory: not in `get`, `agents`, events, logs
+  or the saved state. `warm` takes no `env`, and `model` and `effort` need `acp`.
 - `shed code outline FILE` (`code.outline`, with `machine` over a held link): a file's functions, types,
   sections and blocks in file order, each with its kind, name, line range and depth, by line rules for Rust,
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or

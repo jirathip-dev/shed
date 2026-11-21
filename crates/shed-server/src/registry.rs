@@ -19,9 +19,9 @@ use shed_core::{Detached, History, Report, STATES, Screen, Size, Terminal};
 type Frozen = Vec<(String, Detached)>;
 
 use shed_proto::{
-    AcpSession, Cursor, DriverKind, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams,
-    Logged, LsParams, MachineStats, ModelParams, PROTOCOL, Parent, Policy, ReadParams, ReadResult,
-    Reported, ResizeParams, Resources, RpcError, RunParams, Sample, SendParams, State, StateParams,
+    AcpSession, Cursor, EmitParams, ErrorCode, EventKind, EventsParams, KeysParams, Logged,
+    LsParams, MachineStats, ModelParams, PROTOCOL, Parent, ReadParams, ReadResult, Reported,
+    ResizeParams, Resources, RpcError, RunParams, Sample, SendParams, State, StateParams,
     TerminalInfo,
 };
 
@@ -414,15 +414,13 @@ fn spawn(
     size: Size,
     cmd: &[String],
     cwd: &Path,
-    name: &str,
     idle_after: Option<u64>,
     history: &History,
-    acp: Option<&[(&str, &str)]>,
+    env: &[(String, String)],
+    acp: bool,
 ) -> Result<Terminal, shed_core::Error> {
-    let env = [("SHED", name)]
-        .into_iter()
-        .chain(acp.into_iter().flatten().copied());
-    let pair = acp.map(|_| UnixStream::pair());
+    let env = env.iter().map(|(k, v)| (k, v));
+    let pair = acp.then(UnixStream::pair);
     let (ours, theirs) = pair.transpose()?.unzip();
     let term = Terminal::spawn_with(cmd, cwd, env, size, history, theirs.map(Into::into))?;
     if let Some(ours) = ours {
@@ -603,10 +601,10 @@ impl Registry {
                         size(None, None),
                         &cmd,
                         &info.cwd,
-                        &info.name,
                         info.idle_after,
                         &history,
-                        None,
+                        &[("SHED".to_owned(), info.name.clone())],
+                        false,
                     )
                     .ok()
                     .map(Arc::new);
@@ -909,67 +907,6 @@ impl Registry {
         ended
     }
 
-    fn bridge(&self, p: &mut RunParams) -> Result<(), RpcError> {
-        let cmd = std::mem::take(&mut p.cmd);
-        let id = p.acp.as_deref().unwrap_or_default();
-        let policy = match p.policy.unwrap_or(Policy::Ask) {
-            Policy::Allow => "allow",
-            Policy::Deny => "deny",
-            Policy::Ask => "ask",
-        };
-        let installed = crate::agents::list(&self.path).map_err(internal)?;
-        let adapter = installed
-            .iter()
-            .find(|a| a.id == id)
-            .map(|a| a.cmd.as_slice());
-        let catalog = crate::providers::Catalog::load(&self.providers).0;
-        let record = catalog.by_id(id).cloned().unwrap_or_default();
-        let meta = p.meta.as_ref();
-        let chosen = crate::drivers::choose(&record, policy, &cmd, adapter, meta);
-        let driver = match &chosen {
-            Ok(_) => vec!["--stream".to_owned()],
-            Err(why) if record.driver == DriverKind::Stream => {
-                vec![format!("--why={why}")]
-            }
-            Err(_) => Vec::new(),
-        };
-        let cmd = match (chosen, adapter) {
-            (Ok(stream), _) => stream,
-            (Err(_), _) if !cmd.is_empty() => cmd,
-            (Err(_), Some(adapter)) => adapter.to_vec(),
-            (Err(_), None) => {
-                let ids: Vec<_> = installed.iter().map(|a| a.id.as_str()).collect();
-                let ids = if ids.is_empty() {
-                    "none".to_owned()
-                } else {
-                    ids.join(", ")
-                };
-                let e = format!(
-                    "ACP agent {id} is not installed; installed: {ids}; `shed agents add {id}`"
-                );
-                return Err(RpcError::new(ErrorCode::InvalidParams, e));
-            }
-        };
-        let exe = std::env::current_exe().map_err(internal)?;
-        let path = |p: &Path| p.to_string_lossy().into_owned();
-        let bridge = [
-            path(&exe),
-            "acp-bridge".to_owned(),
-            "--socket".to_owned(),
-            path(&self.socket),
-            "--state".to_owned(),
-            path(&self.path),
-            "--policy".to_owned(),
-            policy.to_owned(),
-            "--agent".to_owned(),
-            id.to_owned(),
-            "--providers".to_owned(),
-            path(&self.providers),
-        ];
-        p.cmd = [bridge.to_vec(), driver, vec!["--".to_owned()], cmd].concat();
-        Ok(())
-    }
-
     pub(crate) fn dir(&self) -> PathBuf {
         self.path.parent().unwrap_or(Path::new(".")).to_owned()
     }
@@ -1052,12 +989,15 @@ impl Registry {
 
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
-        if p.warm && (p.acp.is_none() || p.resume.is_some()) {
-            return Err(bad("warm needs acp and takes no resume"));
+        if p.warm && (p.acp.is_none() || p.resume.is_some() || !p.env.is_empty()) {
+            return Err(bad("warm needs acp and takes no resume or env"));
+        }
+        if p.acp.is_none() && (p.model.is_some() || p.effort.is_some()) {
+            return Err(bad("model and effort need acp"));
         }
         let recipe = p.warm.then(|| recipe(&p));
         if p.acp.is_some() {
-            self.bridge(&mut p)?;
+            crate::drivers::launch::bridge(&mut p, &self.socket, &self.path, &self.providers)?;
         }
         if p.cmd.is_empty() {
             return Err(bad("empty cmd"));
@@ -1084,7 +1024,7 @@ impl Registry {
             };
             self.live(parent).map_err(gone)?;
         }
-        let name = match p.name {
+        let name = match p.name.take() {
             Some(name) if !valid_name(&name) => return Err(bad("name must match [A-Za-z0-9._-]+")),
             Some(name) if self.entries.contains_key(&name) => {
                 return Err(RpcError::new(ErrorCode::NameTaken, name));
@@ -1103,13 +1043,7 @@ impl Registry {
         if let Some(log) = &history.log {
             fs::remove_file(log).ok();
         }
-        let mcp = serde_json::to_string(&p.mcp_servers).map_err(internal)?;
-        let resume = p.resume.as_deref().map(|id| ("SHED_ACP_RESUME", id));
-        let mcp = (!p.mcp_servers.is_empty()).then_some(("SHED_ACP_MCP", mcp.as_str()));
-        let meta = serde_json::to_string(&p.meta).map_err(internal)?;
-        let meta = p.meta.is_some().then_some(("SHED_ACP_META", meta.as_str()));
-        let awake = p.no_hibernate.then_some(("SHED_ACP_HIBERNATE_AFTER", "0"));
-        let acp: Vec<_> = [resume, mcp, meta, awake].into_iter().flatten().collect();
+        let vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
         let scoped = mem_max_mb.filter(|_| crate::limit::scoped());
         let cmd = scoped.map(|mb| crate::limit::in_scope(&p.cmd, mb));
@@ -1117,10 +1051,10 @@ impl Registry {
             size(p.rows, p.cols),
             cmd.as_ref().unwrap_or(&p.cmd),
             &p.cwd,
-            &name,
             p.idle_after,
             &history,
-            p.acp.is_some().then_some(acp.as_slice()),
+            &vars,
+            p.acp.is_some(),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
         if let Some(agent) = p.labels.get("agent").filter(|_| p.acp.is_none()) {
