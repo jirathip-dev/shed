@@ -9,7 +9,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-serde_json.workspace = true
+serde_json = { workspace = true, features = ["preserve_order"] }
+shed-pattern.workspace = true
 
 [package.metadata.gate]
 test_secs = 10

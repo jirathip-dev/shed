@@ -253,7 +253,7 @@ impl Heap {
                 };
                 *used += 1;
                 at += 1;
-                if let Value::Ref(child) = child
+                if let Some(child) = child.handle()
                     && self.shade(child)
                 {
                     deeper = Some(child);
@@ -306,7 +306,12 @@ impl Heap {
         self.phase = Phase::Sweep(at, live);
     }
 
-    fn reserve(&mut self, bytes: usize) -> Result<(), Full> {
+    /// Whether `bytes` more would fit now: a built-in asks before it builds what it will allocate.
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] while a collection runs, or when they would pass the limit.
+    pub fn fits(&self, bytes: usize) -> Result<(), Full> {
         if self.collecting() {
             return Err(Full::Collect);
         }
@@ -317,6 +322,29 @@ impl Heap {
                 Full::Collect
             });
         }
+        Ok(())
+    }
+
+    /// Replaces a cell, counting what it grew by; `false` when the handle is not live.
+    ///
+    /// # Errors
+    ///
+    /// [`Full`] while a collection runs, or when the growth would pass the limit.
+    pub fn put(&mut self, handle: Handle, cell: Cell) -> Result<bool, Full> {
+        let Some(old) = self.slot(handle).map(|slot| slot.bytes) else {
+            return Ok(false);
+        };
+        let bytes = cell.bytes();
+        self.reserve(bytes.saturating_sub(old))?;
+        if let Some(slot) = self.slot_mut(handle) {
+            slot.cell = cell;
+            slot.bytes = bytes;
+        }
+        Ok(true)
+    }
+
+    fn reserve(&mut self, bytes: usize) -> Result<(), Full> {
+        self.fits(bytes)?;
         self.since = self.since.saturating_add(bytes);
         self.swept = false;
         Ok(())
