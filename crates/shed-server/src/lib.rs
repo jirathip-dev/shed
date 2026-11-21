@@ -789,7 +789,8 @@ async fn agents(registry: &Shared, method: Method, request: &Request) -> Result<
         return json(&known.map_err(io_error)?);
     }
     let proto::MatchParams { id, text } = params(request)?;
-    let rules = blocking(move || providers::find(&dir, &id)).await?;
+    let catalog = blocking(move || providers::Catalog::load(&dir).0).await?;
+    let rules = catalog.by_id(&id).cloned().unwrap_or_default();
     let limit = rules.limit_hit(&text);
     json(&proto::Matched {
         limit: limit.as_ref().map(|l| l.0.to_owned()),

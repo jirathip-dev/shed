@@ -215,6 +215,11 @@ fn agent_info() -> AgentInfo {
         logout: Some("fake logout".into()),
         config_dir_var: Some("FAKE_HOME".into()),
         settings_var: None,
+        install: Some("npm install -g fake-agent".into()),
+        token_var: Some("FAKE_TOKEN".into()),
+        models: vec![["fast".into(), "Fast".into()]],
+        model_args: strings(&["--model", "{model}"]),
+        model_env: None,
         effort_args: strings(&["--effort", "{effort}"]),
         efforts: strings(&["low", "high"]),
         rules: vec![Rule {

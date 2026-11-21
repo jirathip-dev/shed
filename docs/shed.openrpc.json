@@ -3,7 +3,7 @@
   "info": {
     "title": "shed",
     "version": "0.0.0",
-    "x-protocol": 3
+    "x-protocol": 4
   },
   "methods": [
     {
@@ -4060,12 +4060,57 @@
             "description": "The variable that names its settings.",
             "default": null
           },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that installs the program.",
+            "default": null
+          },
+          "token_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that carries a login token.",
+            "default": null
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "The models a start may name: id and name.",
+            "default": []
+          },
+          "model_args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The adapter's arguments that set the model, `{model}` standing for the pick.",
+            "default": []
+          },
+          "model_env": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that sets the model, where the adapter takes one.",
+            "default": null
+          },
           "effort_args": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "The arguments that set the effort, `{effort}` standing for one of `efforts`.",
+            "description": "The adapter's arguments that set the effort, `{effort}` standing for one of `efforts`.",
             "default": []
           },
           "efforts": {
@@ -4348,17 +4393,12 @@
             "description": "The arguments that set the model (`{model}`).",
             "default": []
           },
-          "models": {
+          "effort": {
             "type": "array",
             "items": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 2,
-              "maxItems": 2
+              "type": "string"
             },
-            "description": "The models `shed model` offers: id and name.",
+            "description": "The arguments that set the effort (`{effort}`).",
             "default": []
           },
           "mcp": {
@@ -4462,13 +4502,13 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
-            "description": "The median of [`AcpSession::ready_ms`]."
+            "description": "The median of [`crate::AcpSession::ready_ms`]."
           },
           "first_token_ms": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
-            "description": "The median of [`AcpSession::first_token_ms`]."
+            "description": "The median of [`crate::AcpSession::first_token_ms`]."
           }
         },
         "required": [

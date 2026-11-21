@@ -698,7 +698,7 @@ fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
     let _server = Server::start(&dir);
     let providers = Paths::in_dir(&dir).providers();
     std::fs::create_dir_all(&providers).expect("providers dir");
-    let claude = include_str!("../../shed-server/src/providers/claude.toml");
+    let claude = include_str!("../../shed-catalog/providers/claude.toml");
     let quota = claude
         .split_once("[quota]")
         .expect("claude-acp has a quota table")

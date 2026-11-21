@@ -624,8 +624,11 @@ pub fn bridge(
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
     let launch = if stream {
-        let record = rules.stream.clone();
-        Launch::Stream(Box::new(stream::Launch::from_env(cmd, record, state)?))
+        Launch::Stream(Box::new(stream::Launch::from_env(
+            cmd,
+            rules.clone(),
+            state,
+        )?))
     } else {
         Launch::Acp(acp::Launch::from_env()?)
     };

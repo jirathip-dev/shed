@@ -7,5 +7,6 @@ login = "codex login"
 status = "codex login status"
 logout = "codex logout"
 config_dir_var = "CODEX_HOME"
+install = "npm install -g @openai/codex"
 effort_args = ["-c", "model_reasoning_effort={effort}"]
 efforts = ["low", "medium", "high", "xhigh"]

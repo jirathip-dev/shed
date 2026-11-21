@@ -751,7 +751,8 @@ fn send(server: &Server, json: bool, args: SendArgs) -> anyhow::Result<()> {
 fn bridge(a: &BridgeArgs) -> anyhow::Result<ExitCode> {
     let here = std::env::current_dir().context("current directory")?;
     let _raw = attach::RawMode::enter(1, 0)?;
-    let rules = shed_server::providers::find(&a.providers, &a.agent);
+    let catalog = shed_server::providers::Catalog::load(&a.providers).0;
+    let rules = catalog.by_id(&a.agent).cloned().unwrap_or_default();
     let at = (a.socket.as_path(), a.state.as_path());
     let driver = (a.stream, a.why.as_deref());
     let code = lane::bridge(&a.cmd, &here, at, (&a.agent, a.policy, rules), driver)?;

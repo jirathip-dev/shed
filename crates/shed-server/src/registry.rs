@@ -922,7 +922,8 @@ impl Registry {
             .iter()
             .find(|a| a.id == id)
             .map(|a| a.cmd.as_slice());
-        let record = crate::providers::find(&self.providers, id);
+        let catalog = crate::providers::Catalog::load(&self.providers).0;
+        let record = catalog.by_id(id).cloned().unwrap_or_default();
         let meta = p.meta.as_ref();
         let chosen = crate::drivers::choose(&record, policy, &cmd, adapter, meta);
         let driver = match &chosen {
@@ -1245,9 +1246,11 @@ impl Registry {
     }
 
     fn rules(&self, agent: &str) -> Vec<shed_core::Rule> {
-        let records = crate::providers::load(&self.providers).0;
-        let found = records.into_iter().find(|(p, _)| p.agent == agent);
-        let rules = found.map(|(p, _)| p.rules).unwrap_or_default();
+        let catalog = crate::providers::Catalog::load(&self.providers).0;
+        let rules = catalog
+            .by_agent(agent)
+            .map(|p| p.rules.clone())
+            .unwrap_or_default();
         let rule = |r: crate::proto::Rule| shed_core::Rule {
             id: r.id,
             state: r.state,
@@ -1617,10 +1620,9 @@ mod tests {
         let path = dir("rules").join("state.json");
         let mut reg = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
         let screens = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
-        let records = crate::providers::load(&reg.providers).0;
-        let rules = records
-            .iter()
-            .flat_map(|(p, _)| p.rules.iter().map(|r| (&p.agent, r)));
+        let catalog = crate::providers::Catalog::load(&reg.providers).0;
+        let rules = (catalog.iter().map(|e| &e.provider))
+            .flat_map(|p| p.rules.iter().map(|r| (&p.agent, r)));
         let mut shipped = 0;
         for (n, (agent, rule)) in rules.enumerate() {
             assert!(!rule.version.is_empty(), "{}", rule.id);

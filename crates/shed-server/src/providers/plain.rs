@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use shed_proto::Stream;
+use shed_proto::Provider;
 
 use crate::drivers::stream::Wire;
 use crate::lane::Heard;
@@ -16,7 +16,7 @@ impl Wire for Plain {
         json!({ "prompt": text }).to_string()
     }
 
-    fn heard(&mut self, line: &Value, _: &Stream) -> Vec<Heard> {
+    fn heard(&mut self, line: &Value, _: &Provider) -> Vec<Heard> {
         vec![serde_json::from_value(line.clone()).unwrap_or_else(|e| Heard::Skipped(e.to_string()))]
     }
 

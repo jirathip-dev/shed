@@ -9,14 +9,14 @@
 - Don't add a dependency with a disallowed licence, an advisory or a duplicate version. Enforcer: `just deny` (deny.toml).
 - Don't grow the non-test Rust lines in crates/*/src past `line_cap`. Enforcer: `just cap` (ci/cap.toml).
 - Don't make shed-core depend on another workspace crate. Enforcer: `just deps` (scripts/dep-direction.sh).
-- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, client uses proto, search uses pattern and proto, script uses proto and pattern, server uses core, proto, client, pattern, search and script, cli uses server and client; shed-search reads files only in walk.rs, shed-pattern reads none, and neither opens a socket). Enforcer: `just arch` (.drover/arch.toml).
+- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, client and catalog use proto, search uses pattern and proto, script uses proto and pattern, server uses core, proto, client, catalog, pattern, search and script, cli uses server and client; shed-search reads files only in walk.rs, shed-pattern reads none, and neither opens a socket). Enforcer: `just arch` (.drover/arch.toml).
 - Don't drop or retype a method, field or type in docs/shed.openrpc.json without raising `PROTOCOL`. Enforcer: `just protocol` (scripts/protocol.py).
 - Don't shake hands (`Hello::ours`) outside shed-client, shed-proto and the server's dispatch in crates/shed-server/src/lib.rs. Enforcer: `just arch` (.drover/arch.toml).
 - Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.drover/arch.toml).
 - Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.drover/arch.toml).
 - Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.drover/arch.toml).
 - Don't commit a setup-specific name (home paths, tailnet hosts, private IPs, chat IDs). Enforcer: `just hygiene` (ci/denylist.txt).
-- Don't name an agent or provider outside crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
+- Don't name an agent or provider outside crates/shed-catalog/providers/ and crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
 - Don't push a GitHub workflow actionlint rejects. Enforcer: `just actionlint`.
 - Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo. Enforcer: `just self-hosted` (scripts/self-hosted.py).
 - Don't fail an active lesson check in this file (a shadow one only reports). Enforcer: `just lessons` (drover lesson-check).
