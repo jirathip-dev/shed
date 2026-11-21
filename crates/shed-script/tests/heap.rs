@@ -75,7 +75,7 @@ fn garbage_is_not_counted() {
         })
         .unwrap();
         let set = retry(&mut heap, &[keep, item], |heap| {
-            heap.set_field(keep, "last", Value::Ref(item))
+            heap.set_field(keep, &"last".into(), Value::Ref(item))
         });
         assert_eq!(set, Ok(true));
     }
@@ -128,4 +128,17 @@ fn a_collection_never_holds_a_step_over_its_slice() {
     assert!(heap.get(last).is_some());
     let live = (32 + 200_000 * 16) + 200_000 * (32 + 1 + 16) + 2 * 32 + 16;
     assert_eq!(heap.bytes(), live);
+}
+
+#[test]
+fn a_collection_one_unit_at_a_time_keeps_what_is_reachable() {
+    let mut heap = Heap::new(LIMIT);
+    let leaf = heap.alloc(Cell::Str("leaf".into())).unwrap();
+    let inner = heap.alloc(Cell::Array(vec![Value::Ref(leaf)])).unwrap();
+    let outer = heap.alloc(Cell::Array(vec![Value::Ref(inner)])).unwrap();
+    let roots = [outer];
+    while heap.collect(&roots, 1) > 0 && heap.collecting() {}
+    assert!(heap.get(inner).is_some(), "the inner array was collected");
+    assert!(heap.get(leaf).is_some(), "the leaf was collected");
+    assert_eq!(heap.bytes(), (32 + 16) * 2 + 32 + 4);
 }

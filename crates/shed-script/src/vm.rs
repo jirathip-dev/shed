@@ -192,7 +192,7 @@ impl Run {
         };
         let program = Arc::clone(&run.program);
         for text in &program.strings {
-            let Ok(handle) = run.heap.alloc(Cell::Str(text.clone())) else {
+            let Ok(handle) = run.heap.alloc(Cell::Str(text.as_ref().into())) else {
                 run.stop(Limit::Memory);
                 return run;
             };
@@ -556,12 +556,11 @@ impl Run {
         env.ok_or_else(|| Flow::Error("Error", "a scope is missing".into()))
     }
 
-    fn name(&self, at: u32) -> Box<str> {
+    fn name(&self, at: u32) -> Arc<str> {
         self.program
             .strings
             .get(ix(at))
-            .cloned()
-            .unwrap_or_default()
+            .map_or_else(|| "".into(), Arc::clone)
     }
 
     fn exec(&mut self) -> Done {
@@ -809,8 +808,7 @@ impl Run {
     fn object_op(&mut self, op: Op) -> Done {
         match op {
             Op::Get(at) => {
-                let name = self.name(at);
-                let v = self.get(self.peek(0), &name)?;
+                let v = self.get(self.peek(0), &self.name(at))?;
                 self.replace(1, v);
             }
             Op::GetIndex => {
@@ -820,17 +818,16 @@ impl Run {
             }
             Op::Set(at) => {
                 let (object, v) = (self.peek(1), self.peek(0));
-                let name = self.name(at);
-                self.set(object, &name, None, v)?;
+                self.set(object, &self.name(at), v)?;
                 self.replace(2, v);
             }
             Op::SetIndex => {
                 let (object, key, v) = (self.peek(2), self.peek(1), self.peek(0));
                 if let (Value::Number(x), Some(Cell::Array(_))) = (key, self.cell(object)) {
-                    self.set(object, "", Some(x), v)?;
+                    self.set_index(object, x, v)?;
                 } else {
                     let key = self.key(key)?;
-                    self.set(object, &key, None, v)?;
+                    self.set(object, &key, v)?;
                 }
                 self.replace(3, v);
             }
@@ -1146,9 +1143,9 @@ impl Run {
         ))
     }
 
-    fn key(&self, key: Value) -> Done<String> {
+    fn key(&self, key: Value) -> Done<Arc<str>> {
         match key {
-            Value::Number(x) => Ok(number_text(x)),
+            Value::Number(x) => Ok(number_text(x).into()),
             _ => match self.str(key) {
                 Some(s) => Ok(s.into()),
                 None => type_error(format!(
@@ -1192,13 +1189,20 @@ impl Run {
         })
     }
 
-    fn set(&mut self, object: Value, name: &str, at: Option<f64>, v: Value) -> Done {
+    fn set(&mut self, object: Value, name: &Arc<str>, v: Value) -> Done {
+        match self.cell(object) {
+            Some(Cell::Object(_)) => self.field(object, name, v),
+            Some(_) => type_error(format!("cannot set .{name} on {}", self.a(object))),
+            None => type_error(format!("cannot set .{name} on {}", self.kind(object))),
+        }
+    }
+
+    fn set_index(&mut self, object: Value, x: f64, v: Value) -> Done {
         let Value::Ref(handle) = object else {
-            return type_error(format!("cannot set .{name} on {}", self.kind(object)));
+            return Ok(());
         };
-        match (self.heap.cell_mut(handle), at) {
-            (Some(Cell::Object(_)), _) => self.field(object, name, v),
-            (Some(Cell::Array(items)), Some(x)) => {
+        match self.heap.cell_mut(handle) {
+            Some(Cell::Array(items)) => {
                 let len = items.len();
                 match index(x) {
                     Some(i) if i < len => {
@@ -1217,11 +1221,11 @@ impl Run {
                     )),
                 }
             }
-            _ => type_error(format!("cannot set .{name} on {}", self.a(object))),
+            _ => Ok(()),
         }
     }
 
-    fn field(&mut self, object: Value, key: &str, v: Value) -> Done {
+    fn field(&mut self, object: Value, key: &Arc<str>, v: Value) -> Done {
         if let Value::Ref(handle) = object {
             self.heap.set_field(handle, key, v).map_err(full)?;
         }

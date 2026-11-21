@@ -1,10 +1,12 @@
 //! The arena every cell lives in, its live-byte count, and a mark and sweep taken in slices.
 
 use std::mem;
+use std::sync::Arc;
 
 use crate::value::{Cell, Handle, SLOT, Value};
 
 const MIN_TRIGGER: usize = 1 << 20;
+const CHUNK: usize = 4096;
 
 /// Why the heap would not grow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +33,7 @@ struct Slot {
     cell: Cell,
     bytes: usize,
     black: bool,
+    live: bool,
 }
 
 #[derive(Debug, Default)]
@@ -44,7 +47,7 @@ enum Phase {
 /// The arena: cells by handle, every byte counted, collected only through [`Heap::collect`].
 #[derive(Debug)]
 pub struct Heap {
-    slots: Vec<Option<Slot>>,
+    slots: Vec<Vec<Slot>>,
     free: Vec<usize>,
     limit: usize,
     live: usize,
@@ -112,20 +115,27 @@ impl Heap {
     pub fn alloc(&mut self, cell: Cell) -> Result<Handle, Full> {
         let bytes = cell.bytes();
         self.reserve(bytes)?;
-        let slot = Some(Slot {
+        let slot = Slot {
             cell,
             bytes,
             black: self.black,
-        });
-        Ok(Handle(if let Some(at) = self.free.pop() {
-            if let Some(free) = self.slots.get_mut(at) {
+            live: true,
+        };
+        if let Some(at) = self.free.pop() {
+            if let Some(free) = self.entry(at) {
                 *free = slot;
             }
-            at
-        } else {
-            self.slots.push(slot);
-            self.slots.len().saturating_sub(1)
-        }))
+            return Ok(Handle(at));
+        }
+        if self.slots.last().is_none_or(|chunk| chunk.len() == CHUNK) {
+            self.slots.push(Vec::with_capacity(CHUNK));
+        }
+        let full = self.slots.len().saturating_sub(1).saturating_mul(CHUNK);
+        let last = self.slots.last_mut().map_or(0, |chunk| {
+            chunk.push(slot);
+            chunk.len()
+        });
+        Ok(Handle(full.saturating_add(last).saturating_sub(1)))
     }
 
     /// Appends to an array; `false` when the handle is not one.
@@ -169,11 +179,16 @@ impl Heap {
     /// # Errors
     ///
     /// [`Full`] while a collection runs, or when a new field would pass the limit.
-    pub fn set_field(&mut self, object: Handle, key: &str, value: Value) -> Result<bool, Full> {
+    pub fn set_field(
+        &mut self,
+        object: Handle,
+        key: &Arc<str>,
+        value: Value,
+    ) -> Result<bool, Full> {
         let Some(Cell::Object(fields)) = self.get(object) else {
             return Ok(false);
         };
-        let grow = if fields.iter().any(|(name, _)| &**name == key) {
+        let grow = if fields.iter().any(|(name, _)| name == key) {
             0
         } else {
             key.len().saturating_add(SLOT)
@@ -185,9 +200,9 @@ impl Heap {
             ..
         }) = self.slot_mut(object)
         {
-            match fields.iter_mut().find(|(name, _)| &**name == key) {
+            match fields.iter_mut().find(|(name, _)| name == key) {
                 Some((_, old)) => *old = value,
-                None => fields.push((key.into(), value)),
+                None => fields.push((Arc::clone(key), value)),
             }
             *bytes = bytes.saturating_add(grow);
         }
@@ -200,7 +215,13 @@ impl Heap {
         if let Phase::Idle = self.phase {
             self.black = !self.black;
             self.work = 0;
-            self.phase = Phase::Mark(roots.iter().map(|&root| (root, 0)).collect());
+            let mut stack = Vec::new();
+            for &root in roots {
+                if self.shade(root) {
+                    stack.push((root, 0));
+                }
+            }
+            self.phase = Phase::Mark(stack);
         }
         let mut used = 0;
         while used < units {
@@ -225,17 +246,7 @@ impl Heap {
             let Some((handle, mut at)) = stack.pop() else {
                 return true;
             };
-            *used += 1;
-            let black = self.black;
-            let Some(slot) = self.slot_mut(handle) else {
-                continue;
-            };
-            if at == 0 {
-                if slot.black == black {
-                    continue;
-                }
-                slot.black = black;
-            }
+            let mut deeper = None;
             while *used < units {
                 let Some(child) = self.get(handle).and_then(|cell| cell.child(at)) else {
                     break;
@@ -243,21 +254,34 @@ impl Heap {
                 *used += 1;
                 at += 1;
                 if let Value::Ref(child) = child
-                    && self.slot(child).is_some_and(|slot| slot.black != black)
+                    && self.shade(child)
                 {
-                    stack.push((child, 0));
+                    deeper = Some(child);
+                    break;
                 }
             }
             if self.get(handle).and_then(|cell| cell.child(at)).is_some() {
                 stack.push((handle, at));
             }
+            stack.extend(deeper.map(|child| (child, 0)));
         }
         stack.is_empty()
     }
 
+    fn shade(&mut self, handle: Handle) -> bool {
+        let black = self.black;
+        self.slot_mut(handle)
+            .filter(|slot| slot.black != black)
+            .is_some_and(|slot| {
+                slot.black = black;
+                true
+            })
+    }
+
     fn sweep(&mut self, mut at: usize, mut live: usize, units: u64, used: &mut u64) {
+        let black = self.black;
         while *used < units {
-            let Some(entry) = self.slots.get_mut(at) else {
+            let Some(entry) = self.entry(at) else {
                 self.live = live;
                 self.since = 0;
                 self.swept = true;
@@ -270,13 +294,11 @@ impl Heap {
                 self.phase = Phase::Idle;
                 return;
             };
-            match entry {
-                Some(slot) if slot.black == self.black => live = live.saturating_add(slot.bytes),
-                Some(_) => {
-                    *entry = None;
-                    self.free.push(at);
-                }
-                None => {}
+            if entry.live && entry.black == black {
+                live = live.saturating_add(entry.bytes);
+            } else if entry.live {
+                entry.live = false;
+                self.free.push(at);
             }
             *used += 1;
             at += 1;
@@ -300,11 +322,16 @@ impl Heap {
         Ok(())
     }
 
+    fn entry(&mut self, at: usize) -> Option<&mut Slot> {
+        self.slots.get_mut(at / CHUNK)?.get_mut(at % CHUNK)
+    }
+
     fn slot(&self, handle: Handle) -> Option<&Slot> {
-        self.slots.get(handle.0).and_then(Option::as_ref)
+        let slot = self.slots.get(handle.0 / CHUNK)?.get(handle.0 % CHUNK)?;
+        slot.live.then_some(slot)
     }
 
     fn slot_mut(&mut self, handle: Handle) -> Option<&mut Slot> {
-        self.slots.get_mut(handle.0).and_then(Option::as_mut)
+        self.entry(handle.0).filter(|slot| slot.live)
     }
 }

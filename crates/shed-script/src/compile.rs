@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::{iter, mem, slice};
 
 use crate::ScriptError;
@@ -81,7 +82,7 @@ pub(crate) struct Code {
 #[derive(Debug, Default)]
 pub(crate) struct Compiled {
     pub(crate) code: Vec<Code>,
-    pub(crate) strings: Vec<Box<str>>,
+    pub(crate) strings: Vec<Arc<str>>,
 }
 
 pub(crate) fn n(at: usize) -> u32 {
