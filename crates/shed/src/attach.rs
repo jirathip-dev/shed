@@ -6,8 +6,9 @@ use std::time::Duration;
 use rustix::termios::{
     OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcgetwinsize, tcsetattr,
 };
+use serde_json::json;
 use shed_client::{Conn, notification};
-use shed_server::proto::{Method, ResizeParams, SendParams};
+use shed_server::proto::{Method, ResizeParams};
 
 const DETACH: u8 = 0x1c;
 const RESIZE_POLL: Duration = Duration::from_millis(100);
@@ -67,11 +68,7 @@ fn forward_input(mut conn: &UnixStream, name: &str) {
         let detach = read.iter().position(|&b| b == DETACH);
         let typed = read.get(..detach.unwrap_or(n)).unwrap_or_default();
         if !typed.is_empty() {
-            let params = SendParams {
-                name: name.to_owned(),
-                text: String::from_utf8_lossy(typed).into_owned(),
-                ..SendParams::default()
-            };
+            let params = json!({"terminal": name, "text": String::from_utf8_lossy(typed)});
             let sent = notification(Method::Input, &params).map(|line| conn.write_all(&line));
             if !matches!(sent, Ok(Ok(()))) {
                 break;

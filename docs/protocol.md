@@ -2,7 +2,7 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
-Version: `0.0.0`, protocol `2`, oldest served `1`.
+Version: `0.0.0`, protocol `3`, oldest served `1`.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
@@ -36,8 +36,8 @@ tokens, and the `cost` when sent); `parent` names the terminal that started it (
 The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":1,"product":"shed","protocol":2,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":1,"product":"shed","protocol":2,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":2,"product":"shed","protocol":3,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":2,"product":"shed","protocol":3,"version":"0.0.0"}}
 ```
 
 ### `run`
@@ -307,7 +307,7 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0"},"openrpc":"1.3.2"}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":3},"openrpc":"1.3.2"}}
 ```
 
 ### `handover.check`
@@ -412,5 +412,5 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32011 | `LIMIT` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 3-4 / server 56de739 protocol 1-2; update the server and restart shed serve"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 4-5 / server 56de739 protocol 2-3; update the server and restart shed serve"}}
 ```

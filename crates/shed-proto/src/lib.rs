@@ -32,8 +32,8 @@ pub const BUILD: &str = env!("SHED_BUILD");
 /// `<semver> (<sha>)`, as `shed --version`, `shed hello` and the server's ready line print it.
 pub const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SHED_BUILD"), ")");
 
-/// The wire protocol version; bump it with any change to the messages.
-pub const PROTOCOL: u32 = 2;
+/// The wire protocol version; raise it only to drop or retype a method, field or type (`just protocol`). From 3 a server refuses a request field the method does not document.
+pub const PROTOCOL: u32 = 3;
 
 /// The oldest protocol this build still speaks: a server answers a client on it in its shapes, a client accepts a server on it.
 pub const OLDEST_PROTOCOL: u32 = 1;
@@ -1940,7 +1940,7 @@ pub fn openrpc() -> Value {
             )
         })
         .collect();
-    json!({"openrpc": "1.3.2", "info": {"title": "shed", "version": VERSION}, "methods": methods,
+    json!({"openrpc": "1.3.2", "info": {"title": "shed", "version": VERSION, "x-protocol": PROTOCOL}, "methods": methods,
         "x-files": {"sessions/<id>.json": record}, "components": {"schemas": g.take_definitions(true), "errors": errors}})
 }
 

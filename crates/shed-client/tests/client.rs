@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use shed_client::proto::{
-    BUILD, ErrorCode, Event, EventKind, EventsParams, Hello, Method, OLDEST_PROTOCOL, PROTOCOL,
-    Request, RpcError,
+    BUILD, ErrorCode, Event, EventKind, EventsParams, Hello, Method, PROTOCOL, Request, RpcError,
+    RunParams,
 };
-use shed_client::{Calls as _, Conn, Error, Shed, Streamed, once};
+use shed_client::{Calls as _, Conn, Error, MIN_PROTOCOL, Shed, Streamed, once};
 
 type Answer = dyn Fn(&str, &Value, &mut UnixStream) -> Value + Send + Sync;
 
@@ -90,8 +90,8 @@ fn hello_or(method: &str, params: &Value, result: &Value) -> Value {
     }
 }
 
-fn refused_with(theirs: Value) -> String {
-    let fake = fake("refused", move |_, _, _| json!({"result": theirs}));
+fn refused_with(name: &str, theirs: Value) -> String {
+    let fake = fake(name, move |_, _, _| json!({"result": theirs}));
     Conn::connect(&fake.socket)
         .err()
         .expect("refused")
@@ -99,28 +99,96 @@ fn refused_with(theirs: Value) -> String {
 }
 
 fn ours() -> String {
-    format!("SHED_VERSION: this client speaks shed protocol {OLDEST_PROTOCOL} to {PROTOCOL}")
+    format!("SHED_VERSION: this client speaks shed protocol {MIN_PROTOCOL} to {PROTOCOL}")
 }
 
 const FIX: &str =
     "(shed updates itself from its own releases: `shed self-update`, docs/self-update.md)";
 
 #[test]
-fn a_server_that_is_not_shed_or_shares_no_protocol_is_refused_with_its_fix() {
-    let none = refused_with(json!({"version": "9.9.9"}));
+fn a_server_that_is_not_shed_or_sends_no_protocol_is_a_version_error_at_connect() {
+    let none = refused_with("none", json!({"version": "9.9.9"}));
     assert_eq!(none, format!("{}; unnamed unknown is not shed", ours()));
-    let old = json!({"product": "shed", "version": "0.0.1", "build": "abc1234", "protocol": 0});
+    let old = json!({"product": "shed", "version": "0.0.1", "build": "abc1234"});
     assert_eq!(
-        refused_with(old),
+        refused_with("zero", old),
         format!(
             "{}; the server is 0.0.1 (abc1234) protocol 0 to 0; update shed there {FIX}",
             ours()
         )
     );
+}
+
+#[test]
+fn a_server_under_the_floor_is_a_version_error_at_connect() {
+    let under = MIN_PROTOCOL - 1;
+    let old = json!({"product": "shed", "version": "0.0.2", "build": "abc1234", "protocol": under, "oldest": 1});
+    assert_eq!(
+        refused_with("under", old),
+        format!(
+            "{}; the server is 0.0.2 (abc1234) protocol 1 to {under}; update shed there {FIX}",
+            ours()
+        )
+    );
+}
+
+#[test]
+fn a_server_at_the_floor_lacking_a_method_or_field_fails_that_call_naming_it() {
+    let fake = fake("lacks", |method, params, _| match method {
+        "run" => json!({"error": RpcError::new(ErrorCode::InvalidParams, "unknown field run.env")}),
+        "agents.match" => json!({"error": RpcError::new(ErrorCode::MethodNotFound, method)}),
+        "kill" => json!({"error": RpcError::new(ErrorCode::InvalidParams, "missing field `name`")}),
+        _ => hello_or(method, params, &json!([])),
+    });
+    let shed = Shed::at(&fake.socket);
+    let lacks = |e: Error| match e {
+        Error::Version {
+            needs,
+            theirs: Some(_),
+            ..
+        } => needs,
+        other => panic!("{other:?}"),
+    };
+    let run = shed.run(&RunParams::default()).expect_err("too old");
+    assert!(
+        run.to_string()
+            .contains("; it does not know run.env; update shed there"),
+        "{run}"
+    );
+    assert_eq!(lacks(run), Some("run.env".into()));
+    let matched = shed.matched("x", "y").expect_err("too old");
+    assert_eq!(lacks(matched), Some("agents.match".into()));
+    let kill = shed.kill("t1").expect_err("a bad call, not a version");
+    assert_eq!(kill.code(), Some(ErrorCode::InvalidParams));
+    assert_eq!(shed.agents().expect("every other call works"), []);
+}
+
+#[test]
+fn a_server_at_the_floor_that_knows_the_call_answers_it() {
+    let fake = fake("knows", |method, params, _| {
+        hello_or(method, params, &json!([]))
+    });
+    assert_eq!(Shed::at(&fake.socket).agents().expect("agents"), []);
+}
+
+#[test]
+fn a_newer_server_that_still_serves_ours_answers_in_our_shapes() {
+    let fake = fake("newer", |method, _, _| match method {
+        "hello" => json!({"result": {"product": "shed", "version": "9.0.0", "build": "def5678",
+            "protocol": PROTOCOL + 1, "oldest": MIN_PROTOCOL}}),
+        _ => json!({"result": []}),
+    });
+    let shed = Shed::at(&fake.socket);
+    assert_eq!(shed.hello().expect("served").protocol, PROTOCOL + 1);
+    assert_eq!(shed.agents().expect("agents"), []);
+}
+
+#[test]
+fn a_newer_server_that_no_longer_serves_ours_is_a_version_error_at_connect() {
     let new = PROTOCOL + 1;
     let newer = json!({"product": "shed", "version": "9.0.0", "build": "def5678", "protocol": new, "oldest": new});
     assert_eq!(
-        refused_with(newer),
+        refused_with("newer-only", newer),
         format!(
             "{}; the server is 9.0.0 (def5678) protocol {new} to {new}; update this client {FIX}",
             ours()
@@ -276,6 +344,8 @@ fn once_shakes_hands_and_calls_in_one_exchange() {
         .map(|l| serde_json::from_str::<Request>(l).expect("request").method)
         .collect();
     assert_eq!(methods, ["hello", "agents"]);
+    let hello: Request = serde_json::from_str(sent.lines().next().expect("hello")).expect("hello");
+    assert_eq!(hello.params["oldest"], MIN_PROTOCOL);
     assert_eq!(Hello::ours().build, BUILD);
 }
 

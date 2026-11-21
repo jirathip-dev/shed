@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
+use shed_client::MIN_PROTOCOL;
 use shed_core::{Size, Terminal};
-use shed_server::proto::{BUILD, LONG_VERSION, OLDEST_PROTOCOL, PROTOCOL};
+use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
@@ -111,7 +112,7 @@ fn hello_prints_the_version() {
 }
 
 #[test]
-fn hello_accepts_a_server_on_the_previous_protocol_and_reports_its_build() {
+fn hello_reports_a_server_on_another_build() {
     let dir = temp_dir("hello-build");
     let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
     let server = std::thread::spawn(move || {
@@ -121,7 +122,7 @@ fn hello_accepts_a_server_on_the_previous_protocol_and_reports_its_build() {
             .read_line(&mut hello)
             .expect("hello");
         let other = json!({"jsonrpc": "2.0", "id": 1, "result":
-            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 1}});
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL}});
         std::io::Write::write_all(&mut stream, format!("{other}\n").as_bytes()).expect("reply");
     });
     let out = shed_in(&dir, &["hello"]);
@@ -190,7 +191,7 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
         format!(
-            "shed: SHED_VERSION: this client speaks shed protocol {OLDEST_PROTOCOL} to {PROTOCOL}; the server is 0.0.0 (56de739) protocol {0} to {0}; update shed there (shed updates itself from its own releases: `shed self-update`, docs/self-update.md)\n",
+            "shed: SHED_VERSION: this client speaks shed protocol {MIN_PROTOCOL} to {PROTOCOL}; the server is 0.0.0 (56de739) protocol {0} to {0}; update shed there (shed updates itself from its own releases: `shed self-update`, docs/self-update.md)\n",
             PROTOCOL - 2
         )
     );

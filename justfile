@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch lessons temp-left
+check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch protocol lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json.
@@ -97,6 +97,11 @@ arch:
     cd ci/fixtures/arch-search-layer && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-client && ! drover arch-check --config ../../../.drover/arch.toml
     cd ci/fixtures/arch-hello && ! drover arch-check --config ../../../.drover/arch.toml
+
+# A change that drops or retypes a method, field or type in docs/shed.openrpc.json raises PROTOCOL (against ARCH_BASE, else HEAD); the fixture proves the check bites.
+protocol:
+    scripts/protocol.py ${ARCH_BASE:+--base "$ARCH_BASE"}
+    ! scripts/protocol.py ci/fixtures/protocol-dropped
 
 # The lesson checks in .drover/rules.md: an active one that fails fails, a shadow one only reports.
 lessons:
