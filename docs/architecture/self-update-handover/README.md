@@ -227,8 +227,8 @@ Files:
 <state dir>/update/paused                       its mtime is "since"
 <state dir>/update/status.json                  the last pass: { at, current, target, outcome, why }
 <state dir>/update/lock                         flock: one pass at a time
-dist/launchd/dev.shed.update.plist              StartInterval 300, `<exe> self-update`
-dist/systemd/shed-update.service, .timer        oneshot; OnBootSec=1min, OnUnitActiveSec=5min
+dev.shed.update (farrier's fixtures/units/)    StartInterval 300, `<exe> self-update`
+dev.shed.update.service, .timer                 oneshot; OnActiveSec=0, OnUnitActiveSec=300 (since #238)
 ```
 
 What this needs from the two blocking issues:
@@ -254,7 +254,7 @@ new files; the hot files get registration lines only.
 | | `acp.rs` | calls `handover::{hand_over, take_over}` for the bridge's lend, nothing else changes | `handover` |
 | | `config.rs` | `update_source()`: the repo and release URLs, from the environment for tests | nothing |
 | shed | `update.rs` (new) | `self_update`, `pass`, `Target`, `Staged`, `Pass`, status and pause files | `shed_server::{Client, runner, config, clock}`, `out` |
-| | `service.rs` | two jobs instead of one, read from `dist/` with `include_str!`; doctor's `update` row | `update` (status only) |
+| | `service.rs` | two jobs instead of one (since #238 farrier-service `Job` values; golden copies in farrier's `fixtures/units/`); doctor's `update` row | `update` (status only) |
 | | `main.rs` | `Command::SelfUpdate`, hidden `serve --inherit` and `--preflight`, one reconnect helper for `wait`, `events`, `attach`, `watch` | `update`, `service` |
 
 Nothing outside `handover.rs` builds a `Restart` argv or touches the fd queue. Nothing outside
@@ -314,7 +314,7 @@ Left of Swap nothing on the host has changed. The job prints a line only when th
 |---|---|---|---|
 | 1 | detach, inherit, repaint, replace | `shed-core/src/{terminal,screen,history,runner}.rs` | about +130 |
 | 2 | handover: methods, check, drain, freeze, queue, take, inherit; `notes`, `speaks`, `seq` | `shed-proto/src/lib.rs`, `shed-server/src/{handover,registry,lib,acp,events}.rs`, the two generated protocol docs | about +210 |
-| 3 | `self-update`, the job, pause and resume, doctor row, reconnecting commands, job texts read from `dist/` | `shed/src/{update,service,main,attach,watch}.rs`, `shed-server/src/config.rs`, `dist/` | about +190 |
+| 3 | `self-update`, the job, pause and resume, doctor row, reconnecting commands, job texts (since #238 rendered by farrier-service) | `shed/src/{update,service,main,attach,watch}.rs`, `shed-server/src/config.rs` | about +190 |
 | 4 | docs | `docs/self-update.md` (new), a pointer in `docs/service.md`, `changelog.d/added-161.md`; the version-mismatch hints stop saying `cargo install` | 0 |
 
 Tests drive the real binary:
@@ -330,4 +330,4 @@ Tests drive the real binary:
   `build.rs` takes `SHED_BUILD` from the environment when set, and `just test` builds it once.
 
 The cap has 490 lines of headroom today (11,155 of 11,645) and this is about +530: the impl lane should
-expect the standard `drover cap` ask. Moving the job texts to `dist/` gives about 25 back and is counted.
+expect the standard `drover cap` ask. Moving the job texts out of `service.rs` gives about 25 back and is counted (since #238 farrier renders them).
