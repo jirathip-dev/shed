@@ -31,6 +31,7 @@ shared = [
     "crates/shed/tests/acp_bench.rs",
     "crates/shed/tests/*/main.rs",
     "crates/shed/tests/fake_acp.py",
+    "crates/shed-core/src/terminal/mod.rs",
 ]
 
 [[layer]]
@@ -204,6 +205,18 @@ reason = "#238: jobs are written, loaded and restarted only by farrier-service"
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
 max_fn_lines = 150
+
+[[collect]]
+dir = "crates/shed-core/src/terminal"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-core/src/screen"
+glob = "*.rs"
+
+[[size]]
+paths = ["crates/shed-core/src/terminal/mod.rs"]
+max_file_lines = 350
 
 [[collect]]
 dir = "ci/cap.d"
