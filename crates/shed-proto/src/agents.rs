@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::Tokens;
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
-/// the same name in `<config>/providers/` (`docs/acp.md`).
+/// the same name in `<config>/providers/` (`docs/acp/provider-records.md`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(default, deny_unknown_fields)]
