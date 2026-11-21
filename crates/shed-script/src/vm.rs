@@ -2,7 +2,9 @@
 
 use std::cmp::Ordering;
 use std::collections::VecDeque;
+use std::future::poll_fn;
 use std::sync::Arc;
+use std::task::Poll;
 
 use serde_json::Value as Json;
 
@@ -16,6 +18,7 @@ use crate::value::{Builtin, Cell, Frame, Handle, Handler, Settled, Value};
 use crate::{Call, Host, HostError, Program, ScriptError};
 
 const SLICE: u64 = 10_000;
+const IN_FLIGHT: usize = 32;
 
 /// What a run may use before it is stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -244,6 +247,46 @@ impl<'h, H: Host> Run<'h, H> {
 }
 
 impl<H: Host> Run<'_, H> {
+    /// Starts the slice's calls (32 in flight at most) and takes the ready answers; after `Waiting`, waits for one.
+    pub async fn settle(&mut self) {
+        while self.flight.len() < IN_FLIGHT
+            && let Some((asked, params)) = self.queued.pop_front()
+        {
+            let call = self.host.call(&asked.method, params);
+            self.flight.push((asked, call));
+        }
+        let wait = self.waiting();
+        let (flight, answered) = (&mut self.flight, &mut self.answered);
+        poll_fn(|cx| {
+            let before = answered.len();
+            let mut at = 0;
+            while let Some((_, call)) = flight.get_mut(at) {
+                match call.as_mut().poll(cx) {
+                    Poll::Ready(answer) => {
+                        let (asked, _) = flight.remove(at);
+                        answered.push_back((asked, answer));
+                    }
+                    Poll::Pending => at += 1,
+                }
+            }
+            if answered.len() > before || !wait || flight.is_empty() {
+                Poll::Ready(())
+            } else {
+                Poll::Pending
+            }
+        })
+        .await;
+    }
+
+    /// Ends the run at an outside limit (deadline, reply) where the main task is, naming and dropping calls in flight.
+    pub fn stopped(&mut self, limit: Limit) -> ScriptError {
+        self.stop(limit);
+        match &self.done {
+            Some(Err(error)) => error.clone(),
+            _ => self.uncaught(Value::Undefined, self.pos()),
+        }
+    }
+
     /// Runs one slice: at most 10,000 steps or units of collecting.
     pub fn step(&mut self) -> Step {
         let (start, mut collected) = (self.steps, 0);

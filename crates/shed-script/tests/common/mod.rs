@@ -1,5 +1,3 @@
-//! A fake host on a virtual clock, and the server's loop driven with no runtime: step, then settle.
-
 use std::future::{Future, poll_fn};
 use std::pin::pin;
 use std::sync::Mutex;
@@ -9,7 +7,6 @@ use serde_json::Value as Json;
 use shed_script::vm::{Run, Step};
 use shed_script::{Call, Host, HostError, ScriptError};
 
-/// One recorded answer: the virtual millisecond it settles at, and what it is.
 pub type Answer = (u64, Result<Json, HostError>);
 
 #[derive(Default)]
@@ -20,7 +17,6 @@ pub struct State {
     pub most_open: usize,
 }
 
-/// Answers calls in call order from its list, cycling; with none, every call is `NO_SUCH_METHOD`.
 #[derive(Default)]
 pub struct Fixture {
     pub answers: Vec<Answer>,
@@ -58,7 +54,6 @@ impl Host for Fixture {
     }
 }
 
-/// Runs to the end as the server's loop does, moving the clock to the next answer whenever every task waits.
 pub fn drive(run: &mut Run<'_, Fixture>, host: &Fixture) -> Result<Json, ScriptError> {
     loop {
         if let Step::Done(outcome) = run.step() {

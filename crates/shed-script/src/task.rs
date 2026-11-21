@@ -1,9 +1,5 @@
-//! Tasks and promises: async calls parked in the heap, `await`, `shed` calls in flight, draining.
-
 use std::collections::VecDeque;
-use std::future::poll_fn;
 use std::mem;
-use std::task::Poll;
 
 use serde_json::Value as Json;
 
@@ -13,8 +9,6 @@ use crate::value::{Cell, Frame, Handle, SLOT, Settled, Task, Value, Waiter};
 use crate::vm::{Done, Flow, Limit, Run, full, type_error};
 use crate::{Host, HostError, ScriptError};
 
-const IN_FLIGHT: usize = 32;
-
 pub(crate) struct Asked {
     pub(crate) promise: Handle,
     pub(crate) method: Box<str>,
@@ -22,46 +16,6 @@ pub(crate) struct Asked {
 }
 
 impl<H: Host> Run<'_, H> {
-    /// Starts the slice's calls (32 in flight at most) and takes the ready answers; after `Waiting`, waits for one.
-    pub async fn settle(&mut self) {
-        while self.flight.len() < IN_FLIGHT
-            && let Some((asked, params)) = self.queued.pop_front()
-        {
-            let call = self.host.call(&asked.method, params);
-            self.flight.push((asked, call));
-        }
-        let wait = self.waiting();
-        let (flight, answered) = (&mut self.flight, &mut self.answered);
-        poll_fn(|cx| {
-            let before = answered.len();
-            let mut at = 0;
-            while let Some((_, call)) = flight.get_mut(at) {
-                match call.as_mut().poll(cx) {
-                    Poll::Ready(answer) => {
-                        let (asked, _) = flight.remove(at);
-                        answered.push_back((asked, answer));
-                    }
-                    Poll::Pending => at += 1,
-                }
-            }
-            if answered.len() > before || !wait || flight.is_empty() {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
-        })
-        .await;
-    }
-
-    /// Ends the run at an outside limit (deadline, reply) where the main task is, naming and dropping calls in flight.
-    pub fn stopped(&mut self, limit: Limit) -> ScriptError {
-        self.stop(limit);
-        match &self.done {
-            Some(Err(error)) => error.clone(),
-            _ => self.uncaught(Value::Undefined, self.pos()),
-        }
-    }
-
     pub(crate) fn waiting(&self) -> bool {
         self.done.is_none()
             && self.frames.is_empty()

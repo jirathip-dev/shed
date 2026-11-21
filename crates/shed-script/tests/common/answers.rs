@@ -1,5 +1,3 @@
-//! A fixed script's recorded answers, `<name>.host.json`: in call order, `{at, result}` or `{at, error}`.
-
 use std::path::Path;
 
 use serde_json::Value as Json;
