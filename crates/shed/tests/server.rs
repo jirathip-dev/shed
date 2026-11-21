@@ -16,7 +16,8 @@ use serde_json::{Value, json};
 use shed_client::Conn as Client;
 use shed_server::Paths;
 use shed_server::proto::{
-    BUILD, Hello, Method, PROTOCOL, ReadParams, ReadResult, SendParams, State, TerminalInfo,
+    BUILD, Hello, Method, OLDEST_PROTOCOL, PROTOCOL, ReadParams, ReadResult, SendParams, State,
+    TerminalInfo,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -426,6 +427,21 @@ fn read_since_a_cursor_returns_only_what_is_new_and_matches_the_goldens() {
 }
 
 #[test]
+fn a_field_the_method_does_not_document_is_refused_on_protocol_3_and_taken_on_2() {
+    let dir = temp_dir("fields");
+    let _server = Server::start(&dir);
+    let get = |protocol: u32| {
+        let mut c = Conn::open(&dir);
+        let hello = json!({"product": "shed", "version": VERSION, "protocol": protocol});
+        c.call(1, "hello", &hello);
+        let (_, _, reply) = c.call(2, "get", &json!({"name": "t1", "env": {"K": "v"}}));
+        reply["error"]["message"].clone()
+    };
+    assert_eq!(get(3), "INVALID_PARAMS: unknown field get.env");
+    assert_eq!(get(2), "NO_SUCH_TERMINAL: t1");
+}
+
+#[test]
 fn a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest() {
     let dir = temp_dir("version");
     let _server = Server::start(&dir);
@@ -443,15 +459,14 @@ fn a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest() {
         assert_eq!(
             line,
             format!(
-                r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client {client} / server {BUILD} protocol {}-{PROTOCOL}; update {side}"}}}}"#,
-                PROTOCOL - 1
+                r#"{{"jsonrpc":"2.0","id":1,"error":{{"code":-32000,"message":"SHED_VERSION: client {client} / server {BUILD} protocol {OLDEST_PROTOCOL}-{PROTOCOL}; update {side}"}}}}"#
             )
         );
     };
 
     let (_, reply, after) = hello(PROTOCOL, Some(PROTOCOL - 1));
     assert_eq!(reply["result"], ours(), "a client on N gets N's hello");
-    assert_eq!(reply["result"]["oldest"], PROTOCOL - 1);
+    assert_eq!(reply["result"]["oldest"], OLDEST_PROTOCOL);
     assert!(after["result"].is_array(), "{after}");
 
     let (_, reply, after) = hello(PROTOCOL - 1, None);
@@ -467,10 +482,10 @@ fn a_server_serves_its_protocol_and_the_previous_one_and_refuses_the_rest() {
     let (_, reply, _) = hello(PROTOCOL + 1, Some(PROTOCOL));
     assert_eq!(reply["result"], ours(), "a newer client that accepts N");
 
-    let (line, _, after) = hello(PROTOCOL - 2, None);
+    let (line, _, after) = hello(OLDEST_PROTOCOL - 1, None);
     refused(
         &line,
-        &format!("02fcf97 protocol {0}-{0}", PROTOCOL - 2),
+        &format!("02fcf97 protocol {0}-{0}", OLDEST_PROTOCOL - 1),
         "the client",
     );
     assert_eq!(

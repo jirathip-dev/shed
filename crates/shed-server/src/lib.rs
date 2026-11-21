@@ -21,7 +21,7 @@ mod registry;
 mod screen;
 mod stats;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
@@ -30,7 +30,7 @@ use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Duration;
 
 use proto::{
@@ -470,7 +470,7 @@ fn raise_open_files() {
 
 #[derive(Default)]
 struct Session {
-    hello: bool,
+    protocol: Option<u32>,
     beats: bool,
     stream: Option<Stream>,
     watching: Option<String>,
@@ -619,6 +619,63 @@ async fn linked(
     Some(Ok(Value::Array(list)))
 }
 
+const STRICT_PROTOCOL: u32 = 3;
+
+fn hello(session: &mut Session, request: &Request) -> Result<Value, RpcError> {
+    let p: Hello = params(request)?;
+    if !p.compatible() {
+        return Err(RpcError::version(&p, &Hello::ours()));
+    }
+    let answer = Hello::answer(&p);
+    session.protocol = Some(answer.protocol);
+    json(&answer)
+}
+
+fn undocumented(method: Method, params: &Value) -> Result<(), RpcError> {
+    static FIELDS: OnceLock<BTreeMap<String, BTreeSet<String>>> = OnceLock::new();
+    let fields = FIELDS.get_or_init(|| {
+        let doc = proto::openrpc();
+        let methods = doc.get("methods").and_then(Value::as_array);
+        let fields = |m: &Value| {
+            let mut names = BTreeSet::new();
+            let params = m
+                .get("params")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten();
+            names.extend(params.filter_map(|p| p.get("name")?.as_str().map(str::to_owned)));
+            m.get("x-params")
+                .inspect(|s| documented(s, &doc, &mut names));
+            let name = m.get("name").and_then(Value::as_str).unwrap_or_default();
+            (name.to_owned(), names)
+        };
+        methods.into_iter().flatten().map(fields).collect()
+    });
+    let Some(known) = fields.get(method.name()) else {
+        return Ok(());
+    };
+    let mut given = params.as_object().into_iter().flatten();
+    let Some((field, _)) = given.find(|(k, _)| !known.contains(*k)) else {
+        return Ok(());
+    };
+    let field = format!("unknown field {}.{field}", method.name());
+    Err(RpcError::new(ErrorCode::InvalidParams, field))
+}
+
+fn documented(schema: &Value, doc: &Value, names: &mut BTreeSet<String>) {
+    let at = schema.get("$ref").and_then(Value::as_str);
+    if let Some(target) = at.and_then(|r| doc.pointer(r.trim_start_matches('#'))) {
+        documented(target, doc, names);
+    }
+    let properties = schema.get("properties").and_then(Value::as_object);
+    names.extend(properties.into_iter().flatten().map(|(k, _)| k.clone()));
+    for branches in ["oneOf", "anyOf", "allOf"].map(|k| schema.get(k).and_then(Value::as_array)) {
+        for branch in branches.into_iter().flatten() {
+            documented(branch, doc, names);
+        }
+    }
+}
+
 async fn dispatch(
     registry: &Shared,
     session: &mut Session,
@@ -627,14 +684,9 @@ async fn dispatch(
     let method = Method::parse(&request.method)
         .ok_or_else(|| RpcError::new(ErrorCode::MethodNotFound, &request.method))?;
     if method == Method::Hello {
-        let p: Hello = params(request)?;
-        if !p.compatible() {
-            return Err(RpcError::version(&p, &Hello::ours()));
-        }
-        session.hello = true;
-        return json(&Hello::answer(&p));
+        return hello(session, request);
     }
-    if !session.hello && method != Method::Discover {
+    if session.protocol.is_none() && method != Method::Discover {
         return Err(RpcError::new(
             ErrorCode::NoHello,
             "send hello with your version first",
@@ -646,6 +698,9 @@ async fn dispatch(
     }
     if let Some(name) = readonly(method, request, session) {
         return Err(RpcError::new(ErrorCode::ReadOnly, name));
+    }
+    if session.protocol >= Some(STRICT_PROTOCOL) {
+        undocumented(method, &request.params)?;
     }
     if let Some(answer) = linked(registry, &session.links, method, request).await {
         return answer;

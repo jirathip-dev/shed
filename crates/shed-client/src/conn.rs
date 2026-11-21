@@ -11,8 +11,8 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_json::Value;
 use shed_proto::{ErrorCode, Hello, Method, Request, Response, RpcError, Target};
 
-use crate::Calls;
 use crate::stream::Stream;
+use crate::{Calls, MIN_PROTOCOL};
 
 /// Why a call failed.
 #[derive(Debug, thiserror::Error)]
@@ -25,8 +25,8 @@ pub enum Error {
         /// What failed.
         source: io::Error,
     },
-    /// Not shed, a protocol range that does not overlap this client's, or a refused hello.
-    #[error("{}", version_text(ours, theirs.as_deref(), refusal.as_ref()))]
+    /// Not shed, a server under [`MIN_PROTOCOL`], a refused hello, or a call this server is too old for.
+    #[error("{}", version_text(ours, theirs.as_deref(), refusal.as_ref(), needs.as_deref()))]
     Version {
         /// This client's hello.
         ours: Box<Hello>,
@@ -34,6 +34,8 @@ pub enum Error {
         theirs: Option<Box<Hello>>,
         /// The server's refusal of ours.
         refusal: Option<RpcError>,
+        /// The method or field (`run.env`) the call used that this server does not know.
+        needs: Option<String>,
     },
     /// The server's own error.
     #[error("{0}")]
@@ -60,7 +62,12 @@ fn io_text(socket: &Path, source: &io::Error) -> String {
     }
 }
 
-fn version_text(ours: &Hello, theirs: Option<&Hello>, refusal: Option<&RpcError>) -> String {
+fn version_text(
+    ours: &Hello,
+    theirs: Option<&Hello>,
+    refusal: Option<&RpcError>,
+    needs: Option<&str>,
+) -> String {
     let range = |h: &Hello| format!("{} to {}", h.oldest.unwrap_or(h.protocol), h.protocol);
     let head = format!(
         "SHED_VERSION: this client speaks shed protocol {}",
@@ -77,8 +84,11 @@ fn version_text(ours: &Hello, theirs: Option<&Hello>, refusal: Option<&RpcError>
                 "shed there"
             };
             let (version, label) = (&t.version, t.label());
+            let lacks = needs
+                .map(|n| format!("; it does not know {n}"))
+                .unwrap_or_default();
             format!(
-                "{head}; the server is {version} ({label}) protocol {}; update {side} {fix}",
+                "{head}; the server is {version} ({label}) protocol {}{lacks}; update {side} {fix}",
                 range(t)
             )
         }
@@ -122,8 +132,31 @@ fn answer(line: &str, id: &Value) -> Result<Value, Error> {
     }
 }
 
+fn ours() -> Hello {
+    Hello {
+        oldest: Some(MIN_PROTOCOL),
+        ..Hello::ours()
+    }
+}
+
+fn too_old(server: &Hello, method: Method, e: Error) -> Error {
+    let Error::Rpc(rpc) = &e else { return e };
+    let field = rpc.message.strip_prefix("INVALID_PARAMS: unknown field ");
+    let needs = match (rpc.code == ErrorCode::MethodNotFound.code(), field) {
+        (true, _) => method.name().to_owned(),
+        (false, Some(field)) => field.to_owned(),
+        (false, None) => return e,
+    };
+    Error::Version {
+        ours: Box::new(ours()),
+        theirs: Some(Box::new(server.clone())),
+        refusal: None,
+        needs: Some(needs),
+    }
+}
+
 fn shaken(answer: Result<Value, Error>) -> Result<Hello, Error> {
-    let ours = Box::new(Hello::ours());
+    let ours = Box::new(ours());
     let theirs: Hello = match answer {
         Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
             let refusal = Some(e);
@@ -131,11 +164,12 @@ fn shaken(answer: Result<Value, Error>) -> Result<Hello, Error> {
                 ours,
                 theirs: None,
                 refusal,
+                needs: None,
             });
         }
         answer => decode(answer?)?,
     };
-    if theirs.compatible() {
+    if theirs.compatible() && MIN_PROTOCOL <= theirs.protocol {
         return Ok(theirs);
     }
     let theirs = Some(Box::new(theirs));
@@ -143,6 +177,7 @@ fn shaken(answer: Result<Value, Error>) -> Result<Hello, Error> {
         ours,
         theirs,
         refusal: None,
+        needs: None,
     })
 }
 
@@ -188,7 +223,7 @@ impl Conn {
         let mut conn = Self {
             socket,
             wire,
-            server: Hello::ours(),
+            server: ours(),
         };
         let hello = encode(&conn.server)?;
         conn.server = shaken(conn.exchange(Method::Hello, hello))?;
@@ -230,7 +265,8 @@ impl Conn {
         let mut reply = String::new();
         match wire.reader.read_line(&mut reply) {
             Ok(0) => Err(io(io::ErrorKind::UnexpectedEof.into())),
-            Ok(_) => answer(&reply, &request.id.unwrap_or_default()),
+            Ok(_) => answer(&reply, &request.id.unwrap_or_default())
+                .map_err(|e| too_old(&self.server, method, e)),
             Err(e) => Err(io(late(wire.reader.get_ref(), e))),
         }
     }
@@ -312,7 +348,7 @@ pub fn once<P: Serialize, R: DeserializeOwned>(
     params: &P,
     exchange: impl FnOnce(&str) -> io::Result<String>,
 ) -> Result<R, Error> {
-    let hello = Request::new(1, Method::Hello, encode(&Hello::ours())?);
+    let hello = Request::new(1, Method::Hello, encode(&ours())?);
     let call = Request::new(2, method, encode(params)?);
     let mut lines = String::new();
     for request in [hello, call] {
@@ -321,8 +357,9 @@ pub fn once<P: Serialize, R: DeserializeOwned>(
     }
     let out = exchange(&lines).map_err(io_at(Path::new("")))?;
     let mut out = out.lines();
-    shaken(answer(out.next().unwrap_or_default(), &1.into()))?;
-    decode(answer(out.next().unwrap_or_default(), &2.into())?)
+    let server = shaken(answer(out.next().unwrap_or_default(), &1.into()))?;
+    let answer = answer(out.next().unwrap_or_default(), &2.into());
+    decode(answer.map_err(|e| too_old(&server, method, e))?)
 }
 
 /// One notification line (a request without an id, so no response) for `method` with `params`.

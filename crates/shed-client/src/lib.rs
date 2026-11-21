@@ -25,6 +25,9 @@ pub use conn::{Conn, Error, notification, once};
 pub use shed::Shed;
 pub use stream::{Stream, Streamed};
 
+/// The oldest server protocol this client works against; what `hello` carries as `oldest`.
+pub const MIN_PROTOCOL: u32 = 3;
+
 fn typed<C, P, R>(calls: &C, method: Method, params: &P) -> Result<R, Error>
 where
     C: Calls + ?Sized,
