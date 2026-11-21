@@ -41,7 +41,7 @@ fn guard(dir: &Path, mode: &str, per: &str) {
     std::fs::write(dir.join("guard.py"), GUARD).unwrap();
     let py = dir.join("guard.py");
     let cmd = json!(["python3", "-u", py, mode, dir]);
-    let config = format!("[script]\nguard = {cmd}\nguard_timeout = 2\nguard_per = \"{per}\"\n");
+    let config = format!("[script]\nguard = {cmd}\nguard_timeout = 1\nguard_per = \"{per}\"\n");
     std::fs::write(Paths::in_dir(dir).config, config).unwrap();
 }
 
@@ -252,21 +252,18 @@ fn acting_over_the_limit_keeps_each_method() {
     let dir = temp_dir("script-limit");
     let _server = Server::start(&dir);
     guard(&dir, "allow", "run");
-    let path = dir.join("big");
-    let writes = format!(
-        "const data = 'x'.repeat(65536).toBytes();
-         for (let i = 0; i < 40; i++) {{ await shed.file.write({{ path: {:?}, data }}); }}
-         return 1;",
-        path.to_str().unwrap()
-    );
-    let reply = code(&dir, &writes);
+    start(&dir, "t");
+    let writes = "const note = 'x'.repeat(300000);
+         for (let i = 0; i < 20; i++) { await shed.state({ name: 't', state: 'working', note }); }
+         return 1;";
+    let reply = code(&dir, writes);
     assert_eq!(error_code(&reply), "REPLY_LIMIT", "{}", reply["error"]);
     let acting = reply["acting"].as_array().unwrap();
-    assert_eq!(acting.len(), 40);
+    assert_eq!(acting.len(), 20);
     assert!(
         acting
             .iter()
-            .all(|a| *a == json!({"method": "file.write", "result": true}))
+            .all(|a| *a == json!({"method": "state", "result": true}))
     );
     let big = code(&dir, "return 'x'.repeat(9000000);");
     assert_eq!(error_code(&big), "REPLY_LIMIT");
