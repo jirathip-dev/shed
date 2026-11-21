@@ -4,6 +4,8 @@
 #![forbid(unsafe_code)]
 
 pub mod conn;
+#[cfg(feature = "fake")]
+pub mod fake;
 pub mod shed;
 pub mod stream;
 
