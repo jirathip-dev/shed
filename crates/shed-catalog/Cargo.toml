@@ -12,6 +12,10 @@ publish.workspace = true
 shed-proto.workspace = true
 toml.workspace = true
 
+[[example]]
+name = "catalog"
+path = "../../skill/shed-client/examples/catalog.rs"
+
 [package.metadata.gate]
 test_secs = 5
 

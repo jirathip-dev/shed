@@ -5,6 +5,7 @@ mod attach;
 mod code;
 mod out;
 mod service;
+mod skill;
 mod update;
 mod watch;
 
@@ -145,6 +146,10 @@ enum Command {
     Doctor,
     Setup(SetupArgs),
     SelfUpdate(update::Args),
+    Skill {
+        #[arg(long)]
+        to: PathBuf,
+    },
 }
 
 #[derive(Args)]
@@ -279,6 +284,7 @@ impl Server<'_> {
                 | Command::Doctor
                 | Command::Setup(_)
                 | Command::SelfUpdate(_)
+                | Command::Skill { .. }
         );
         if local && on.is_some() {
             bail!(
@@ -617,6 +623,10 @@ fn run(mut cli: Cli) -> anyhow::Result<ExitCode> {
         Command::Doctor => return service::doctor(&paths),
         Command::Setup(args) => setup(&paths, &args)?,
         Command::SelfUpdate(a) => return update::self_update(&paths, &a),
+        Command::Skill { to } => {
+            let written = skill::write(&to)?;
+            print(json, &written, || written.join("\n") + "\n")?;
+        }
     }
     Ok(ExitCode::SUCCESS)
 }

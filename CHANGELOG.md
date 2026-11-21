@@ -224,6 +224,9 @@ All notable changes to this project are documented here. The format follows
   the model and effort into the agent record's words or variables for the driver it picks, and gives the
   variables to the program. Their values stay in the server's memory: not in `get`, `agents`, events, logs
   or the saved state. `warm` takes no `env`, and `model` and `effort` need `acp`.
+- `shed skill --to <dir>` writes the shed-client skill (`SKILL.md` and its compiled examples) to
+  `<dir>/shed-client/`, and `shed_client::fake` (the `fake` feature) is a test server on a real socket for
+  apps that use the client.
 - `shed code outline FILE` (`code.outline`, with `machine` over a held link): a file's functions, types,
   sections and blocks in file order, each with its kind, name, line range and depth, by line rules for Rust,
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or
