@@ -120,6 +120,10 @@ bench:
     cargo test -p shed --locked --test cli timing_report -- --nocapture
     cargo test -p shed-core --locked --test history throughput_report -- --nocapture
 
+# The script engine's speed report (#214): targets 3, 4 and 5, each the median and range of 5 runs.
+script-bench:
+    cargo test -p shed-script --release --locked --test perf speed_report -- --ignored --nocapture
+
 # Build shed and install it to BIN_DIR/shed (default ~/.cargo/bin), signed on macOS with "herdsman-local" (#56).
 install *BIN_DIR:
     scripts/install.sh {{BIN_DIR}}
