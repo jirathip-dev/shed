@@ -6,8 +6,6 @@ fn bad(what: impl std::fmt::Display) -> RpcError {
     RpcError::new(ErrorCode::InvalidParams, what)
 }
 
-/// Turns an ACP `run` into the bridge's command over the driver it picks, with the record's words for the
-/// model and the effort, and their variables added to `env`.
 pub(crate) fn bridge(
     p: &mut RunParams,
     socket: &Path,
@@ -85,7 +83,6 @@ pub(crate) fn bridge(
     Ok(())
 }
 
-/// The program's variables: the caller's `env`, then `SHED` and, on an ACP run, what the bridge reads.
 pub(crate) fn vars(p: &RunParams, name: &str) -> serde_json::Result<Vec<(String, String)>> {
     let mut vars: Vec<_> = p.env.clone().into_iter().collect();
     vars.push(("SHED".to_owned(), name.to_owned()));
