@@ -179,6 +179,22 @@ fn speed_report() {
         "at least 25",
         spins.iter().map(|t| t.steps_per_second / 1e6).collect(),
     );
+    let holds: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("hold.js"))).collect();
+    report(
+        "target 5: hold.js, the longest slice",
+        "at most 1 ms",
+        holds.iter().map(|t| ms(t.slice)).collect(),
+    );
+    report(
+        "target 5: hold.js, the longest collection",
+        "at most 150 ms",
+        holds.iter().map(|t| ms(t.collection)).collect(),
+    );
+}
+
+#[test]
+#[ignore = "timed: run by `just script-bench`, in release"]
+fn speed_report_builtins() {
     let shapes: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("shapes.js"))).collect();
     report(
         "target 3: shapes.js, million steps a second",
@@ -190,16 +206,5 @@ fn speed_report() {
         "big.js, the longest slice (one built-in's hold)",
         "at most 30 ms",
         bigs.iter().map(|t| ms(t.slice)).collect(),
-    );
-    let holds: Vec<Timed> = (0..RUNS).map(|_| timed(&fixed("hold.js"))).collect();
-    report(
-        "target 5: hold.js, the longest slice",
-        "at most 1 ms",
-        holds.iter().map(|t| ms(t.slice)).collect(),
-    );
-    report(
-        "target 5: hold.js, the longest collection",
-        "at most 150 ms",
-        holds.iter().map(|t| ms(t.collection)).collect(),
     );
 }
