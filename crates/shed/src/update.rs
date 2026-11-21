@@ -8,9 +8,10 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
+use shed_client::Conn;
 use shed_server::proto::{BUILD, Handover, Method};
 use shed_server::runner::{self, ExitCode};
-use shed_server::{Client, Paths, clock, config};
+use shed_server::{Paths, clock, config};
 
 fn main_head(repo: &str) -> anyhow::Result<String> {
     let ran = runner::output("git", ["ls-remote", repo, "refs/heads/main"], &[])?;
@@ -88,7 +89,7 @@ impl Staged {
     }
 }
 
-fn hand_over(serve: Option<Client>, to: &str) -> String {
+fn hand_over(serve: Option<Conn>, to: &str) -> String {
     match serve.map(|mut c| c.call::<_, Handover>(Method::Handover, &json!({"build": to}))) {
         None => "not running".to_owned(),
         Some(Ok(_)) => "handed over".to_owned(),
@@ -107,7 +108,7 @@ fn pass(paths: &Paths, dir: &Path, exe: &Path, dry: bool) -> anyhow::Result<Stri
     if dry {
         crate::out::line(format_args!("target   {tag} (main)"));
     }
-    let mut serve = Client::connect(&paths.socket).ok();
+    let mut serve = Conn::connect(&paths.socket).ok();
     let serving = serve.as_ref().map(|c| c.server().build.clone());
     if to == BUILD {
         return Ok(match serving.filter(|b| b != BUILD) {
@@ -179,7 +180,7 @@ pub fn self_update(paths: &Paths, args: &Args) -> anyhow::Result<ExitCode> {
     let exe = std::env::current_exe().context("this binary's path")?;
     let dry = args.dry_run;
     if dry {
-        let serve = Client::connect(&paths.socket).map(|c| c.server().build.clone());
+        let serve = Conn::connect(&paths.socket).map(|c| c.server().build.clone());
         let serve = serve.unwrap_or_else(|_| "not running".to_owned());
         crate::out::line(format_args!("current  {BUILD}, serve {serve}"));
     }

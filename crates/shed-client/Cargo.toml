@@ -1,0 +1,39 @@
+[package]
+name = "shed-client"
+description = "The one client for shed's socket: the handshake, a pool, typed calls and streams."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+shed-proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[features]
+fake = []
+
+[dev-dependencies]
+shed-client = { path = ".", features = ["fake"] }
+
+[[example]]
+name = "lane"
+path = "../../skill/shed-client/examples/lane.rs"
+
+[[example]]
+name = "events"
+path = "../../skill/shed-client/examples/events.rs"
+
+[[example]]
+name = "fake"
+path = "../../skill/shed-client/examples/fake.rs"
+
+[package.metadata.gate]
+test_secs = 10
+
+[lints]
+workspace = true

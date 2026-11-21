@@ -1,4 +1,4 @@
-//! Machines over SSH: the `[machines]` table of the config file and a [`Client`] through
+//! Machines over SSH: the `[machines]` table of the config file and a [`Conn`] through
 //! `ssh <target> shed connect`.
 //!
 //! The config file is a small TOML subset, written by `shed machine add|rm`:
@@ -24,8 +24,9 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::proto::{BUILD, ErrorCode, MachineStats, Method, StatsParams};
-use crate::{Client, Error};
+use crate::Error;
+use crate::proto::{BUILD, MachineStats, Method, StatsParams};
+use shed_client::Conn;
 
 const CONNECT_TIMEOUT: u32 = 10;
 static WRITES: AtomicU64 = AtomicU64::new(0);
@@ -184,7 +185,7 @@ pub fn find(path: &Path, name: &str) -> Result<Machine, Error> {
 /// # Errors
 /// [`Error::MachineVersion`] when the shed there is another version; [`Error::Unreachable`] when
 /// `ssh` or the shed there gives no answer; [`Error::Io`] when `ssh` cannot start.
-pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Client, Error> {
+pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Conn, Error> {
     let (ours, theirs) = UnixStream::pair()?;
     fs::DirBuilder::new()
         .recursive(true)
@@ -207,25 +208,32 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
     }
     let mut child = shed_core::runner::over("ssh", args, OwnedFd::from(theirs))?;
     std::thread::spawn(move || child.wait());
-    match Client::over(ours) {
-        Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
-            let there = e.message.split(" / server ").nth(1).unwrap_or_default();
-            let there = there
-                .split(" protocol ")
-                .next()
-                .unwrap_or_default()
-                .to_owned();
+    match Conn::over(ours) {
+        Err(shed_client::Error::Version {
+            theirs, refusal, ..
+        }) => {
+            let there = match (theirs, refusal) {
+                (Some(theirs), _) => theirs.label(),
+                (None, e) => {
+                    let message = e.map(|e| e.message).unwrap_or_default();
+                    let there = message.split(" / server ").nth(1).unwrap_or_default();
+                    let there = there.split(" protocol ").next().unwrap_or_default();
+                    there.to_owned()
+                }
+            };
             Err(Error::MachineVersion {
                 machine: machine.name.clone(),
                 here: BUILD.to_owned(),
                 there,
             })
         }
-        Err(Error::BadResponse(_) | Error::Io(_)) => Err(Error::Unreachable {
-            machine: machine.name.clone(),
-            target: machine.target.clone(),
-        }),
-        client => client,
+        Err(shed_client::Error::Bad(_) | shed_client::Error::Io { .. }) => {
+            Err(Error::Unreachable {
+                machine: machine.name.clone(),
+                target: machine.target.clone(),
+            })
+        }
+        conn => Ok(conn?),
     }
 }
 
@@ -257,8 +265,10 @@ pub fn stats(
     let (tx, rx) = mpsc::channel();
     let (m, dir) = (machine.clone(), control_dir.to_owned());
     std::thread::spawn(move || {
-        tx.send(connect(&m, &dir, false).and_then(|mut c| c.call(Method::MachineStats, &params)))
-            .ok();
+        tx.send(
+            connect(&m, &dir, false).and_then(|mut c| Ok(c.call(Method::MachineStats, &params)?)),
+        )
+        .ok();
     });
     let seen = seen_dir.join(&machine.name);
     match rx.recv_timeout(STATS_TIMEOUT) {

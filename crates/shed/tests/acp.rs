@@ -15,10 +15,11 @@ use std::process::{Command, Output};
 
 use common::{Server, temp_dir};
 use serde_json::{Value, json};
+use shed_client::Conn;
 use shed_core::proctree::{self, ProcessTable as _};
+use shed_server::Paths;
 use shed_server::lane::transcript::Preview;
 use shed_server::proto::{EventKind, EventsParams, Logged, Method, ReadResult};
-use shed_server::{Client, Paths};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
 
@@ -127,7 +128,7 @@ fn registry(dir: &Path) -> PathBuf {
 }
 
 fn events_until(dir: &Path, run: &str, last: impl Fn(&Value) -> bool) -> Vec<String> {
-    let mut client = Client::connect(&Paths::in_dir(dir).socket).expect("connect");
+    let mut client = Conn::connect(&Paths::in_dir(dir).socket).expect("connect");
     let params = EventsParams {
         labels: [("run".to_owned(), run.to_owned())].into(),
         since: Some(0),
@@ -697,7 +698,7 @@ fn a_usage_update_and_a_quota_block_show_in_get_top_and_as_an_event() {
     let _server = Server::start(&dir);
     let providers = Paths::in_dir(&dir).providers();
     std::fs::create_dir_all(&providers).expect("providers dir");
-    let claude = include_str!("../../shed-server/src/providers/claude.toml");
+    let claude = include_str!("../../shed-catalog/providers/claude.toml");
     let quota = claude
         .split_once("[quota]")
         .expect("claude-acp has a quota table")
@@ -1747,7 +1748,7 @@ fn a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_a
         e["event"] == "reply" && e["text"] == "you said: more"
     });
 
-    let mut client = Client::connect(&Paths::in_dir(&dir).socket).expect("connect");
+    let mut client = Conn::connect(&Paths::in_dir(&dir).socket).expect("connect");
     let all = EventsParams {
         labels: std::collections::BTreeMap::new(),
         since: Some(0),

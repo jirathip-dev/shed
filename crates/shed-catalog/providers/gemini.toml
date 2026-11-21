@@ -1,0 +1,6 @@
+# Gemini CLI, which speaks ACP itself (`gemini --acp`). A file of the same name in <config>/providers/ overrides keys of this one.
+id = "gemini"
+agent = "gemini"
+install = "npm install -g @google/gemini-cli"
+token_var = "GEMINI_API_KEY"
+model_env = "GEMINI_MODEL"

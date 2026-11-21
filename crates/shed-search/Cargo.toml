@@ -12,6 +12,9 @@ publish.workspace = true
 shed-pattern.workspace = true
 shed-proto.workspace = true
 
+[package.metadata.gate]
+test_secs = 5
+
 [lints]
 workspace = true
 

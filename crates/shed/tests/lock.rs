@@ -9,18 +9,19 @@ use std::time::{Duration, Instant};
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
+use shed_client::Conn;
+use shed_server::Paths;
 use shed_server::proto::Method;
-use shed_server::{Client, Paths};
 
-fn client(dir: &Path) -> Client {
-    Client::connect(&Paths::in_dir(dir).socket).expect("connect")
+fn client(dir: &Path) -> Conn {
+    Conn::connect(&Paths::in_dir(dir).socket).expect("connect")
 }
 
-fn call(c: &mut Client, method: Method, params: &Value) -> Value {
+fn call(c: &mut Conn, method: Method, params: &Value) -> Value {
     c.call(method, params).expect("call")
 }
 
-fn run(c: &mut Client, dir: &Path, name: &str, script: &str) {
+fn run(c: &mut Conn, dir: &Path, name: &str, script: &str) {
     let params = json!({"name": name, "cwd": dir, "cmd": ["sh", "-c", script]});
     call(c, Method::Run, &params);
     eventually("ready", || {
@@ -30,7 +31,7 @@ fn run(c: &mut Client, dir: &Path, name: &str, script: &str) {
     });
 }
 
-fn timed(c: &mut Client, method: Method, params: &Value) -> Duration {
+fn timed(c: &mut Conn, method: Method, params: &Value) -> Duration {
     let start = Instant::now();
     call(c, method, params);
     start.elapsed()
@@ -38,7 +39,7 @@ fn timed(c: &mut Client, method: Method, params: &Value) -> Duration {
 
 fn in_thread<T: Send + 'static>(
     dir: &Path,
-    f: impl FnOnce(&mut Client) -> T + Send + 'static,
+    f: impl FnOnce(&mut Conn) -> T + Send + 'static,
 ) -> JoinHandle<T> {
     let dir: PathBuf = dir.to_owned();
     std::thread::spawn(move || f(&mut client(&dir)))

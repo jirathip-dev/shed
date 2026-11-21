@@ -245,7 +245,7 @@ fn box_ssh(root: &Path) -> usize {
 
 fn local_events(root: &Path, since: u64) -> impl Iterator<Item = Value> {
     let socket = shed_server::Paths::in_dir(&root.join("local")).socket;
-    let mut client = shed_server::Client::connect(&socket).expect("connect");
+    let mut client = shed_client::Conn::connect(&socket).expect("connect");
     let params = EventsParams {
         since: Some(since),
         ..EventsParams::default()
@@ -309,7 +309,7 @@ fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_versi
     );
 
     let socket = shed_server::Paths::in_dir(&root.join("local")).socket;
-    let mut client = shed_server::Client::connect(&socket).expect("connect");
+    let mut client = shed_client::Conn::connect(&socket).expect("connect");
     let read = json!({"name": "box/t1"});
     let mut took: Vec<Duration> = (0..50)
         .map(|_| {
@@ -401,7 +401,7 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     let merged: Vec<_> = seen.iter().filter_map(ours).collect();
     let there: Vec<_> = {
         let socket = shed_server::Paths::in_dir(&remote).socket;
-        let mut client = shed_server::Client::connect(&socket).expect("connect");
+        let mut client = shed_client::Conn::connect(&socket).expect("connect");
         let params = EventsParams {
             since: Some(0),
             ..EventsParams::default()

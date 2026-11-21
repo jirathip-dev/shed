@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
+use shed_client::MIN_PROTOCOL;
 use shed_core::{Size, Terminal};
 use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
 
@@ -111,7 +112,7 @@ fn hello_prints_the_version() {
 }
 
 #[test]
-fn hello_accepts_a_server_on_the_previous_protocol_and_reports_its_build() {
+fn hello_reports_a_server_on_another_build() {
     let dir = temp_dir("hello-build");
     let listener = std::os::unix::net::UnixListener::bind(dir.join("shed.sock")).expect("bind");
     let server = std::thread::spawn(move || {
@@ -121,7 +122,7 @@ fn hello_accepts_a_server_on_the_previous_protocol_and_reports_its_build() {
             .read_line(&mut hello)
             .expect("hello");
         let other = json!({"jsonrpc": "2.0", "id": 1, "result":
-            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 1}});
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL}});
         std::io::Write::write_all(&mut stream, format!("{other}\n").as_bytes()).expect("reply");
     });
     let out = shed_in(&dir, &["hello"]);
@@ -190,8 +191,7 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
         format!(
-            "shed: SHED_VERSION: client {BUILD} protocol {}-{PROTOCOL} / server 56de739 protocol {1}-{1}; update the server and restart shed serve\n",
-            PROTOCOL - 1,
+            "shed: SHED_VERSION: this client speaks shed protocol {MIN_PROTOCOL} to {PROTOCOL}; the server is 0.0.0 (56de739) protocol {0} to {0}; update shed there (shed updates itself from its own releases: `shed self-update`, docs/self-update.md)\n",
             PROTOCOL - 2
         )
     );
@@ -1052,4 +1052,26 @@ fn a_trust_prompt_on_screen_outranks_a_reported_working_until_it_leaves() {
     assert!(until("working"), "{}", info(&dir, "lane"));
     let reported = &info(&dir, "lane")["reported"];
     assert_eq!(reported["from"], "reported", "{reported}");
+}
+
+#[test]
+fn skill_writes_the_client_skill_and_its_examples_as_the_repo_has_them() {
+    let dir = temp_dir("skill");
+    let listed = shed(&["skill", "--to", dir.to_str().unwrap()]);
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skill/shed-client");
+    let names = [
+        "SKILL.md",
+        "examples/lane.rs",
+        "examples/events.rs",
+        "examples/catalog.rs",
+        "examples/fake.rs",
+    ];
+    for name in names {
+        let written = dir.join("shed-client").join(name);
+        assert!(listed.contains(written.to_str().unwrap()), "{listed}");
+        let want = std::fs::read_to_string(repo.join(name)).unwrap();
+        assert_eq!(std::fs::read_to_string(&written).unwrap(), want, "{name}");
+    }
+    assert_eq!(listed.lines().count(), names.len());
+    assert_eq!(shed(&["skill", "--to", dir.to_str().unwrap()]), listed);
 }

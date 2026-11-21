@@ -1,5 +1,5 @@
 use serde_json::{Map, Value, json};
-use shed_proto::{AcpUsage, Stream};
+use shed_proto::{AcpUsage, Provider, Stream};
 
 use crate::drivers::stream::Wire;
 use crate::lane::{Heard, Tool};
@@ -21,10 +21,13 @@ impl Wire for Claude {
         json!({"type": "user", "message": {"role": "user", "content": content}}).to_string()
     }
 
-    fn heard(&mut self, line: &Value, record: &Stream) -> Vec<Heard> {
+    fn heard(&mut self, line: &Value, provider: &Provider) -> Vec<Heard> {
+        let Some(record) = provider.stream.as_ref() else {
+            return Vec::new();
+        };
         let main = line["parent_tool_use_id"].is_null();
         match (line["type"].as_str(), line["subtype"].as_str()) {
-            (Some("system"), Some("init")) => self.init(line, record),
+            (Some("system"), Some("init")) => self.init(line, provider),
             (Some("user"), _) if line["isReplay"] == true => vec![Heard::Prompted],
             (Some("user"), _) if main => results(line),
             (Some("stream_event"), _) if main => started(&line["event"], record),
@@ -57,7 +60,7 @@ impl Wire for Claude {
 }
 
 impl Claude {
-    fn init(&mut self, line: &Value, record: &Stream) -> Vec<Heard> {
+    fn init(&mut self, line: &Value, record: &Provider) -> Vec<Heard> {
         let mut heard = Vec::new();
         let model = line["model"].as_str().map(str::to_owned);
         if model.is_some() && model != self.model {
@@ -193,7 +196,8 @@ mod tests {
     use crate::lane::Heard;
 
     fn record() -> Provider {
-        crate::providers::find(Path::new("/no-such-dir"), "claude-acp")
+        let catalog = crate::providers::Catalog::load(Path::new("/no-such-dir")).0;
+        catalog.by_id("claude-acp").cloned().unwrap_or_default()
     }
 
     fn show(heard: &Heard, provider: &Provider) -> String {
@@ -224,7 +228,6 @@ mod tests {
     #[test]
     fn a_recorded_session_reads_as_shed_hears_it() {
         let provider = record();
-        let stream = provider.stream.clone().unwrap_or_default();
         let fixture = include_str!("../../tests/fixtures/claude-stream.jsonl");
         let mut wire = Claude::default();
         let (mut text, mut seen) = (String::new(), Vec::new());
@@ -234,7 +237,7 @@ mod tests {
             if line["type"] == "result" {
                 result = line["result"].as_str().unwrap_or_default().to_owned();
             }
-            for heard in wire.heard(&line, &stream) {
+            for heard in wire.heard(&line, &provider) {
                 match heard {
                     Heard::Text(chunk) => text.push_str(&chunk),
                     heard => seen.push(show(&heard, &provider)),
@@ -266,11 +269,10 @@ mod tests {
 
     #[test]
     fn a_rejected_limit_an_error_and_a_plan_are_heard() {
-        let stream = record().stream.unwrap_or_default();
         let mut wire = Claude::default();
         let mut hear = |line: Value| -> Vec<String> {
             let provider = record();
-            wire.heard(&line, &stream).iter().map(|h| show(h, &provider)).collect()
+            wire.heard(&line, &provider).iter().map(|h| show(h, &provider)).collect()
         };
         let info = json!({"status": "rejected", "resetsAt": 1_795_150_800, "rateLimitType": "five_hour"});
         let limit = json!({"type": "rate_limit_event", "rate_limit_info": info});

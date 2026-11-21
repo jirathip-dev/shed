@@ -3,18 +3,20 @@
 - Don't leave a clippy warning (pedantic), or add an `allow` past the workspace's 10, or one without a reason. Enforcer: `just clippy`.
 - Don't `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `dbg!`, index or slice, cast with `as`, or `let _ =` a must-use value outside tests, and don't write `unsafe`. Enforcer: `just clippy` (`[workspace.lints]`, clippy.toml), `just banned` (ci/fixtures/banned).
 - Don't `print!` or `eprint!` outside crates/shed/src/out.rs. Enforcer: `just clippy` (print_stdout, print_stderr), `just banned`.
-- Don't push a failing test. Enforcer: `just test`.
+- Don't push a failing test, or one whose crate runs past its `test_secs`. Enforcer: `just budget` (scripts/budget.py).
 - Don't let a test leave a temp folder behind, pass or fail. Enforcer: `just temp-left` (scripts/temp-left.sh) after `just test`.
 - Don't break the rustdoc build. Enforcer: `just doc`.
 - Don't add a dependency with a disallowed licence, an advisory or a duplicate version. Enforcer: `just deny` (deny.toml).
 - Don't grow the non-test Rust lines in crates/*/src past `line_cap`. Enforcer: `just cap` (ci/cap.toml).
 - Don't make shed-core depend on another workspace crate. Enforcer: `just deps` (scripts/dep-direction.sh).
-- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, search uses pattern and proto, script uses proto and pattern, server uses core, proto, pattern, search and script, cli uses server; shed-search reads files only in walk.rs, shed-pattern reads none, and neither opens a socket). Enforcer: `just arch` (.drover/arch.toml).
+- Don't use a layer outside its `may_use` (core, proto and pattern use nothing, client and catalog use proto, search uses pattern and proto, script uses proto and pattern, server uses core, proto, client, catalog, pattern, search and script, cli uses server and client; shed-search reads files only in walk.rs, shed-pattern reads none, and neither opens a socket). Enforcer: `just arch` (.drover/arch.toml).
+- Don't drop or retype a method, field or type in docs/shed.openrpc.json without raising `PROTOCOL`. Enforcer: `just protocol` (scripts/protocol.py).
+- Don't shake hands (`Hello::ours`) outside shed-client, shed-proto and the server's dispatch in crates/shed-server/src/lib.rs. Enforcer: `just arch` (.drover/arch.toml).
 - Don't start a process or use `std::process` outside crates/shed-core/src/runner.rs (`Command::new`, `std::process` are banned elsewhere). Enforcer: `just arch` (.drover/arch.toml).
 - Don't sleep or read the clock outside crates/shed-core/src/clock.rs (`thread::sleep`, `Instant::now`, `SystemTime::now`), or read the environment outside crates/shed-server/src/config.rs (`env::var`). Enforcer: `just arch` (.drover/arch.toml).
 - Don't grow a file past 2000 lines or a function past 150 unless the baseline lists it. Enforcer: `just arch` (.drover/arch.toml).
 - Don't commit a setup-specific name (home paths, tailnet hosts, private IPs, chat IDs). Enforcer: `just hygiene` (ci/denylist.txt).
-- Don't name an agent or provider outside crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
+- Don't name an agent or provider outside crates/shed-catalog/providers/ and crates/shed-server/src/providers/. Enforcer: `just neutral` (scripts/neutral-core.sh).
 - Don't push a GitHub workflow actionlint rejects. Enforcer: `just actionlint`.
 - Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo. Enforcer: `just self-hosted` (scripts/self-hosted.py).
 - Don't fail an active lesson check in this file (a shadow one only reports). Enforcer: `just lessons` (drover lesson-check).

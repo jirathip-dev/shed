@@ -210,6 +210,23 @@ All notable changes to this project are documented here. The format follows
 - `read` returns a `cursor`, and `read` with `since: <cursor>` returns only what is new: the lines that
   scrolled off since, then the screen only when it changed (`changed`). Lines scrollback dropped before
   they were read are counted in `lost`. ACP terminals take `since` for their events by `seq`.
+- `shed-client`, the one client for shed's socket: the handshake, a pool of idle connections with a call
+  timeout, the typed calls and the streams, blocking and with no async runtime. shed's own CLI, machine
+  links and ACP bridge run on it. A server shed cannot speak to is named in one `SHED_VERSION` line that
+  says which side to update.
+- The agent records live in a crate of their own, `shed-catalog`, which an app reads with no server running:
+  built in, under the host's files, under the app's own rows, merged key by key. Records gain `install`,
+  `token_var`, `models` (moved up from `[stream]`), `model_args`, `model_env` and `[stream] effort`, and
+  `Provider::pick` turns a model and an effort into the words or variables for the driver that runs. A
+  gemini record is built in, and claude's efforts include `max`. Protocol 4: `Stream.models` moved to
+  `Provider.models`.
+- `run` takes a `model`, an `effort` and an `env` (`shed run --model --effort --env K=V`): the server turns
+  the model and effort into the agent record's words or variables for the driver it picks, and gives the
+  variables to the program. Their values stay in the server's memory: not in `get`, `agents`, events, logs
+  or the saved state. `warm` takes no `env`, and `model` and `effort` need `acp`.
+- `shed skill --to <dir>` writes the shed-client skill (`SKILL.md` and its compiled examples) to
+  `<dir>/shed-client/`, and `shed_client::fake` (the `fake` feature) is a test server on a real socket for
+  apps that use the client.
 - `shed code outline FILE` (`code.outline`, with `machine` over a held link): a file's functions, types,
   sections and blocks in file order, each with its kind, name, line range and depth, by line rules for Rust,
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or
@@ -258,6 +275,11 @@ All notable changes to this project are documented here. The format follows
   `run --resume` replays shed's own transcript (the agent's replay is dropped), `agents sessions` lists shed's
   sessions without starting the agent, `rm` deletes a session's files, and sessions go
   `$SHED_SESSIONS_KEEP` days (default 30) after their last turn. `session.driver` is new (`acp`).
+- Protocol 3: a client on protocol 3 that sends a request field its method does not document gets
+  `INVALID_PARAMS: unknown field <method>.<field>` instead of the field being dropped; clients on
+  protocol 1 or 2 are served as before. shed's own client needs a protocol 3 server, and a call an older
+  server lacks fails with `SHED_VERSION` naming the method or field. `just protocol` fails a change that
+  drops or retypes a method, field or type in `docs/shed.openrpc.json` without raising the protocol.
 - `shed wait --output` takes groups `( … )`, alternation `a|b`, counts `{n,m}`, `\b` and anchors anywhere,
   on a matcher whose time is bounded by pattern size times line length. `(`, `)`, `|`, and `^` or `$` in
   the middle of a pattern are now operators; a construct shed lacks (lookaround, backreferences) is an

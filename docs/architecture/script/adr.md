@@ -228,7 +228,8 @@ The gate has three levels; the files and commands are in README.md, "Measuring a
 
 ## Checked by running
 
-**The worked examples are valid and their replies exact.** [check.mjs](check.mjs) takes the four
+**The worked examples are valid and their replies exact.** check.mjs (since slice 5
+[make.mjs](../../../crates/shed-script/tests/golden/make.mjs), which writes the goldens) takes the four
 programs from README.md, runs them in Node against a fixture host with a guard (one process for the run:
 20 ms to start, then nothing on its whole-millisecond clock) and a virtual clock, and compares each reply
 with the one shown (Node 24.22.2):

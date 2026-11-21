@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, bail};
+use shed_client::{Conn, Error};
+use shed_server::Paths;
 use shed_server::proto::{BUILD, LONG_VERSION};
 use shed_server::runner::ExitCode;
-use shed_server::{Client, Error, Paths};
 
 const LABEL: &str = "dev.shed.serve";
 const UPDATE: &str = "dev.shed.update";
@@ -166,7 +167,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
     let fix = format!("fix: {}", job.start);
     let loaded = shed_server::runner::output("sh", ["-c", &job.loaded], &[])
         .is_ok_and(|o| o.status.success());
-    let server = Client::connect(&paths.socket);
+    let server = Conn::connect(&paths.socket);
     let outside = format!(
         "a server outside {LABEL} answers on {socket}; fix: stop that server, then {}",
         job.kick
@@ -186,7 +187,9 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
         (
             "socket",
             match &server {
-                Err(e) if !matches!(e, Error::Rpc(_)) => Err(format!("{socket}: {e}; {fix}")),
+                Err(e) if !matches!(e, Error::Version { .. }) => {
+                    Err(format!("{socket}: {e}; {fix}"))
+                }
                 _ => Ok(socket.to_string()),
             },
         ),
@@ -198,7 +201,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
                     "binary {BUILD}, server {}; fix: shed install",
                     c.server().label()
                 )),
-                Err(Error::Rpc(e)) => Err(format!("{e}; fix: shed install")),
+                Err(e @ Error::Version { .. }) => Err(format!("{e}; fix: shed install")),
                 Err(_) => Err("no server to ask".into()),
             },
         ),
@@ -234,7 +237,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<ExitCode> {
     crate::out::line(format_args!("ok    memory   {memory}"));
     let home = shed_server::config::var("HOME").unwrap_or_default();
     let dir = paths.providers();
-    let bad = shed_server::providers::load(&dir).1;
+    let bad = shed_server::providers::Catalog::load(&dir).1;
     for e in &bad {
         crate::out::line(format_args!("FAIL  provider {e}; skipped"));
     }

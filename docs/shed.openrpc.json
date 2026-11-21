@@ -2,7 +2,8 @@
   "openrpc": "1.3.2",
   "info": {
     "title": "shed",
-    "version": "0.0.0"
+    "version": "0.0.0",
+    "x-protocol": 4
   },
   "methods": [
     {
@@ -135,6 +136,39 @@
               "type": "string"
             },
             "description": "The program and its arguments; with `acp`, the agent's ACP adapter (empty: the installed\nagent's), which the server wraps in its own bridge."
+          }
+        },
+        {
+          "name": "model",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACP: the model, in the words of the agent's record for the driver the server picks."
+          }
+        },
+        {
+          "name": "effort",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACP: the effort, one of the record's `efforts`."
+          }
+        },
+        {
+          "name": "env",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Variables for the program, over the server's own. Kept in memory only; never saved or shown."
           }
         },
         {
@@ -4275,12 +4309,57 @@
             "description": "The variable that names its settings.",
             "default": null
           },
+          "install": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that installs the program.",
+            "default": null
+          },
+          "token_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that carries a login token.",
+            "default": null
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "The models a start may name: id and name.",
+            "default": []
+          },
+          "model_args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The adapter's arguments that set the model, `{model}` standing for the pick.",
+            "default": []
+          },
+          "model_env": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that sets the model, where the adapter takes one.",
+            "default": null
+          },
           "effort_args": {
             "type": "array",
             "items": {
               "type": "string"
             },
-            "description": "The arguments that set the effort, `{effort}` standing for one of `efforts`.",
+            "description": "The adapter's arguments that set the effort, `{effort}` standing for one of `efforts`.",
             "default": []
           },
           "efforts": {
@@ -4563,17 +4642,12 @@
             "description": "The arguments that set the model (`{model}`).",
             "default": []
           },
-          "models": {
+          "effort": {
             "type": "array",
             "items": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 2,
-              "maxItems": 2
+              "type": "string"
             },
-            "description": "The models `shed model` offers: id and name.",
+            "description": "The arguments that set the effort (`{effort}`).",
             "default": []
           },
           "mcp": {
@@ -4677,13 +4751,13 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
-            "description": "The median of [`AcpSession::ready_ms`]."
+            "description": "The median of [`crate::AcpSession::ready_ms`]."
           },
           "first_token_ms": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
-            "description": "The median of [`AcpSession::first_token_ms`]."
+            "description": "The median of [`crate::AcpSession::first_token_ms`]."
           }
         },
         "required": [

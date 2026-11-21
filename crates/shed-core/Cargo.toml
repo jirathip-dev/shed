@@ -17,5 +17,8 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "
 unicode-width.workspace = true
 vte.workspace = true
 
+[package.metadata.gate]
+test_secs = 20
+
 [lints]
 workspace = true

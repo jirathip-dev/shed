@@ -1,0 +1,1 @@
+{"result":[{"name":"impl-190","kind":"permission","note":"Bash: cargo test","tail":["Bash(cargo test --workspace --locked)","Do you want to proceed?","> 1. Yes   2. No"]},{"name":"impl-191","kind":"question","note":"Which cap raise?","tail":["The slice needs 180 more lines than the cap has.","Raise the cap, or trim the CLI help?","> "]}],"logs":[],"calls":3,"acting":[],"ms":2}

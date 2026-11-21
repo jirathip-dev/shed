@@ -18,11 +18,18 @@ use serde_json::Value;
 #[cfg(feature = "schema")]
 use serde_json::json;
 
+pub mod agents;
+pub use agents::{
+    Agent, AgentInfo, Cache, DriverKind, Hooks, MatchParams, Matched, Medians, Picked, Provider,
+    Quota, Rule, Stream,
+};
 pub mod code;
 pub use code::{
     FileMatches, GrepLine, GrepParams, GrepResult, Group, Kind, Lang, OutlineParams, OutlineResult,
     Span, Symbol,
 };
+pub mod input;
+pub use input::{Input, frame};
 
 /// The shed version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -33,8 +40,8 @@ pub const BUILD: &str = env!("SHED_BUILD");
 /// `<semver> (<sha>)`, as `shed --version`, `shed hello` and the server's ready line print it.
 pub const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SHED_BUILD"), ")");
 
-/// The wire protocol version; bump it with any change to the messages.
-pub const PROTOCOL: u32 = 2;
+/// The wire protocol version; raise it only to drop or retype a method, field or type (`just protocol`). From 3 a server refuses a request field the method does not document.
+pub const PROTOCOL: u32 = 4;
 
 /// The oldest protocol this build still speaks: a server answers a client on it in its shapes, a client accepts a server on it.
 pub const OLDEST_PROTOCOL: u32 = 1;
@@ -620,7 +627,7 @@ pub enum Policy {
 }
 
 /// `run` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct RunParams {
     /// The terminal's name, unique per server; `[A-Za-z0-9._-]+`.
@@ -640,6 +647,15 @@ pub struct RunParams {
     /// The program and its arguments; with `acp`, the agent's ACP adapter (empty: the installed
     /// agent's), which the server wraps in its own bridge.
     pub cmd: Vec<String>,
+    /// ACP: the model, in the words of the agent's record for the driver the server picks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// ACP: the effort, one of the record's `efforts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    /// Variables for the program, over the server's own. Kept in memory only; never saved or shown.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
     /// The ACP agent the program bridges (`shed run --acp`): `read` renders its transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acp: Option<String>,
@@ -709,7 +725,7 @@ pub struct LsParams {
 }
 
 /// `get`, `kill` and `rm` params: the terminal's name.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Target {
     /// The terminal's name.
@@ -803,7 +819,7 @@ pub struct SendParams {
 }
 
 /// `keys` and `terminal.keys` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct KeysParams {
     /// The terminal's name (`terminal` in `terminal.keys`).
@@ -814,7 +830,7 @@ pub struct KeysParams {
 }
 
 /// `resize` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ResizeParams {
     /// The terminal's name.
@@ -826,7 +842,7 @@ pub struct ResizeParams {
 }
 
 /// `state` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct StateParams {
     /// The terminal's name.
@@ -872,7 +888,7 @@ pub struct Reported {
 }
 
 /// `wait` params.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WaitParams {
     /// The terminal's name; with `children`, the parent's.
@@ -975,11 +991,12 @@ pub struct Event {
 }
 
 /// What an [`Event`] reports; the `event` field names it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum EventKind {
     /// The program started (`run`, or a kept terminal back after a server restart).
+    #[default]
     Started,
     /// The reported state changed.
     State(Box<Reported>),
@@ -1231,7 +1248,7 @@ impl Tokens {
 }
 
 /// `emit` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct EmitParams {
     /// The terminal's name.
@@ -1245,7 +1262,7 @@ pub struct EmitParams {
 }
 
 /// `acp.model` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct ModelParams {
     /// The terminal's name.
@@ -1363,270 +1380,6 @@ pub struct Link {
     pub error: Option<String>,
 }
 
-/// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
-/// the same name in `<config>/providers/` (`docs/acp.md`).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(default, deny_unknown_fields)]
-pub struct Provider {
-    /// The ACP agent id (`shed agents add <id>`).
-    pub id: String,
-    /// The PTY agent's name, as `shed setup` takes it.
-    pub agent: String,
-    /// Text in a line that says the login expired.
-    pub auth_failures: Vec<String>,
-    /// Text in a line that says a usage limit was hit.
-    pub limit: Vec<String>,
-    /// Markers in a limit line that the reset time follows.
-    pub resets: Vec<String>,
-    /// The `shed state` hooks `shed setup` writes.
-    pub hooks: Option<Hooks>,
-    /// The command that logs in.
-    pub login: Option<String>,
-    /// The command that shows whether it is logged in.
-    pub status: Option<String>,
-    /// The command that logs out.
-    pub logout: Option<String>,
-    /// The variable that moves its config folder.
-    pub config_dir_var: Option<String>,
-    /// The variable that names its settings.
-    pub settings_var: Option<String>,
-    /// The arguments that set the effort, `{effort}` standing for one of `efforts`.
-    pub effort_args: Vec<String>,
-    /// The effort levels it takes.
-    pub efforts: Vec<String>,
-    /// The screens that set its state, for a terminal labelled `agent=<agent>`.
-    pub rules: Vec<Rule>,
-    /// Where its prompt responses' `_meta` carries the turn's tokens.
-    pub quota: Option<Quota>,
-    /// How long its prompt cache lives on each login.
-    pub cache: Option<Cache>,
-    /// Which driver runs its lanes.
-    pub driver: DriverKind,
-    /// The stream driver's data: the agent's own JSON-lines mode.
-    pub stream: Option<Stream>,
-}
-
-/// The driver a provider's lanes run on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum DriverKind {
-    /// Its ACP adapter.
-    #[default]
-    Acp,
-    /// Its own JSON-lines mode, by the record's `stream` table, when a lane can be served whole.
-    Stream,
-}
-
-/// How the stream driver starts an agent in its own JSON-lines mode.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(default, deny_unknown_fields)]
-pub struct Stream {
-    /// The provider's line format: `providers/<wire>.rs`.
-    pub wire: String,
-    /// The agent's command line, before the arguments of one start.
-    pub command: Vec<String>,
-    /// Text that names the ACP adapter when it is the last argument of a caller's own command.
-    pub adapter: Option<String>,
-    /// The words an adapter is started with; `command` replaces them and the adapter.
-    pub launchers: Vec<String>,
-    /// The arguments that start a session under the id shed made (`{session}`).
-    pub new: Vec<String>,
-    /// The arguments that start the agent on a session it has (`{session}`).
-    pub resume: Vec<String>,
-    /// The arguments that set the model (`{model}`).
-    pub model: Vec<String>,
-    /// The models `shed model` offers: id and name.
-    pub models: Vec<[String; 2]>,
-    /// The arguments that pass the MCP servers (`{file}`: a private file with the wire's text).
-    pub mcp: Vec<String>,
-    /// Each policy's arguments; a policy without an entry stays on ACP.
-    pub policy: BTreeMap<String, Vec<String>>,
-    /// Each `--meta` option's flag, by its dotted path; an option without an entry stays on ACP.
-    pub meta: BTreeMap<String, String>,
-    /// Each tool's ACP kind and the input key that is its title.
-    pub tools: BTreeMap<String, [String; 2]>,
-    /// The tool, and its input key, whose list is the plan.
-    pub plan: Option<[String; 2]>,
-}
-
-/// The prompt cache's lifetime on a plan and on an API key, and the variables that mean an API key.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Cache {
-    /// Seconds on a subscription plan, the login without an API variable.
-    pub plan: u64,
-    /// Seconds on an API key.
-    pub api: u64,
-    /// Variables that, set and not empty in the agent's environment, mean an API key.
-    pub api_vars: Vec<String>,
-}
-
-/// A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is
-/// `state`. Above priority 0 it outranks the agent's own report; at or below, it applies only without one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Rule {
-    /// Its name; `get` shows `rule:<id>` as the state's `from`.
-    pub id: String,
-    /// The state it sets.
-    pub state: String,
-    /// Why it is blocked: `permission`, `question` or `auth`.
-    #[serde(default)]
-    pub kind: Option<String>,
-    /// The highest matching rule wins; the agent's own report has priority 0.
-    pub priority: i32,
-    /// How many of the screen's last non-blank lines it looks at.
-    pub region: usize,
-    /// The texts it matches, any one of them.
-    pub any: Vec<String>,
-    /// The agent version its golden screen was captured from.
-    pub version: String,
-}
-
-/// The keys of a turn's tokens in a prompt response's `_meta`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Quota {
-    /// The keys from `_meta` down to the object of counters.
-    pub path: Vec<String>,
-    /// The input tokens' key.
-    pub input: String,
-    /// The cache reads' key.
-    pub cache_read: String,
-    /// The cache writes' key.
-    pub cache_write: String,
-    /// The output tokens' key.
-    pub output: String,
-}
-
-impl Provider {
-    /// The first line of `text` that says a usage limit was hit, and the reset time after a marker in it.
-    #[must_use]
-    pub fn limit_hit<'t>(&self, text: &'t str) -> Option<(&'t str, Option<String>)> {
-        let line = text
-            .lines()
-            .find(|l| self.limit.iter().any(|s| l.contains(s)))?;
-        let at = self.resets.iter().find_map(|r| line.split_once(r));
-        Some((
-            line,
-            at.map(|(_, at)| at.trim().trim_end_matches('.').to_owned()),
-        ))
-    }
-
-    /// The turn's tokens in a prompt response's `meta`, or `None` when they are absent or not counts.
-    #[must_use]
-    pub fn tokens(&self, meta: &serde_json::Map<String, Value>) -> Option<Tokens> {
-        let quota = self.quota.as_ref()?;
-        let (first, rest) = quota.path.split_first()?;
-        let counts = rest.iter().try_fold(meta.get(first)?, |v, k| v.get(k))?;
-        let count = |key: &String| counts.get(key).and_then(Value::as_u64);
-        Some(Tokens {
-            input: count(&quota.input)?,
-            cache_read: count(&quota.cache_read)?,
-            cache_write: count(&quota.cache_write)?,
-            output: count(&quota.output)?,
-        })
-    }
-
-    /// The prompt cache's likely lifetime in seconds, by whether `set` says one of the API variables is set.
-    #[must_use]
-    pub fn cache_lifetime(&self, set: impl Fn(&str) -> bool) -> Option<u64> {
-        let cache = self.cache.as_ref()?;
-        let api = cache.api_vars.iter().any(|v| set(v));
-        Some(if api { cache.api } else { cache.plan })
-    }
-
-    /// The first line of `text` that says the login expired.
-    #[must_use]
-    pub fn auth_failure<'t>(&self, text: &'t str) -> Option<&'t str> {
-        text.lines()
-            .find(|l| self.auth_failures.iter().any(|s| l.contains(s)))
-    }
-}
-
-/// A PTY agent's hook table.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Hooks {
-    /// Its config file, under the home folder.
-    pub file: String,
-    /// Each hook event and the state it reports.
-    pub events: Vec<[String; 2]>,
-}
-
-/// One installed ACP agent.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Agent {
-    /// The registry id.
-    pub id: String,
-    /// The pinned version.
-    pub version: String,
-    /// The distribution it came from: `binary`, `npx` (installed once with npm, run by `node`) or `uvx`.
-    pub distribution: String,
-    /// The ACP adapter's command line (`env K=V …` first when the registry sets variables).
-    pub cmd: Vec<String>,
-}
-
-/// One `agents` entry: an agent shed has a provider record for, installed, or both.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct AgentInfo {
-    /// The ACP agent id.
-    pub id: String,
-    /// Where the record came from: `built-in` or the user file's path.
-    pub source: Option<String>,
-    /// The provider record.
-    pub provider: Option<Provider>,
-    /// The installed adapter.
-    pub installed: Option<Agent>,
-    /// The medians of its last sessions' timings, when any session got a first token.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub medians: Option<Medians>,
-}
-
-/// An agent's medians over its last `$SHED_MEDIAN_OF` (default 20) ACP sessions that got a first token.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct Medians {
-    /// How many sessions they are over.
-    pub sessions: u64,
-    /// The median of [`AcpSession::ready_ms`].
-    pub ready_ms: u64,
-    /// The median of [`AcpSession::first_token_ms`].
-    pub first_token_ms: u64,
-}
-
-/// `agents.match` params: an agent's id and text to apply its rules to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct MatchParams {
-    /// The ACP agent id.
-    pub id: String,
-    /// The text, e.g. a pane's screen.
-    pub text: String,
-}
-
-/// `agents.match` result: the lines the agent's rules find.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-pub struct Matched {
-    /// The first line that says a usage limit was hit (the state `rate-limited`).
-    pub limit: Option<String>,
-    /// The reset time that line gives.
-    pub resets: Option<String>,
-    /// The first line that says the login expired.
-    pub auth: Option<String>,
-}
-
 /// `machine.stats` result: a sample taken now, and the kept ones after `since`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -1724,7 +1477,7 @@ pub struct TerminalInfo {
 }
 
 /// `screen.watch` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct WatchParams {
     /// The terminal's name.
@@ -1804,7 +1557,7 @@ pub enum Color {
 }
 
 /// `terminal.resize` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalResizeParams {
     /// The terminal's name; default the one this connection watches.
@@ -1817,7 +1570,7 @@ pub struct TerminalResizeParams {
 }
 
 /// `handover.check` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct HandoverCheckParams {
     /// The build the binary must be.
@@ -1827,7 +1580,7 @@ pub struct HandoverCheckParams {
 }
 
 /// `handover` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct HandoverParams {
     /// The build the server's own binary must be now.
@@ -1847,7 +1600,7 @@ pub struct Handover {
 }
 
 /// `terminal.readonly` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalParams {
     /// The terminal's name.
@@ -1948,7 +1701,7 @@ pub fn openrpc() -> Value {
             )
         })
         .collect();
-    json!({"openrpc": "1.3.2", "info": {"title": "shed", "version": VERSION}, "methods": methods,
+    json!({"openrpc": "1.3.2", "info": {"title": "shed", "version": VERSION, "x-protocol": PROTOCOL}, "methods": methods,
         "x-files": {"sessions/<id>.json": record}, "components": {"schemas": g.take_definitions(true), "errors": errors}})
 }
 

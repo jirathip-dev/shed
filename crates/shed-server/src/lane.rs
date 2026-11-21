@@ -2,7 +2,7 @@
 //! through its driver and turns what the agent says into shed events (`emit`), reported states and a
 //! JSONL transcript that `read` renders.
 //!
-//! The bridge reads its PTY in raw mode: a line framed by [`frame`] (`send`, `approve`, `cancel`,
+//! The bridge reads its PTY in raw mode: a line framed by [`frame`](shed_proto::frame) (`send`, `approve`, `cancel`,
 //! `model`), a plain line typed in `attach` (a prompt), or `Esc` / `Ctrl+C` alone (cancel).
 //!
 //! Its own tokio runtime runs the driver and the lane on this thread and, on one worker beside it, a
@@ -22,13 +22,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Map, Value};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 pub use shed_proto::Policy;
 use shed_proto::{
-    AcpSession, AcpUsage, ApprovalOption, EventKind, Method, Provider, Reported, StateParams,
-    Tokens,
+    AcpSession, AcpUsage, ApprovalOption, EventKind, Input, Method, Provider, Reported,
+    StateParams, Tokens,
 };
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWriteExt as _, BufReader};
 use tokio::process::Child;
@@ -37,41 +37,12 @@ use tokio::time::Instant;
 use transcript::{Preview, clean};
 use writer::{Out, Writer};
 
+use crate::Error;
 use crate::drivers::{acp, stream};
-use crate::{Client, Error};
+use shed_client::Conn;
 
 /// The states only an ACP lane reports, beside `working`, `done` and `error`.
 pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited", "hibernated"];
-
-/// One framed input to the bridge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Input {
-    /// Start a turn (`session/prompt`).
-    Prompt(String),
-    /// Cancel the turn (`session/cancel`).
-    Cancel,
-    /// Switch to this model (`session/set_config_option`, the `model` option).
-    Model(String),
-    /// Report under this terminal name from now on: a spare session taken by `run --warm`.
-    Name(String),
-    /// Answer permission request `request` (else the oldest) with this option id or kind.
-    #[serde(untagged)]
-    Approve {
-        /// The option id or kind.
-        #[serde(rename = "approve")]
-        option: String,
-        /// The `approval_request`'s id.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        request: Option<String>,
-    },
-}
-
-/// The bytes that deliver `input` to a bridge through its terminal: `RS`, the JSON, a newline.
-#[must_use]
-pub fn frame(input: &Input) -> String {
-    format!("\x1e{}\n", serde_json::to_string(input).unwrap_or_default())
-}
 
 /// Where the bridge of terminal `name` lends its PTY's master to a server on `socket` that starts again.
 #[must_use]
@@ -653,14 +624,17 @@ pub fn bridge(
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
     let launch = if stream {
-        let record = rules.stream.clone();
-        Launch::Stream(Box::new(stream::Launch::from_env(cmd, record, state)?))
+        Launch::Stream(Box::new(stream::Launch::from_env(
+            cmd,
+            rules.clone(),
+            state,
+        )?))
     } else {
         Launch::Acp(acp::Launch::from_env()?)
     };
     let at = (socket, state);
     let result = run(cmd, cwd, at, (agent, policy, rules), (&name, launch, why));
-    if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
+    if let (Err(e), Ok(mut server)) = (&result, Conn::connect(socket)) {
         let report = Reported {
             state: "error".to_owned(),
             note: Some(e.to_string()),
@@ -800,21 +774,5 @@ mod tests {
         assert_eq!(secs(Some("900"), Some(300)), Some(900));
         assert_eq!(secs(Some("junk"), Some(300)), Some(600));
         assert_eq!(secs(Some("0"), Some(300)), None);
-    }
-
-    #[test]
-    fn frames_are_one_line_of_json() {
-        let framed = frame(&Input::Prompt("a\nb".to_owned()));
-        assert_eq!(framed, "\x1e{\"prompt\":\"a\\nb\"}\n");
-        assert_eq!(frame(&Input::Cancel), "\x1e\"cancel\"\n");
-        let approve = |request: Option<&str>| Input::Approve {
-            option: "allow".to_owned(),
-            request: request.map(str::to_owned),
-        };
-        let line = "{\"approve\":\"allow\",\"request\":\"7\"}";
-        assert_eq!(frame(&approve(Some("7"))), format!("\x1e{line}\n"));
-        let read = |l: &str| serde_json::from_str::<Input>(l).unwrap();
-        assert_eq!(read(line), approve(Some("7")));
-        assert_eq!(read("{\"approve\":\"allow\"}"), approve(None));
     }
 }
