@@ -58,4 +58,4 @@ codegen-units = 1
 strip = true
 
 [profile.dev.package.shed-script]
-opt-level = 1
+opt-level = 3
