@@ -117,8 +117,8 @@ shed runs them as a second kind of terminal, through the same API:
 | `shed read <t>` | The transcript as text: prompts, one line per tool call, final replies. |
 
 `shed events` adds `turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply` and `session`, and
-`shed wait --until done` is exact. The PTY mode stays for agents without ACP. shed never handles provider
-credentials: each agent logs in its own way. See [docs/acp/accounts.md](docs/acp/accounts.md), including the Claude adapter caveat.
+`shed wait --until done` is exact. The PTY mode stays for agents without ACP. `run --account` runs an agent on one of
+shed's accounts; see [docs/accounts/accounts.md](docs/accounts/accounts.md).
 
 ## Integration with herdsman
 

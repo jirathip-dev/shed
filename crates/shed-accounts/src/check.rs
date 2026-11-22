@@ -23,9 +23,8 @@ pub fn command(
     env: &BTreeMap<String, String>,
     unset: &[String],
 ) -> Vec<String> {
-    let api = provider.cache.iter().flat_map(|c| &c.api_vars);
     let var = provider.config_dir_var.iter().filter(|_| folder.is_none());
-    let gone = (provider.scrub.iter()).chain(api).chain(unset).chain(var);
+    let gone = crate::env::dropped(provider).chain(unset).chain(var);
     let mut cmd = vec!["env".to_owned()];
     cmd.extend(gone.flat_map(|v| ["-u".to_owned(), v.clone()]));
     if let (Some(var), Some(folder)) = (&provider.config_dir_var, folder) {
