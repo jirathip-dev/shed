@@ -32,6 +32,7 @@ shared = [
     "crates/shed/tests/*/main.rs",
     "crates/shed/tests/fake_acp.py",
     "crates/shed-core/src/terminal/mod.rs",
+    "crates/shed-proto/src/lib.rs",
 ]
 
 [[layer]]
@@ -305,3 +306,15 @@ max_file_lines = 260
 [[size]]
 paths = ["crates/shed/tests/*/main.rs"]
 max_file_lines = 300
+
+[[collect]]
+dir = "crates/shed-proto/methods"
+glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-proto/errors"
+glob = "*.md"
+
+[[size]]
+paths = ["crates/shed-proto/src/lib.rs"]
+max_file_lines = 80

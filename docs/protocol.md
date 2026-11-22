@@ -31,94 +31,31 @@ tokens, and the `cost` when sent); `parent` names the terminal that started it (
 
 ## Methods
 
-### `hello`
+### `acp.model`
 
-The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
-```
-
-### `run`
-
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
+Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"mem_max_mb":4096,"name":"build","parent":{"name":"lead","notify":true}}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
-```
-
-### `ls`
-
-List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"ls","params":{"labels":{"issue":"7"},"parent":"lead"}}
-{"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
-```
-
-### `get`
-
-One terminal.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"get","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
-```
-
-### `read`
-
-The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. Every read returns a `cursor`; with `since: <cursor>` only what is new: the lines that scrolled off since (`lost: N` when scrollback dropped N of them first), then the screen only when it changed (`changed`), so nothing new is an empty `text`. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`, or with `since` only those after its `seq`.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"read","params":{"history":false,"lines":2,"name":"build","since":{"screen":2166136261,"seq":40}}}
-{"jsonrpc":"2.0","id":1,"result":{"changed":true,"cursor":{"screen":3735928559,"seq":41},"text":"ok 12 tests\n$"}}
-```
-
-### `send`
-
-Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint"}}
+{"jsonrpc":"2.0","id":1,"method":"acp.model","params":{"model":"haiku","name":"agent"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
-### `keys`
+### `agents`
 
-Press keys by name (`enter`, `esc`, `ctrl+c`, `up`, …); nothing is sent if any name is unknown.
+Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it).
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"keys","params":{"keys":["ctrl+c","enter"],"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{}}
+{"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"settings_var":null,"status":"fake login status","stream":null,"token_var":"FAKE_TOKEN"},"source":"/home/me/.config/shed/providers/fake.toml"}]}
 ```
 
-### `kill`
+### `agents.match`
 
-End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exited terminal.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"kill","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
-```
-
-### `rm`
-
-Remove an exited terminal, its ACP session closed; returns it as it was.
+Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"rm","params":{"name":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
-```
-
-### `resize`
-
-Resize the terminal; the program gets SIGWINCH.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"resize","params":{"cols":120,"name":"build","rows":50}}
-{"jsonrpc":"2.0","id":1,"result":{}}
+{"jsonrpc":"2.0","id":1,"method":"agents.match","params":{"id":"fake-acp","text":"working…\nfake: limit hit, back at 3pm."}}
+{"jsonrpc":"2.0","id":1,"result":{"auth":null,"limit":"fake: limit hit, back at 3pm.","resets":"3pm"}}
 ```
 
 ### `attach`
@@ -130,31 +67,22 @@ Take over the terminal. After the response the server writes a redraw (clear, th
 {"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
-### `state`
+### `code.grep`
 
-Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen. The terminal also speaks the Program Status Protocol (OSC 7501, revision 0.4): `state=<s>[:<key>=<value>]…` with `idle` and `clear`, `id`, `kind`, `progress`, `app` and base64 `title` and `msg`, and answers the probe `ESC ] 7501 ; ?`. A report with an `id` is a record of its own (`records`); on exit `working` and `blocked` ones are dropped.
+The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"state","params":{"name":"build","note":"tests pass","state":"done"}}
-{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+{"jsonrpc":"2.0","id":1,"method":"code.grep","params":{"count":false,"fixed":false,"glob":["*.rs"],"hidden":false,"ignore_case":false,"pattern":"retries","root":"/home/user/project","word":true}}
+{"jsonrpc":"2.0","id":1,"result":{"files":[{"count":2,"groups":[{"lines":[{"n":13,"text":"    pub retries: usize,"}],"scope":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9}]},{"lines":[{"n":42,"text":"        let retries = self.retries.min(budget);"}],"scope":[{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}],"lang":"rust","path":"src/job.rs"}],"matches":2,"searched":12}}
 ```
 
-### `wait`
+### `code.outline`
 
-Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback; `blocked` only of `kind`, if given) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"wait","params":{"kind":"question","name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
-{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"records":[{"id":"build/tests","state":"working"}],"reported":{"app":"make","kind":"question","msg":"Overwrite config.toml?","progress":40,"state":"blocked","title":"Docs"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
-```
-
-### `events`
-
-Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
+A file's functions, types, sections and blocks in file order, each with its kind, name, lines and depth, by line rules for Rust, TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or 256 MiB is `LIMIT`. `machine` reads it there.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"events","params":{"labels":{"issue":"7"},"since":120}}
-{"jsonrpc":"2.0","id":1,"result":{}}
+{"jsonrpc":"2.0","id":1,"method":"code.outline","params":{"machine":"box","path":"/home/user/project/src/job.rs"}}
+{"jsonrpc":"2.0","id":1,"result":{"lang":"rust","lines":49,"path":"/home/user/project/src/job.rs","symbols":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9},{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}}
 ```
 
 ### `emit`
@@ -166,76 +94,13 @@ Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `p
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
-### `screen.watch`
+### `events`
 
-Stream a running terminal's screen. After the response the server writes screen updates (see Screen updates), at most 20 a second: the full screen first (none when `since` is the screen's current `seq`), then the rows that changed. It closes the connection when the program's PTY closes. The connection still takes requests; their responses are not written.
+Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"screen.watch","params":{"since":41,"terminal":"build"}}
+{"jsonrpc":"2.0","id":1,"method":"events","params":{"labels":{"issue":"7"},"since":120}}
 {"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `terminal.input`
-
-Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"terminal.input","params":{"terminal":"build","text":"make lint"}}
-{"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `terminal.keys`
-
-Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
-{"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `terminal.resize`
-
-Resize the terminal, as `resize`; without `terminal`, the one this connection watches.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"terminal.resize","params":{"cols":60,"rows":30}}
-{"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `terminal.readonly`
-
-Mark the terminal read-only for this connection: from then on, until it closes, the connection's `send`, `keys`, `resize`, `attach`, `terminal.input`, `terminal.keys` and `terminal.resize` to the terminal are refused with `READONLY`. The connection may resize only the terminals it has not marked.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"terminal.readonly","params":{"terminal":"agent"}}
-{"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `machine.stats`
-
-The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000}}
-{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}}
-```
-
-### `acp.model`
-
-Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"acp.model","params":{"model":"haiku","name":"agent"}}
-{"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `machine.links`
-
-Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
 ```
 
 ### `exec`
@@ -265,58 +130,22 @@ Replace a file with `data`: written to a temp file beside it, then renamed over 
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
-### `code.outline`
+### `get`
 
-A file's functions, types, sections and blocks in file order, each with its kind, name, lines and depth, by line rules for Rust, TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or 256 MiB is `LIMIT`. `machine` reads it there.
+One terminal.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"code.outline","params":{"machine":"box","path":"/home/user/project/src/job.rs"}}
-{"jsonrpc":"2.0","id":1,"result":{"lang":"rust","lines":49,"path":"/home/user/project/src/job.rs","symbols":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9},{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}}
+{"jsonrpc":"2.0","id":1,"method":"get","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
-### `code.grep`
+### `handover`
 
-The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"code.grep","params":{"count":false,"fixed":false,"glob":["*.rs"],"hidden":false,"ignore_case":false,"pattern":"retries","root":"/home/user/project","word":true}}
-{"jsonrpc":"2.0","id":1,"result":{"files":[{"count":2,"groups":[{"lines":[{"n":13,"text":"    pub retries: usize,"}],"scope":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9}]},{"lines":[{"n":42,"text":"        let retries = self.retries.min(budget);"}],"scope":[{"depth":0,"end":49,"kind":"impl","name":"Job","start":37},{"depth":1,"end":44,"kind":"fn","name":"run","start":38}]}],"lang":"rust","path":"src/job.rs"}],"matches":2,"searched":12}}
-```
-
-### `heartbeat`
-
-Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection.
+Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"heartbeat","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{}}
-```
-
-### `agents`
-
-Each agent shed has a provider record for or has installed, by id, as `shed agents --json` prints it: the record (its limit and login-expired lines, hooks and program facts), its `source` (`built-in` or the user file in `<config>/providers/` that adds or overrides it) and the installed adapter. A bad user file is skipped (`shed doctor` names it).
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
-{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"settings_var":null,"status":"fake login status","stream":null,"token_var":"FAKE_TOKEN"},"source":"/home/me/.config/shed/providers/fake.toml"}]}
-```
-
-### `agents.match`
-
-Apply agent `id`'s limit and auth rules to `text` (a pane's screen, a reply): the first line that says a usage limit was hit with its reset time, and the first that says the login expired, as an ACP lane would read them. An agent with no record matches nothing.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"agents.match","params":{"id":"fake-acp","text":"working…\nfake: limit hit, back at 3pm."}}
-{"jsonrpc":"2.0","id":1,"result":{"auth":null,"limit":"fake: limit hit, back at 3pm.","resets":"3pm"}}
-```
-
-### `rpc.discover`
-
-The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":4},"openrpc":"1.3.2"}}
+{"jsonrpc":"2.0","id":1,"method":"handover","params":{"build":"1a2b3c4"}}
+{"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
 ```
 
 ### `handover.check`
@@ -328,13 +157,184 @@ Would the server hand over to the binary at `candidate`: it runs `<candidate> se
 {"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
 ```
 
-### `handover`
+### `heartbeat`
 
-Hand over to the binary the server was started from, which must be `build`: after the same check as `handover.check` it answers, waits up to 10 s for the other requests in flight, then replaces itself in place on the same process id, keeping the socket and every running terminal (screen, children and exit statuses). Every connection is closed: a closed connection means reconnect and ask again; `events` with `since` gets `reset`. A refused or failed handover leaves the server serving as it was.
+Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"handover","params":{"build":"1a2b3c4"}}
-{"jsonrpc":"2.0","id":1,"result":{"from":"4254d78","terminals":12,"to":"1a2b3c4"}}
+{"jsonrpc":"2.0","id":1,"method":"heartbeat","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `hello`
+
+The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
+```
+
+### `keys`
+
+Press keys by name (`enter`, `esc`, `ctrl+c`, `up`, …); nothing is sent if any name is unknown.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"keys","params":{"keys":["ctrl+c","enter"],"name":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `kill`
+
+End the terminal's whole process tree (SIGTERM, then SIGKILL); returns the exited terminal.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"kill","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
+```
+
+### `ls`
+
+List terminals, by name; `labels` keeps those that carry every given label, `parent` the children of that terminal.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"ls","params":{"labels":{"issue":"7"},"parent":"lead"}}
+{"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
+```
+
+### `machine.links`
+
+Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+```
+
+### `machine.stats`
+
+The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000}}
+{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}}
+```
+
+### `read`
+
+The visible screen, or with `history` the scrollback and screen, as plain text; `lines` keeps the last N lines. Every read returns a `cursor`; with `since: <cursor>` only what is new: the lines that scrolled off since (`lost: N` when scrollback dropped N of them first), then the screen only when it changed (`changed`), so nothing new is an empty `text`. ACP: the transcript as text, or with `events` its events (each with its `seq`), paged by `before` and `n`, or with `since` only those after its `seq`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"read","params":{"history":false,"lines":2,"name":"build","since":{"screen":2166136261,"seq":40}}}
+{"jsonrpc":"2.0","id":1,"result":{"changed":true,"cursor":{"screen":3735928559,"seq":41},"text":"ok 12 tests\n$"}}
+```
+
+### `resize`
+
+Resize the terminal; the program gets SIGWINCH.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"resize","params":{"cols":120,"name":"build","rows":50}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `rm`
+
+Remove an exited terminal, its ACP session closed; returns it as it was.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"rm","params":{"name":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":0,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":null,"state":"exited"}}
+```
+
+### `rpc.discover`
+
+The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.openrpc.json`): every method's params and result, the streamed events and screen updates, and the error codes, as JSON Schema. Needs no `hello`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":4},"openrpc":"1.3.2"}}
+```
+
+### `run`
+
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"mem_max_mb":4096,"name":"build","parent":{"name":"lead","notify":true}}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+```
+
+### `screen.watch`
+
+Stream a running terminal's screen. After the response the server writes screen updates (see Screen updates), at most 20 a second: the full screen first (none when `since` is the screen's current `seq`), then the rows that changed. It closes the connection when the program's PTY closes. The connection still takes requests; their responses are not written.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"screen.watch","params":{"since":41,"terminal":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `send`
+
+Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"send","params":{"name":"build","text":"make lint"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `state`
+
+Report the terminal's state (`working`, `blocked`, `done` or `error`) with an optional note; a program can also print `ESC ] 7501 ; state=<s>[;note=<n>] BEL`, which never reaches the screen. The terminal also speaks the Program Status Protocol (OSC 7501, revision 0.4): `state=<s>[:<key>=<value>]…` with `idle` and `clear`, `id`, `kind`, `progress`, `app` and base64 `title` and `msg`, and answers the probe `ESC ] 7501 ; ?`. A report with an `id` is a record of its own (`records`); on exit `working` and `blocked` ones are dropped.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"state","params":{"name":"build","note":"tests pass","state":"done"}}
+{"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"reported":{"note":"tests pass","state":"done"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+```
+
+### `terminal.input`
+
+Type text into the terminal as a person: written as it is, and a line left unsent holds `send`s until enter, `ctrl+u` or `ctrl+c`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.input","params":{"terminal":"build","text":"make lint"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.keys`
+
+Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.input`, a line left unsent holds `send`s.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.readonly`
+
+Mark the terminal read-only for this connection: from then on, until it closes, the connection's `send`, `keys`, `resize`, `attach`, `terminal.input`, `terminal.keys` and `terminal.resize` to the terminal are refused with `READONLY`. The connection may resize only the terminals it has not marked.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.readonly","params":{"terminal":"agent"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.resize`
+
+Resize the terminal, as `resize`; without `terminal`, the one this connection watches.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.resize","params":{"cols":60,"rows":30}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `wait`
+
+Answer once the reported state is one of `until` (`idle` too, from the `idle_after` fallback; `blocked` only of `kind`, if given) or a visible screen line matches the pattern `output` (`matched`), the program exits (`exited`) or `timeout` seconds pass (`timeout`). The server blocks; nothing polls. With `children`, `name` is a parent: `all` matches once no child is working (`terminal` is the parent), `any` on the next child that reports `done`, `blocked` or `error`, or exits (`terminal` is that child; `exited` when no child runs).
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"wait","params":{"kind":"question","name":"build","output":"^ok \\d+ tests$","timeout":600.0,"until":["done","blocked"]}}
+{"jsonrpc":"2.0","id":1,"result":{"outcome":"matched","terminal":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"records":[{"id":"build/tests","state":"working"}],"reported":{"app":"make","kind":"question","msg":"Overwrite config.toml?","progress":40,"state":"blocked","title":"Docs"},"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}}
 ```
 
 ## Events
@@ -402,11 +402,6 @@ An error's `message` starts with its name: `NAME: detail`.
 
 | Code | Name |
 |---|---|
-| -32700 | `PARSE` |
-| -32600 | `INVALID_REQUEST` |
-| -32601 | `NO_SUCH_METHOD` |
-| -32602 | `INVALID_PARAMS` |
-| -32603 | `INTERNAL` |
 | -32000 | `SHED_VERSION` |
 | -32001 | `NO_HELLO` |
 | -32002 | `NO_SUCH_TERMINAL` |
@@ -419,6 +414,11 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32009 | `DRAFT_HELD` |
 | -32010 | `HANDOVER_REFUSED` |
 | -32011 | `LIMIT` |
+| -32600 | `INVALID_REQUEST` |
+| -32601 | `NO_SUCH_METHOD` |
+| -32602 | `INVALID_PARAMS` |
+| -32603 | `INTERNAL` |
+| -32700 | `PARSE` |
 
 ```json
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 5-6 / server 56de739 protocol 3-4; update the server and restart shed serve"}}

@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 
 use crate::machines::{self, Machine};
-use crate::proto::{ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, RpcError};
+use crate::proto::{
+    ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
+};
 use crate::{Error, Shared, blocking, lock};
 use shed_client::Conn;
 
@@ -36,23 +38,9 @@ impl Held {
 }
 
 pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value)> {
-    let field = match method {
-        Method::Run
-        | Method::Exec
-        | Method::FileRead
-        | Method::FileWrite
-        | Method::CodeOutline
-        | Method::CodeGrep => "machine",
-        Method::Get
-        | Method::Read
-        | Method::Send
-        | Method::Keys
-        | Method::Kill
-        | Method::Rm
-        | Method::State
-        | Method::Model
-        | Method::Wait => "name",
-        _ => return None,
+    let field = match method.route()? {
+        Route::Machine => "machine",
+        Route::Name => "name",
     };
     let value = request.params.get(field)?.as_str()?;
     let (machine, name) = match field {
