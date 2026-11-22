@@ -20,10 +20,10 @@ shed-pattern = { path = "crates/shed-pattern" }
 shed-search = { path = "crates/shed-search" }
 shed-script = { path = "crates/shed-script" }
 shed-server = { path = "crates/shed-server" }
-agent-client-protocol = "=5.0.0"
+agent-client-protocol = "=5.4.0"
 farrier-service = { git = "https://github.com/jirathip-dev/farrier", rev = "d34a7bb8388ef183c981dc01483634a87f0d3495" }
 anyhow = "=1.0.104"
-clap = { version = "=4.6.7", features = ["derive"] }
+clap = { version = "=4.6.8", features = ["derive"] }
 futures = { version = "=0.3.34", default-features = false, features = ["std"] }
 pty-process = "=0.5.4"
 serde = { version = "=1.0.229", features = ["derive"] }
