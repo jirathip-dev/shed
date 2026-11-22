@@ -1,7 +1,8 @@
 use serde_json::Value;
 
+use crate::call::{blocking, json};
 use crate::proto::{ErrorCode, GrepParams, OutlineParams, RpcError};
-use crate::{blocking, clock, json, search};
+use crate::{clock, search};
 
 pub(crate) async fn outline(p: OutlineParams) -> Result<Value, RpcError> {
     let done = blocking(move || search::outline(&p, &search::LIMITS)).await?;

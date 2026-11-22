@@ -1,11 +1,11 @@
 # Every CI gate, locally.
-check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch protocol lessons temp-left
+check: generate fmt clippy banned budget doc deny cap deps hygiene neutral boundary comments actionlint self-hosted arch protocol lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
 # then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json), then the
 # goldens the CLI, ACP, server and machines tests write (crates/shed/tests/golden/, their `golden.rs`), then
-# Cargo.lock from the manifests.
+# Cargo.lock from the manifests, then README.md's command table from docs/commands/.
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
@@ -13,6 +13,7 @@ generate:
     SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
     SHED_BLESS=1 cargo test -p shed --locked --test cli --test acp --test server --test machines golden::
     cargo metadata --format-version 1 > /dev/null
+    python3 -I "{{justfile_directory()}}/scripts/commands.py"
 
 fmt:
     cargo fmt --all --check
@@ -64,6 +65,11 @@ hygiene:
 neutral:
     scripts/neutral-core.sh
     ! scripts/neutral-core.sh ci/fixtures/leaky-core
+
+# No workflow or chat code in shed (#257); the fixture proves the check bites.
+boundary:
+    scripts/boundary.sh
+    ! scripts/boundary.sh ci/fixtures/boundary
 
 # The comment rule (#65); the two breaking fixtures prove the check bites, the allowed one that it passes.
 comments:
