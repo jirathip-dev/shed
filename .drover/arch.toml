@@ -87,7 +87,13 @@ may_use = ["proto", "pattern"]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script"]
+may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script", "accounts"]
+
+[[layer]]
+name = "accounts"
+paths = ["crates/shed-accounts/src/**"]
+mods = ["shed_accounts"]
+may_use = ["core", "proto"]
 
 [[layer]]
 name = "cli"
@@ -202,6 +208,12 @@ except = []
 reason = "search and patterns open no socket"
 
 [[ban]]
+pattern = ".expose()"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-accounts/src/env.rs", "crates/shed-accounts/src/proxy.rs"]
+reason = "a token leaves its type only into a main-host run's environment or the proxy's upstream header"
+
+[[ban]]
 pattern = "launchctl"
 paths = ["crates/*/src/**"]
 except = []
@@ -221,6 +233,10 @@ max_fn_lines = 150
 [[collect]]
 dir = "docs/accounts"
 glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-accounts/src"
+glob = "*.rs"
 
 [[collect]]
 dir = "crates/shed-core/src/terminal"
@@ -304,7 +320,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 410
+max_file_lines = 430
 
 [[collect]]
 dir = "crates/shed/tests"

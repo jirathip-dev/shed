@@ -1,6 +1,7 @@
 //! The accounts' keys of a provider record, and what its status command and usage probe say.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
@@ -141,6 +142,116 @@ pub struct Window {
     pub used_pct: u32,
     /// When it resets.
     pub resets_at: Option<u64>,
+}
+
+/// An account: a provider's login in a config folder shed keeps, and what shed last read of it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Account {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// `[a-z0-9-]+`, or `default`: the CLI's own default folder.
+    pub name: String,
+    /// Its config folder; none for `default`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<PathBuf>,
+    /// An adopted folder, linked in: `account.rm` removes the link, never the folder.
+    #[serde(default)]
+    pub adopted: bool,
+    /// Signed out, ready or limited.
+    pub state: AccountState,
+    /// The email or organisation the status command reports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub who: Option<String>,
+    /// The status on one line, redacted.
+    #[serde(default)]
+    pub line: String,
+    /// When the status command last ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_at: Option<u64>,
+    /// The last usage reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Usage>,
+    /// Its setup token's dates, never the token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<TokenInfo>,
+    /// The record's `setup_files` found in its folder; not empty: no run.
+    #[serde(default)]
+    pub setup: Vec<String>,
+    /// Its login terminal, while one runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login: Option<String>,
+}
+
+/// An account's state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum AccountState {
+    /// Neither signed in nor holding a token.
+    #[default]
+    SignedOut,
+    /// The status command says signed in, or it has a token.
+    Ready,
+    /// It hit a limit.
+    Limited,
+}
+
+/// A setup token's dates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct TokenInfo {
+    /// When it was saved.
+    pub saved_at: u64,
+    /// When it lapses, by the record's `token.days`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<u64>,
+    /// The upstream refused it.
+    #[serde(default)]
+    pub rejected: bool,
+}
+
+/// `account.add` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountAdd {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// `[a-z0-9-]+`.
+    pub name: String,
+    /// Adopt this existing folder in place, by link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<PathBuf>,
+    /// A setup token file on this host (0600), copied in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_file: Option<PathBuf>,
+}
+
+/// `account.status`, `account.login` and `account.rm` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountName {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// The account.
+    pub name: String,
+}
+
+/// `account.ls` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountsParams {
+    /// Only this provider's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+}
+
+/// `account.login`'s result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Login {
+    /// The redacted terminal the login runs in.
+    pub terminal: String,
 }
 
 fn one_line(text: &str) -> String {
