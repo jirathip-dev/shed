@@ -6,7 +6,7 @@ use std::time::Instant;
 
 impl Registry {
     pub(crate) fn emit(&mut self, mut p: EmitParams) -> Result<(), RpcError> {
-        if !p.kind.is_acp() {
+        if !p.kind.is_acp() && !matches!(p.kind, EventKind::Account { .. }) {
             return Err(RpcError::new(
                 ErrorCode::InvalidParams,
                 "emit takes only ACP events",
@@ -48,6 +48,10 @@ impl Registry {
             EventKind::Reply { .. } if !p.replay => {
                 info.session.get_or_insert_default().turn_ended =
                     Some(shed_core::clock::unix_now());
+                true
+            }
+            EventKind::Account { account, .. } if !p.replay => {
+                info.account = Some(account.clone());
                 true
             }
             EventKind::Usage(u) => {

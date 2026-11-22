@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use shed_accounts::session;
+use shed_proto::Provider;
+
 struct Gone(PathBuf);
 
 impl Drop for Gone {
@@ -35,22 +38,6 @@ fn claude(folder: &Path, cwd: &Path, args: &[&str]) -> String {
     text
 }
 
-fn copy(session: &str, from: &Path, to: &Path) -> usize {
-    let file = format!("{session}.jsonl");
-    let projects = fs::read_dir(from.join("projects")).expect("projects in the first folder");
-    let mut copied = 0;
-    for project in projects.flatten() {
-        let source = project.path().join(&file);
-        if source.is_file() {
-            let dir = to.join("projects").join(project.file_name());
-            fs::create_dir_all(&dir).expect("mkdir");
-            fs::copy(&source, dir.join(&file)).expect("copy");
-            copied += 1;
-        }
-    }
-    copied
-}
-
 #[test]
 #[ignore = "live: needs claude and two signed-in config folders in SHED_LIVE_FROM and SHED_LIVE_TO"]
 fn a_session_copied_between_two_account_folders_loads() {
@@ -71,8 +58,12 @@ fn a_session_copied_between_two_account_folders_loads() {
     let cwd = cwd.0.as_path();
     let first = "The code word is kumquat. Reply with just: ok";
     claude(&from, cwd, &["-p", "--session-id", &session, first]);
+    let record = Provider {
+        session_files: vec!["projects/*/{session}.jsonl".into()],
+        ..Provider::default()
+    };
     assert_eq!(
-        copy(&session, &from, &to),
+        session::copy(&record, &session, &from, &to).expect("copied"),
         1,
         "one session file in {}",
         from.display()

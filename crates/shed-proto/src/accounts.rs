@@ -169,6 +169,9 @@ pub struct Account {
     /// When the status command last ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<u64>,
+    /// While `state` is `limited`: when the limit ends.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limited_until: Option<u64>,
     /// The last usage reading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -178,6 +181,9 @@ pub struct Account {
     /// The record's `setup_files` found in its folder; not empty: no run.
     #[serde(default)]
     pub setup: Vec<String>,
+    /// The terminals on it now.
+    #[serde(default)]
+    pub runs: u32,
     /// Its login terminal, while one runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login: Option<String>,
