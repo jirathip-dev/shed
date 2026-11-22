@@ -2362,6 +2362,78 @@
             ],
             "description": "The stream driver's data: the agent's own JSON-lines mode.",
             "default": null
+          },
+          "setup_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files and folders that make a config folder a setup: an account's folder holds none of them.",
+            "default": []
+          },
+          "session_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A session's files under the config folder, `{session}` standing for its id.",
+            "default": []
+          },
+          "scrub": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables, besides `cache.api_vars`, a run on an account never inherits.",
+            "default": []
+          },
+          "status_read": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatusRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the status command's output reads.",
+            "default": null
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageProbe"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The usage probe.",
+            "default": null
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenSetup"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The setup token.",
+            "default": null
+          },
+          "proxy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProxyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token proxy.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp/provider-records.md`)."
@@ -2650,6 +2722,203 @@
         },
         "description": "How the stream driver starts an agent in its own JSON-lines mode."
       },
+      "StatusRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/StatusFormat",
+            "description": "The output's format."
+          },
+          "signed_in": {
+            "type": "string",
+            "description": "The key whose `true` means signed in."
+          },
+          "who": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys that name who it is signed in as, the first one set wins.",
+            "default": []
+          },
+          "how": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key that names how it signed in.",
+            "default": null
+          }
+        },
+        "required": [
+          "format",
+          "signed_in"
+        ],
+        "description": "How the status command's output reads; without it, exit 0 is signed in and the output is the status."
+      },
+      "StatusFormat": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "json",
+            "description": "One JSON object."
+          }
+        ],
+        "description": "A status command's output format."
+      },
+      "UsageProbe": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Variables it runs with.",
+            "default": {}
+          },
+          "unset": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables it runs without.",
+            "default": []
+          },
+          "fresh": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds a reading stands."
+          },
+          "hold": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds a limit mark stands when no reading gives a reset time."
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WindowRead"
+            },
+            "description": "The windows it reads."
+          }
+        },
+        "required": [
+          "command",
+          "fresh",
+          "hold",
+          "windows"
+        ],
+        "description": "The usage probe: the command that prints an account's usage, and how its lines read."
+      },
+      "WindowRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The window's name."
+          },
+          "line": {
+            "type": "string",
+            "description": "The text its line starts with."
+          },
+          "used": {
+            "type": "string",
+            "description": "The marker the percentage used comes before."
+          },
+          "resets": {
+            "type": "string",
+            "description": "The marker the reset time comes after."
+          }
+        },
+        "required": [
+          "id",
+          "line",
+          "used",
+          "resets"
+        ],
+        "description": "How one usage window's line reads."
+      },
+      "TokenSetup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command that prints a new token."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "The text the token on the screen starts with."
+          },
+          "days": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The days it lasts."
+          }
+        },
+        "required": [
+          "command",
+          "prefix",
+          "days"
+        ],
+        "description": "The setup token: the command that makes one, how it starts and how long it lasts."
+      },
+      "ProxyRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "upstream": {
+            "type": "string",
+            "description": "The provider's API."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The path prefixes it signs; a request outside them is refused."
+          },
+          "base_url_var": {
+            "type": "string",
+            "description": "The variable that points the agent at the proxy."
+          },
+          "key_var": {
+            "type": "string",
+            "description": "The variable that carries the run's key."
+          },
+          "auth": {
+            "type": "string",
+            "description": "The header that carries the token, `{token}` standing for it."
+          },
+          "append": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values added to a header's list when the request lacks them.",
+            "default": {}
+          }
+        },
+        "required": [
+          "upstream",
+          "paths",
+          "base_url_var",
+          "key_var",
+          "auth"
+        ],
+        "description": "The token proxy: where a run on another machine's calls go, and how they are signed."
+      },
       "Agent": {
         "type": "object",
         "additionalProperties": false,
@@ -2862,6 +3131,10 @@
             "format": "uint64",
             "minimum": 0,
             "description": "The most memory its process tree may hold, in MB, if limited."
+          },
+          "redacted": {
+            "type": "boolean",
+            "description": "Its screen passes through `redact` on every read, and `attach` is refused."
           }
         },
         "required": [
@@ -2872,7 +3145,7 @@
           "keep",
           "state"
         ],
-        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them."
+        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,\n`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused."
       },
       "State": {
         "oneOf": [

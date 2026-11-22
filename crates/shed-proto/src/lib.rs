@@ -6,6 +6,8 @@
 //! from these types (`SHED_BLESS=1 cargo test -p shed-proto --features schema`); CI fails when it drifts.
 #![forbid(unsafe_code)]
 
+pub mod accounts;
+pub use accounts::*;
 pub mod acp;
 pub use acp::*;
 pub mod agents;

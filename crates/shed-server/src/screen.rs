@@ -50,8 +50,31 @@ fn diff(last: Option<&Snapshot>, now: &Snapshot, seq: u64) -> Option<ScreenUpdat
     })
 }
 
-pub(crate) async fn watch(term: &Terminal, since: Option<u64>, out: &mut OwnedWriteHalf) {
-    let (mut seq, mut now) = term.snapshot();
+fn redacted(mut snap: Snapshot) -> Snapshot {
+    for row in &mut snap.rows {
+        let text: String = row.iter().map(|r| r.text.as_str()).collect();
+        let shown = shed_core::redact(&text);
+        if shown != text {
+            *row = vec![shed_core::Run {
+                text: shown,
+                pen: shed_core::Pen::default(),
+            }];
+        }
+    }
+    snap
+}
+
+pub(crate) async fn watch(
+    term: &Terminal,
+    since: Option<u64>,
+    redact: bool,
+    out: &mut OwnedWriteHalf,
+) {
+    let snapshot = || {
+        let (seq, snap) = term.snapshot();
+        (seq, if redact { redacted(snap) } else { snap })
+    };
+    let (mut seq, mut now) = snapshot();
     let mut last = (since == Some(seq)).then(|| now.clone());
     let mut exited = false;
     loop {
@@ -71,6 +94,6 @@ pub(crate) async fn watch(term: &Terminal, since: Option<u64>, out: &mut OwnedWr
             Ok(Wake::Matched)
         );
         last = Some(now);
-        (seq, now) = term.snapshot();
+        (seq, now) = snapshot();
     }
 }

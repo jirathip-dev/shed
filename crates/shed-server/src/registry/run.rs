@@ -134,6 +134,7 @@ impl Registry {
             session: None,
             parent: p.parent,
             mem_max_mb,
+            redacted: false,
         };
         self.events.emit(&info, EventKind::Started);
         let entry = Entry {

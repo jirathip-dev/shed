@@ -219,6 +219,10 @@ max_file_lines = 2000
 max_fn_lines = 150
 
 [[collect]]
+dir = "docs/accounts"
+glob = "*.md"
+
+[[collect]]
 dir = "crates/shed-core/src/terminal"
 glob = "*.rs"
 
