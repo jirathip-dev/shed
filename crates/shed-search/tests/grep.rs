@@ -1,4 +1,4 @@
-//! `grep` on real trees: the goldens, the walk's rules, every limit and a clipped line.
+//! `grep` and `find` on real trees: the goldens, the walk's rules, every limit and a clipped line.
 
 #![cfg(test)]
 
@@ -8,8 +8,8 @@ use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
-use shed_proto::{GrepParams, GrepResult};
-use shed_search::{Error, LIMITS, Limit, Limits, Over, grep, text};
+use shed_proto::{FindParams, GrepParams, GrepResult};
+use shed_search::{Error, LIMITS, Limit, Limits, Over, find, grep, text};
 
 struct Temp(PathBuf);
 
@@ -51,8 +51,8 @@ fn paths(r: &GrepResult) -> Vec<&str> {
     r.files.iter().map(|f| f.path.as_str()).collect()
 }
 
-fn samples() -> Temp {
-    let tmp = Temp::new("samples");
+fn samples(name: &str) -> Temp {
+    let tmp = Temp::new(name);
     let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden");
     for entry in fs::read_dir(&golden).unwrap() {
         let path = entry.unwrap().path();
@@ -71,7 +71,7 @@ fn golden(name: &str) -> String {
 
 #[test]
 fn the_grep_goldens_hold() {
-    let tmp = samples();
+    let tmp = samples("samples");
     let p = GrepParams {
         word: true,
         ..params(&tmp.0, "retries")
@@ -83,6 +83,71 @@ fn the_grep_goldens_hold() {
     };
     let want: Value = serde_json::from_str(&golden("grep-retries-rs.json")).unwrap();
     assert_eq!(serde_json::to_value(run(&one)).unwrap(), want);
+}
+
+#[test]
+fn the_find_golden_holds() {
+    let tmp = samples("find-samples");
+    let p = FindParams {
+        root: tmp.0.clone(),
+        query: "Queue retries queue".into(),
+        top: Some(3),
+        ..FindParams::default()
+    };
+    let r = find(&p, &LIMITS, &|| false).unwrap();
+    assert_eq!(text::find(&r), golden("find-queue-retries.txt"));
+    assert!(r.files.windows(2).all(|w| w[0].score >= w[1].score));
+}
+
+#[test]
+fn find_ranks_names_paths_and_tests_and_says_why() {
+    let tmp = Temp::new("find");
+    tmp.put("lane/cap.rs", b"fn cap() {}\n")
+        .put("lane/tests/cap_test.rs", b"fn cap() {}\n")
+        .put("src/caplimit.rs", b"x\n")
+        .put("src/other.rs", b"nothing here\n");
+    let p = |query: &str, top| FindParams {
+        root: tmp.0.clone(),
+        query: query.into(),
+        top,
+        ..FindParams::default()
+    };
+    let r = find(&p("cap lane", None), &LIMITS, &|| false).unwrap();
+    let why: Vec<(&str, u32, Vec<&str>)> = r
+        .files
+        .iter()
+        .map(|f| {
+            (
+                f.path.as_str(),
+                f.score,
+                f.why.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        why,
+        [
+            (
+                "lane/cap.rs",
+                138,
+                vec!["name is cap", "path has lane", "lines: cap 1"]
+            ),
+            (
+                "lane/tests/cap_test.rs",
+                53,
+                vec!["name has cap", "path has lane", "lines: cap 1", "a test"]
+            ),
+            ("src/caplimit.rs", 24, vec!["name has cap"]),
+        ]
+    );
+    assert_eq!((r.total, r.searched), (3, 4));
+    assert_eq!(r.files[0].symbols[0].name, "cap");
+    let one = find(&p("cap", Some(1)), &LIMITS, &|| false).unwrap();
+    assert_eq!((one.files.len(), one.total), (1, 3));
+    let all = find(&p("cap", Some(500)), &LIMITS, &|| false).unwrap();
+    assert_eq!(all.files.len(), 3);
+    let empty = find(&p("  ", None), &LIMITS, &|| false);
+    assert!(matches!(empty, Err(Error::Query(_))), "{empty:?}");
 }
 
 #[test]

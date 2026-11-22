@@ -349,8 +349,8 @@ tabs and spaces.
 The outline inputs are in [crates/shed-search/tests/golden/](../../../crates/shed-search/tests/golden/),
 named `sample.<ext>.in` so `just comments` does not read the Rust one as source; each `.outline` beside them
 is the text outline, and the crate's test globs them as `lang::outline` on the text. The grep goldens
-(`grep-retries.*`) are beside them and run on a temp copy without the `.in`; the find golden stays in
-[golden/](golden/) until its slice moves it.
+(`grep-retries.*`) and the find golden (`find-queue-retries.txt`, `--top 3`) are beside them and run on a
+temp copy without the `.in`.
 
 <table><tr><td>
 
@@ -486,7 +486,7 @@ The query is split into words, compared without case. Per word a file earns:
 
 The sum is multiplied by the number of words that earned anything, and halved for a test path (`tests/`,
 `test_*`, `*_test.*`, `*.test.*`, `*.spec.*`; `why` says `a test`). Ties go by path. A file is outlined only
-when one of the words is in it. [golden/find-queue-retries.txt](golden/find-queue-retries.txt) pins the
+when one of the words is in it. [find-queue-retries.txt](../../../crates/shed-search/tests/golden/find-queue-retries.txt) pins the
 order and the reasons.
 
 ## Tests the impl writes
