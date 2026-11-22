@@ -32,7 +32,18 @@ around lanes:
 - **Process hygiene built in.** Closing a terminal ends its whole process tree. Per-terminal memory and CPU are
   reported, so a forgotten dev server or language server is visible.
 
-## Scope (v0.1)
+## Scope
+
+shed is the core runtime under the agents. Its job:
+
+- terminals and ACP sessions, kept alive and reported on;
+- machines over SSH, `exec` and `file.*`;
+- host and process stats;
+- the server as a user service, and its self-update;
+- accounts and credentials, the token proxy, usage monitoring, and every provider fact as catalog data
+  ([#256](https://github.com/jirathip-dev/shed/issues/256), the accounts ADR).
+
+The v0.1 commands:
 
 | Command | What it does |
 |---|---|
@@ -66,8 +77,15 @@ protocol over stdin/stdout for SSH.
 
 ## Non-goals
 
+shed is one of three repos. The other two own these jobs, and shed never does them:
+
+- **drover, the workflow driver:** no workflow, issue, queue, lane, review, gate or merge logic, no worktree
+  management, and no screens JSON or backend API for its screens.
+- **cooee, the bots and chat:** no chat, bot or user-facing UI.
+
+Also out of scope:
+
 - No TUI layouts, tabs, splits, themes or plugins.
-- No worktree management (herdsman does `git worktree` itself).
 - No agent-brand detection. Programs report their state; a screen-text fallback is optional and per-harness.
 - No Windows in v0.1.
 

@@ -20,4 +20,6 @@
 - Don't name an agent or provider outside crates/*/src/providers/ and crates/shed-server/src/providers.rs (enforced by: core/arch (`[[ban]]` in .drover/arch.toml))
 - Don't push a GitHub workflow actionlint rejects (enforced by: core/actionlint)
 - Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo (enforced by: local/self-hosted (scripts/self-hosted.py))
+- Don't add workflow or issue logic (GitHub issues, pull requests, queues, review verdicts, merges): it is drover's (enforced by: local/boundary (scripts/boundary.sh))
+- Don't add chat UI, bot code or screens JSON: chat and bots are cooee's, screens drover's (enforced by: local/boundary (scripts/boundary.sh))
 - Don't fail an active lesson check in this file (a shadow one only reports) (enforced by: core/rules (drover lesson-check))
