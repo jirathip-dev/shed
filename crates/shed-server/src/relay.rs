@@ -1,3 +1,5 @@
+//! `shed connect`'s byte relay between stdin/stdout and the server's socket.
+
 use std::io::{self, Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
