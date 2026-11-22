@@ -214,6 +214,12 @@ except = ["crates/shed-accounts/src/env.rs", "crates/shed-accounts/src/proxy.rs"
 reason = "a token leaves its type only into a main-host run's environment or the proxy's upstream header"
 
 [[ban]]
+pattern = "TcpListener"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-accounts/src/relay.rs"]
+reason = "shed listens on Unix sockets; the one TCP listener is the relay, on loopback"
+
+[[ban]]
 pattern = "launchctl"
 paths = ["crates/*/src/**"]
 except = []
@@ -308,7 +314,7 @@ max_file_lines = 230
 
 [[size]]
 paths = ["crates/shed-server/src/links.rs"]
-max_file_lines = 250
+max_file_lines = 300
 
 [[size]]
 paths = ["crates/shed-proto/tests/protocol_doc/acp.rs"]
@@ -320,7 +326,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 430
+max_file_lines = 440
 
 [[collect]]
 dir = "crates/shed/tests"

@@ -44,10 +44,10 @@ Make an account: an empty config folder of mode 0700 under `accounts/<provider>/
 
 ### `account.login`
 
-The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.
+The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`. With `token`, the record's `token.command` runs instead, and shed saves the setup token it prints, read off the unredacted screen, to the account's 0600 token file.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"account.login","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"method":"account.login","params":{"name":"work","provider":"claude","token":true}}
 {"jsonrpc":"2.0","id":1,"result":{"terminal":"login-claude-work"}}
 ```
 
@@ -273,7 +273,7 @@ Each configured machine's held link: `up`, `reconnecting` or `down`, since when,
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":5,"version":"0.0.0"},"home":"/home/user","os":"linux","since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":5,"version":"0.0.0"},"home":"/home/user","os":"linux","proxy":41234,"since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
 ```
 
 ### `machine.rm`
@@ -292,6 +292,33 @@ The machine's health now: load per CPU, memory pressure (percent of memory not a
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000,"top":1}}
 {"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"top_cpu":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"top_mem":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"uptime_s":86400}}
+```
+
+### `proxy.keys`
+
+The token proxy's per-run keys, newest first: each one's id, terminal, account and state; never a key.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"proxy.keys","params":{}}
+{"jsonrpc":"2.0","id":1,"result":[{"account":"work","created":1762416000,"id":"3f9a1c2e","provider":"claude","state":"live","terminal":"box/lane-256-impl"}]}
+```
+
+### `proxy.relay`
+
+Server to server, over a held link: this machine's loopback relay port, kept for good, and a fresh socket path the main host's next forward binds; the relay passes bytes to it and holds no key or token.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"proxy.relay","params":{}}
+{"jsonrpc":"2.0","id":1,"result":{"port":41234,"socket":"/run/user/1000/up-5e0c9a1f.sock"}}
+```
+
+### `proxy.revoke`
+
+The key stops signing at once; an unknown id is `INVALID_PARAMS`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"proxy.revoke","params":{"id":"3f9a1c2e"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
 ### `read`
@@ -501,6 +528,8 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32013 | `ACCOUNT_SETUP` |
 | -32014 | `ACCOUNT_SIGNED_OUT` |
 | -32015 | `ACCOUNT_LIMITED` |
+| -32016 | `ACCOUNT_LOCAL_ONLY` |
+| -32017 | `NO_PROXY` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

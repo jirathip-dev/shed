@@ -5,6 +5,9 @@
 pub mod check;
 pub mod choice;
 pub mod env;
+pub mod keys;
+pub mod proxy;
+pub mod relay;
 pub mod session;
 pub mod store;
 pub mod token;

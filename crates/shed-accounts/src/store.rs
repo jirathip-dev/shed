@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
-use shed_proto::{Account, AccountAdd, AccountState, ErrorCode, Provider, RpcError, Usage};
+use shed_proto::{
+    Account, AccountAdd, AccountState, ErrorCode, Provider, RpcError, TokenInfo, Usage,
+};
 
 use crate::token::{self, Token};
 
@@ -34,6 +36,9 @@ pub struct Reading {
     /// When its last limit ends.
     #[serde(default)]
     pub limited_until: Option<u64>,
+    /// The `saved_at` of the token the proxy's upstream refused.
+    #[serde(default)]
+    pub rejected: Option<u64>,
 }
 
 /// The accounts folder beside the state file.
@@ -171,6 +176,21 @@ impl Store {
         self.account(provider, &p.name)
     }
 
+    /// Saves `token` as the account's setup token (0600).
+    ///
+    /// # Errors
+    /// `NO_ACCOUNT`, or `IO` when the file cannot be written.
+    pub fn save_token(
+        &self,
+        provider: &Provider,
+        name: &str,
+        token: &Token,
+    ) -> Result<(), RpcError> {
+        self.folder(provider, name)?;
+        let path = self.token_file(provider, name);
+        token.save(&path).map_err(io(&path))
+    }
+
     /// The account as shed last read it.
     ///
     /// # Errors
@@ -180,7 +200,10 @@ impl Store {
         let key = format!("{}/{name}", provider.agent);
         let reading = self.readings().remove(&key).unwrap_or_default();
         let days = provider.token.as_ref().map(|t| t.days);
-        let token = token::info(&self.token_file(provider, name), days);
+        let token = token::info(&self.token_file(provider, name), days).map(|t| TokenInfo {
+            rejected: reading.rejected == Some(t.saved_at),
+            ..t
+        });
         let limited_until = (reading.limited_until).filter(|t| *t > shed_core::clock::unix_now());
         let state = match reading.state {
             _ if limited_until.is_some() => AccountState::Limited,
@@ -232,6 +255,27 @@ impl Store {
         self.update(|all| {
             all.insert(key, reading);
         })
+    }
+
+    /// Marks the account's token refused by the proxy's upstream, until a new one is saved; whether it was not
+    /// marked yet.
+    ///
+    /// # Errors
+    /// `IO` when `accounts.json` cannot be written.
+    pub fn reject(&self, provider: &Provider, name: &str) -> Result<bool, RpcError> {
+        let Some(saved_at) =
+            token::info(&self.token_file(provider, name), None).map(|t| t.saved_at)
+        else {
+            return Ok(false);
+        };
+        let key = format!("{}/{name}", provider.agent);
+        let mut fresh = false;
+        self.update(|all| {
+            let reading = all.entry(key).or_default();
+            fresh = reading.rejected != Some(saved_at);
+            reading.rejected = Some(saved_at);
+        })?;
+        Ok(fresh)
     }
 
     /// What shed last read of the account.

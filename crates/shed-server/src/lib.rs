@@ -21,6 +21,7 @@ pub mod limit;
 mod links;
 pub mod machines;
 pub mod providers;
+mod proxy;
 mod registry;
 mod screen;
 pub mod serve;

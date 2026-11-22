@@ -1,16 +1,18 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, Write as _};
 use std::net::Shutdown;
+use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde_json::Value;
 
 use crate::call::blocking;
 use crate::machines::{self, Machine};
 use crate::proto::{
-    ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
+    ErrorCode, Event, EventsParams, Link, LinkState, Method, Relay, Request, Route, RpcError,
 };
 use crate::{Error, Shared, lock};
 use shed_client::Conn;
@@ -202,8 +204,13 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                 if beating.is_ok() && events.call::<_, Value>(Method::Events, &params).is_ok() {
                     failures = 0;
                     held.learn(&mut calls);
+                    crate::proxy::sweep(&lock(registry).path.clone(), &machine.name, &mut calls);
+                    let relay = calls.call(Method::ProxyRelay, &serde_json::json!({})).ok();
                     *lock(&held.calls) = Some(calls);
                     held.set(LinkState::Up, None);
+                    let (to, local) = (Arc::clone(held), crate::proxy::socket(control));
+                    let there = machine.clone();
+                    std::thread::spawn(move || forward(&to, &there, &local, relay));
                     let (reader, writer) = events.split();
                     reader
                         .get_ref()
@@ -238,6 +245,42 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
         }
         shed_core::clock::sleep(machines::backoff(failures));
         failures += 1;
+    }
+}
+
+fn forward(held: &Held, machine: &Machine, local: &Path, mut relay: Option<Relay>) {
+    let up = || lock(&held.link).state == LinkState::Up;
+    while let Some(r) = relay.take().filter(|_| up()) {
+        let spec = format!("{}:{}", r.socket.display(), local.display());
+        let mut args = vec![];
+        for option in [
+            "BatchMode=yes",
+            "ControlPath=none",
+            "ExitOnForwardFailure=yes",
+            "ServerAliveInterval=15",
+            "StreamLocalBindMask=0177",
+        ] {
+            args.extend(["-o", option]);
+        }
+        args.extend(["-R", &spec, "--", &machine.target, "cat"]);
+        let Ok((ours, theirs)) = UnixStream::pair() else {
+            return;
+        };
+        let Ok(mut ssh) = shed_core::runner::over("ssh", args, OwnedFd::from(theirs)) else {
+            return;
+        };
+        lock(&held.link).proxy = Some(r.port);
+        while up() && matches!(ssh.try_wait(), Ok(None)) {
+            shed_core::clock::sleep(Duration::from_secs(1));
+        }
+        ssh.kill().ok();
+        ssh.wait().ok();
+        drop(ours);
+        lock(&held.link).proxy = None;
+        shed_core::clock::sleep(machines::backoff(0));
+        let mut calls = lock(&held.calls);
+        relay =
+            (calls.as_mut()).and_then(|c| c.call(Method::ProxyRelay, &serde_json::json!({})).ok());
     }
 }
 

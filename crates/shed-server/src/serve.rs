@@ -201,6 +201,7 @@ async fn listen(
         .create(control)?;
     let links = Arc::new(links::Links::new(paths.config.clone(), control.to_owned()));
     links.sync(&registry);
+    crate::proxy::start(&registry, &links, bind(&crate::proxy::socket(control))?);
     let listener = match listener {
         Some(listener) => tokio::net::UnixListener::from_std(listener)?,
         None => bind(&paths.socket)?,

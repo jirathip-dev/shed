@@ -59,7 +59,7 @@
     },
     {
       "name": "account.login",
-      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.",
+      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`. With `token`, the record's `token.command` runs instead, and shed saves the setup token it prints, read off the unredacted screen, to the account's 0600 token file.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -76,6 +76,14 @@
           "schema": {
             "type": "string",
             "description": "The account."
+          }
+        },
+        {
+          "name": "token",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Run the record's `token.command` and save the setup token it prints (0600)."
           }
         }
       ],
@@ -1519,6 +1527,54 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/MachineStats"
+        }
+      }
+    },
+    {
+      "name": "proxy.keys",
+      "description": "The token proxy's per-run keys, newest first: each one's id, terminal, account and state; never a key.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/ProxyKey"
+          }
+        }
+      }
+    },
+    {
+      "name": "proxy.relay",
+      "description": "Server to server, over a held link: this machine's loopback relay port, kept for good, and a fresh socket path the main host's next forward binds; the relay passes bytes to it and holds no key or token.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Relay"
+        }
+      }
+    },
+    {
+      "name": "proxy.revoke",
+      "description": "The key stops signing at once; an unknown id is `INVALID_PARAMS`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The key's id."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
         }
       }
     },
@@ -5060,6 +5116,16 @@
               "null"
             ],
             "description": "Its `HOME`."
+          },
+          "proxy": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Its relay port, while the forward to this host's token proxy is up."
           }
         },
         "required": [
@@ -5361,6 +5427,87 @@
           "command"
         ],
         "description": "One process, as `terminal.procs` and `machine.stats`'s `top` report it."
+      },
+      "ProxyKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The first 8 hex digits of its sha256."
+          },
+          "terminal": {
+            "type": "string",
+            "description": "`<machine>/<name>`: the run it was made for."
+          },
+          "provider": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          },
+          "account": {
+            "type": "string",
+            "description": "The account whose token signs its calls now."
+          },
+          "created": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was made."
+          },
+          "state": {
+            "$ref": "#/components/schemas/KeyState",
+            "description": "Live, revoked or ended."
+          }
+        },
+        "required": [
+          "id",
+          "terminal",
+          "provider",
+          "account",
+          "created",
+          "state"
+        ],
+        "description": "A per-run key of the token proxy; never the key itself."
+      },
+      "KeyState": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "live",
+            "description": "It signs its run's calls."
+          },
+          {
+            "type": "string",
+            "const": "revoked",
+            "description": "`proxy.revoke` ended it."
+          },
+          {
+            "type": "string",
+            "const": "ended",
+            "description": "Its terminal exited, was killed or was removed."
+          }
+        ],
+        "description": "A per-run key's state."
+      },
+      "Relay": {
+        "type": "object",
+        "properties": {
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "The loopback port the machine's relay keeps."
+          },
+          "socket": {
+            "type": "string",
+            "description": "The socket path the next forward binds there."
+          }
+        },
+        "required": [
+          "port",
+          "socket"
+        ],
+        "description": "`proxy.relay`'s result: where a machine's agents reach the token proxy."
       },
       "Cursor": {
         "type": "object",
@@ -6164,6 +6311,14 @@
       "ACCOUNT_LIMITED": {
         "code": -32015,
         "message": "ACCOUNT_LIMITED"
+      },
+      "ACCOUNT_LOCAL_ONLY": {
+        "code": -32016,
+        "message": "ACCOUNT_LOCAL_ONLY"
+      },
+      "NO_PROXY": {
+        "code": -32017,
+        "message": "NO_PROXY"
       },
       "INVALID_REQUEST": {
         "code": -32600,

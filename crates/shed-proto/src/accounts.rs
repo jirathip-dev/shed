@@ -260,6 +260,68 @@ pub struct Login {
     pub terminal: String,
 }
 
+/// `account.login` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountLogin {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// The account.
+    pub name: String,
+    /// Run the record's `token.command` and save the setup token it prints (0600).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub token: bool,
+}
+
+/// A per-run key of the token proxy; never the key itself.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ProxyKey {
+    /// The first 8 hex digits of its sha256.
+    pub id: String,
+    /// `<machine>/<name>`: the run it was made for.
+    pub terminal: String,
+    /// The record's `agent` name.
+    pub provider: String,
+    /// The account whose token signs its calls now.
+    pub account: String,
+    /// When it was made.
+    pub created: u64,
+    /// Live, revoked or ended.
+    pub state: KeyState,
+}
+
+/// A per-run key's state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum KeyState {
+    /// It signs its run's calls.
+    Live,
+    /// `proxy.revoke` ended it.
+    Revoked,
+    /// Its terminal exited, was killed or was removed.
+    Ended,
+}
+
+/// `proxy.revoke` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct KeyId {
+    /// The key's id.
+    pub id: String,
+}
+
+/// `proxy.relay`'s result: where a machine's agents reach the token proxy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Relay {
+    /// The loopback port the machine's relay keeps.
+    pub port: u16,
+    /// The socket path the next forward binds there.
+    pub socket: PathBuf,
+}
+
 fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
