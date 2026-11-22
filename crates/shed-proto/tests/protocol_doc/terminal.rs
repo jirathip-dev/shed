@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    KeysParams, LsParams, Method, Parent, ReadParams, ReadResult, Reported, ResizeParams,
+    Cursor, KeysParams, LsParams, Method, Parent, ReadParams, ReadResult, Reported, ResizeParams,
     Resources, RunParams, SendParams, State, StateParams, Target, TerminalInfo, WaitOutcome,
     WaitParams, WaitResult,
 };
@@ -26,6 +26,8 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         session: None,
         parent: Some(lead()),
         mem_max_mb: None,
+        redacted: false,
+        account: None,
     }
 }
 
@@ -87,6 +89,9 @@ pub(crate) fn run_params() -> Value {
         keep: true,
         idle_after: None,
         cmd: vec!["make".into(), "test".into()],
+        model: None,
+        effort: None,
+        env: BTreeMap::new(),
         acp: None,
         policy: None,
         resume: None,
@@ -99,6 +104,7 @@ pub(crate) fn run_params() -> Value {
         parent: Some(lead()),
         rows: None,
         cols: None,
+        account: None,
     })
     .unwrap()
 }
@@ -112,11 +118,20 @@ fn read_example() -> (Value, Value) {
             events: false,
             before: None,
             n: None,
+            since: Some(Cursor {
+                seq: 40,
+                screen: 2_166_136_261,
+            }),
         })
         .unwrap(),
         to_value(ReadResult {
             text: "ok 12 tests\n$".into(),
-            events: Vec::new(),
+            cursor: Cursor {
+                seq: 41,
+                screen: 3_735_928_559,
+            },
+            changed: true,
+            ..ReadResult::default()
         })
         .unwrap(),
     )

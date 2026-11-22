@@ -1,0 +1,74 @@
+use std::fmt;
+
+/// How many times a job may be retried.
+pub const RETRIES: usize = 3;
+
+type Outcome<T> =
+    Result<T, QueueError>;
+
+/// A job waiting to run.
+#[derive(Debug, Clone)]
+pub struct Job {
+    pub id: u64,
+    pub retries: usize,
+}
+
+pub enum QueueError {
+    Full,
+    Closed { retries: usize },
+}
+
+pub trait Queue {
+    fn push(&mut self, job: Job) -> Outcome<()>;
+    fn len(&self) -> usize;
+}
+
+// fn old_push() was removed with the retries rework.
+
+impl<T: Queue> fmt::Display for Wrapper<T>
+where
+    T: fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} jobs, {RETRIES} retries", self.0.len())
+    }
+}
+
+impl Job {
+    pub(crate) async fn run(
+        &self,
+        budget: usize,
+    ) -> Outcome<()> {
+        let retries = self.retries.min(budget);
+        retry(retries).await
+    }
+
+    pub const fn fresh(id: u64) -> Self {
+        Self { id, retries: 0 }
+    }
+}
+
+pub fn drain<Q>(
+    queue: &mut Q,
+) -> usize
+where
+    Q: Queue,
+{
+    queue.len()
+}
+
+macro_rules! job {
+    ($id:expr) => {
+        Job::fresh($id)
+    };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fresh_has_no_retries() {
+        assert_eq!(job!(1).retries, 0);
+    }
+}

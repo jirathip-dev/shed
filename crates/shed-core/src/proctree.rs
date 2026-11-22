@@ -4,7 +4,7 @@
 //! any descendants that left it. The process table comes from `/proc` on Linux and `ps` elsewhere
 //! (macOS), behind [`ProcessTable`].
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::time::Duration;
 
@@ -23,6 +23,8 @@ pub struct ProcessInfo {
     pub rss_bytes: u64,
     /// User plus system CPU time used so far.
     pub cpu: Duration,
+    /// How long it has run.
+    pub elapsed: Duration,
     /// Exited but not yet reaped.
     pub zombie: bool,
 }
@@ -45,6 +47,9 @@ impl ProcessTable for Procfs {
     fn list(&self) -> io::Result<Vec<ProcessInfo>> {
         let page = u64::try_from(rustix::param::page_size()).unwrap_or(4096);
         let ticks = rustix::param::clock_ticks_per_second().max(1);
+        let uptime = std::fs::read_to_string("/proc/uptime")?;
+        let up = uptime.split('.').next().and_then(|u| u.parse().ok());
+        let up = up.unwrap_or(0);
         let mut out = Vec::new();
         for entry in std::fs::read_dir("/proc")? {
             let Ok(entry) = entry else { continue };
@@ -57,7 +62,7 @@ impl ProcessTable for Procfs {
                 continue;
             }
             if let Ok(stat) = std::fs::read_to_string(entry.path().join("stat"))
-                && let Some(p) = parse_stat(&stat, page, ticks)
+                && let Some(p) = parse_stat(&stat, page, ticks, up)
             {
                 out.push(p);
             }
@@ -67,7 +72,7 @@ impl ProcessTable for Procfs {
 }
 
 #[cfg(any(target_os = "linux", test))]
-fn parse_stat(stat: &str, page: u64, ticks: u64) -> Option<ProcessInfo> {
+fn parse_stat(stat: &str, page: u64, ticks: u64, up: u64) -> Option<ProcessInfo> {
     let (pid, rest) = stat.split_once(" (")?;
     let fields: Vec<&str> = rest.rsplit_once(") ")?.1.split(' ').collect();
     let num = |i: usize| fields.get(i).and_then(|f| f.parse::<u64>().ok());
@@ -78,6 +83,7 @@ fn parse_stat(stat: &str, page: u64, ticks: u64) -> Option<ProcessInfo> {
         pgid: fields.get(2)?.parse().ok()?,
         rss_bytes: num(21)? * page,
         cpu: Duration::from_millis(cpu_ticks * 1000 / ticks),
+        elapsed: Duration::from_secs(up.saturating_sub(num(19)? / ticks)),
         zombie: fields.first() == Some(&"Z"),
     })
 }
@@ -91,7 +97,7 @@ impl ProcessTable for Ps {
     fn list(&self) -> io::Result<Vec<ProcessInfo>> {
         let out = crate::runner::output(
             "ps",
-            ["-A", "-o", "pid=,ppid=,pgid=,rss=,time=,stat="],
+            ["-A", "-o", "pid=,ppid=,pgid=,rss=,time=,etime=,stat="],
             &[("LC_ALL", "C")],
         )?;
         if !out.status.success() {
@@ -107,7 +113,7 @@ impl ProcessTable for Ps {
 #[cfg(any(not(target_os = "linux"), test))]
 fn parse_ps(line: &str) -> Option<ProcessInfo> {
     let f: Vec<&str> = line.split_whitespace().collect();
-    let [id, parent, group, rss, time, stat] = f.as_slice() else {
+    let [id, parent, group, rss, time, etime, stat] = f.as_slice() else {
         return None;
     };
     Some(ProcessInfo {
@@ -116,6 +122,7 @@ fn parse_ps(line: &str) -> Option<ProcessInfo> {
         pgid: group.parse().ok()?,
         rss_bytes: rss.parse::<u64>().ok()? * 1024,
         cpu: parse_cpu_time(time)?,
+        elapsed: parse_cpu_time(etime)?,
         zombie: stat.starts_with('Z'),
     })
 }
@@ -160,6 +167,30 @@ pub fn command(pid: i32) -> Option<(String, Duration)> {
     let out = String::from_utf8_lossy(&out.stdout);
     let (age, args) = out.trim().split_once(' ')?;
     Some((args.trim().to_owned(), parse_cpu_time(age)?))
+}
+
+/// The command lines of those of `pids` still alive.
+#[cfg(target_os = "linux")]
+#[must_use]
+pub fn commands(pids: &[i32]) -> BTreeMap<i32, String> {
+    let alive = pids.iter().filter_map(|&p| Some((p, command(p)?.0)));
+    alive.collect()
+}
+
+/// The command lines of those of `pids` still alive.
+#[cfg(not(target_os = "linux"))]
+#[must_use]
+pub fn commands(pids: &[i32]) -> BTreeMap<i32, String> {
+    let list: Vec<String> = pids.iter().map(i32::to_string).collect();
+    let args = ["-o", "pid=,args=", "-p", &list.join(",")];
+    let out = crate::runner::output("ps", args, &[("LC_ALL", "C")]);
+    let text = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    let text = text.unwrap_or_default();
+    let row = |l: &str| {
+        let (pid, args) = l.trim().split_once(' ')?;
+        Some((pid.parse().ok()?, args.trim().to_owned()))
+    };
+    text.lines().filter_map(row).collect()
 }
 
 /// The platform's process table.
@@ -281,6 +312,7 @@ mod tests {
             pgid: group,
             rss_bytes: 1024,
             cpu: Duration::from_millis(10),
+            elapsed: Duration::from_secs(1),
             zombie: false,
         }
     }
@@ -320,7 +352,7 @@ mod tests {
     #[test]
     fn parses_proc_stat() {
         let stat = "42 (a b) c) S 7 42 42 0 -1 0 0 0 0 0 150 50 0 0 20 0 1 0 100 1000 3 18446744073709551615";
-        let info = parse_stat(stat, 4096, 100);
+        let info = parse_stat(stat, 4096, 100, 31);
         assert_eq!(
             info,
             Some(ProcessInfo {
@@ -329,6 +361,7 @@ mod tests {
                 pgid: 42,
                 rss_bytes: 3 * 4096,
                 cpu: Duration::from_secs(2),
+                elapsed: Duration::from_secs(30),
                 zombie: false
             })
         );
@@ -336,7 +369,7 @@ mod tests {
 
     #[test]
     fn parses_ps_lines() {
-        let info = parse_ps("  42     7    42   1500   0:01.50 Ss+");
+        let info = parse_ps("  42     7    42   1500   0:01.50 01:05 Ss+");
         assert_eq!(
             info,
             Some(ProcessInfo {
@@ -345,10 +378,14 @@ mod tests {
                 pgid: 42,
                 rss_bytes: 1500 * 1024,
                 cpu: Duration::from_millis(1500),
+                elapsed: Duration::from_secs(65),
                 zombie: false
             })
         );
-        assert_eq!(parse_ps("1 0 1 0 0:00.00 Z").map(|p| p.zombie), Some(true));
+        assert_eq!(
+            parse_ps("1 0 1 0 0:00.00 00:01 Z").map(|p| p.zombie),
+            Some(true)
+        );
         assert_eq!(parse_cpu_time("01:02:03"), Some(Duration::from_secs(3723)));
         assert_eq!(
             parse_cpu_time("2-00:00:01"),

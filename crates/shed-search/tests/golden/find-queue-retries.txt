@@ -1,0 +1,15 @@
+1. sample.rs (rust, 74 lines)
+     why: lines: queue 7, retries 10
+     trait Queue [21-24]
+     const RETRIES [3-4]
+     enum QueueError [16-19]
+     fn fresh_has_no_retries [70-73]
+2. sample.ts (typescript, 59 lines)
+     why: lines: queue 6, retries 7
+     class Queue [22-49]
+     const RETRIES [3-4]
+3. sample.py (python, 50 lines)
+     why: lines: queue 8, retries 4
+     class Queue [14-39]
+     class QueueError [10-11]
+3 of 6 files, 6 searched

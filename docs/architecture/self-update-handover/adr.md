@@ -87,8 +87,8 @@ Order and undo:
 6. **The updater only stages, checks, swaps and asks.** It reads main's head, fetches `SHA256SUMS` and
    the asset of `build-<sha7>`, verifies the sum and that `--version` names the sha, asks
    `handover.check`, renames into place, asks `handover`. It never stops, starts or signals serve.
-7. **`shed install` installs both jobs** (serve and the 5-minute update), with the job texts read from
-   `dist/` so the files to copy by hand and the installed ones are one text. `--pause` is a marker file.
+7. **`shed install` installs both jobs** (serve and the 5-minute update), with the job texts rendered
+   by farrier-service since #238 (golden copies in farrier's `fixtures/units/`). `--pause` is a marker file.
 
 ## Consequences
 
@@ -126,9 +126,8 @@ Order and undo:
   `cargo install`.
 - **The cap** has 490 lines of headroom and this is about +530 (README, Slices).
 
-## `.herdsman/arch.toml`
+## `.drover/arch.toml`
 
 No lines to add. This issue turns no shared list into a folder and adds no generated file. The two
 protocol docs it changes are already under `generated`, and `runner.rs` is already the one file where
-`std::process` is allowed, which is where `replace` goes. (The repo's arch file is `.herdsman/arch.toml`;
-there is no `.drover/arch.toml`.)
+`std::process` is allowed, which is where `replace` goes.

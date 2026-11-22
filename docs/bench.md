@@ -88,3 +88,51 @@ writer are tasks on one runtime thread that all terminals share: the reaper chec
 becomes writable, one send at a time as before, and makes it blocking again. A read in that window waits
 in `poll`. A master left non-blocking made the reader poll between reads and drained 15 to 31% slower. That leaves
 three threads per terminal, plus serve's own and the shared runtime's.
+
+## Code grep: `code.grep` against the ADR prototype and rg (#208)
+
+**Method.** The code-search ADR's own script, unchanged, on shed at `ce4424e` (the tree the ADR measured:
+243 files searched, 1.6 MB):
+
+```sh
+rustc --edition 2024 -O -o "$S/proto" docs/architecture/code-search/bench/prototype.rs
+git archive ce4424e | tar -x -C "$S/base-tree"
+python3 -I docs/architecture/code-search/bench/bench.py "$S/proto" "$S/base-tree"       # before
+shed --dir "$S/srv" serve --detach                                                      # release build
+printf '#!/bin/sh\nexec shed --dir "%s/srv" code "$@"\n' "$S" > "$S/shed-code"; chmod +x "$S/shed-code"
+python3 -I docs/architecture/code-search/bench/bench.py "$S/shed-code" "$S/base-tree"   # after
+```
+
+Each cell is the median of 15 runs of the whole process, wall time then the client's CPU time in brackets.
+For shed that is the CLI alone: the search runs in `shed serve`, so the CPU column does not count it.
+`same` means rg and shed matched the same path and line pairs. The text bytes are the same as the
+prototype's on every query. Apple M6, 12 cores, 32 GB, macOS 27.2, a shared build host at load average 15
+for both runs.
+
+| query | lines / files | rg | prototype (before) | shed code grep (after) | same |
+|---|---|---|---|---|---|
+| `Pattern::new` -F | 3 / 2 | 8.9 (17.8) ms | 7.2 (6.3) ms | 8.9 (3.0) ms | yes |
+| `spawn_blocking` -F | 9 / 4 | 9.0 (18.1) ms | 10.1 (8.5) ms | 8.9 (3.0) ms | yes |
+| `wait` -F -w -g '*.rs' -g '!tests/' | 41 / 13 | 8.2 (6.5) ms | 7.0 (5.6) ms | 7.6 (3.0) ms | yes |
+| `handover_refused` -F -i | 8 / 4 | 9.1 (17.9) ms | 7.1 (6.3) ms | 9.0 (3.0) ms | yes |
+| `fn \w+_limit` | 11 / 7 | 11.1 (20.2) ms | 7.3 (6.5) ms | 9.7 (3.1) ms | yes |
+| `TODO\|FIXME\|HACK` | 4 / 2 | 8.3 (17.9) ms | 8.2 (7.3) ms | 10.8 (3.1) ms | yes |
+| `Method::(Exec\|FileRead\|FileWrite)\b` | 9 / 4 | 9.0 (18.0) ms | 6.9 (5.9) ms | 8.8 (2.8) ms | yes |
+| `\d{2,}\.\d+\.\d+` -g '*.toml' | 0 / 0 | 7.7 (5.5) ms | 3.5 (2.7) ms | 5.7 (2.8) ms | yes |
+| `^\s*pub (async )?fn [a-z_]+\(&mut self` | 6 / 2 | 9.0 (18.1) ms | 6.8 (5.9) ms | 8.6 (2.8) ms | yes |
+| `[0-9a-f]{40}`, no needle | 156 / 1 | 9.6 (20.1) ms | 21.0 (20.1) ms | 25.8 (2.9) ms | yes |
+| `zzzz_not_here` -F | 0 / 0 | 9.2 (15.7) ms | 6.7 (5.6) ms | 10.1 (3.6) ms | yes |
+
+`self` -F is `LIMIT: matches over 250 at crates/shed-core/src/history.rs; narrow the path, add a glob, or
+ask for a count`; with `--count` it answers in 10.8 ms (rg -c: 10.3 ms).
+
+**Reading it.** shed finds the same lines as rg on every query and prints the prototype's bytes exactly. It
+is 0 to 5 ms slower than the prototype in wall time: the CLI, the socket round trip, JSON both ways and the
+wrapper shell, which the one-process prototype does not pay. With no needle the engine runs on every line,
+as the ADR expects, at 2.5 times rg.
+
+**The perf gate.** `crates/shed-search/tests/perf.rs` runs these queries (plus `retries` -w, `self` -F
+--count and `fn|def|class` -i) over `crates/shed-search/tests/golden` and checks each one's files read, bytes
+read (the smallest byte limit it passes), rows and text and JSON bytes against
+`crates/shed-search/tests/perf-baseline.txt`. A changed count fails `just test`; a meant one is
+`SHED_BLESS=1 cargo test -p shed-search --test perf` and the new baseline in the PR.

@@ -33,11 +33,9 @@ pub fn setup(
     remove: bool,
     dry: bool,
 ) -> io::Result<Vec<HookFile>> {
-    let records = crate::providers::load(providers).0;
+    let catalog = crate::providers::Catalog::load(providers).0;
     let tables = || {
-        records
-            .iter()
-            .filter_map(|(p, _)| Some((&p.agent, p.hooks.as_ref()?)))
+        (catalog.iter().map(|e| &e.provider)).filter_map(|p| Some((&p.agent, p.hooks.as_ref()?)))
     };
     if let Some(a) = agents
         .iter()

@@ -17,66 +17,78 @@ fn stdout<A: AsRef<std::ffi::OsStr>>(program: &str, args: impl IntoIterator<Item
 pub(crate) fn system(dir: &Path) -> Sample {
     let cpus =
         std::thread::available_parallelism().map_or(1, |n| u32::try_from(n.get()).unwrap_or(1));
-    let (load, mem_pressure_pct, swap_used_mb, uptime_s) = probe();
+    let probed = probe();
     let df = stdout("df", [Path::new("-Pk"), dir]);
-    let free_kb = df.lines().nth(1).and_then(|l| l.split_whitespace().nth(3));
+    let kb = |column| {
+        let line = df
+            .lines()
+            .nth(1)
+            .and_then(|l| l.split_whitespace().nth(column));
+        line.and_then(|v| v.parse::<u64>().ok()).unwrap_or(0)
+    };
     Sample {
         at: unix_now(),
-        load_per_cpu: load / f64::from(cpus),
-        mem_pressure_pct,
-        swap_used_mb,
-        disk_free_mb: free_kb.and_then(|v| v.parse().ok()).unwrap_or(0) / 1024,
+        load_per_cpu: probed.load_per_cpu / f64::from(cpus),
+        disk_free_mb: kb(3) / 1024,
+        disk_total_mb: kb(1) / 1024,
         cpus: cpus.into(),
-        uptime_s,
-        terminals: std::collections::BTreeMap::new(),
+        ..probed
     }
 }
 
+fn first<T: std::str::FromStr>(text: &str) -> Option<T> {
+    text.split_whitespace()
+        .next()?
+        .trim_end_matches('.')
+        .parse()
+        .ok()
+}
+
 #[cfg(target_os = "linux")]
-fn probe() -> (f64, u64, u64, u64) {
+fn probe() -> Sample {
     let read = |p: &str| fs::read_to_string(p).unwrap_or_default();
-    let meminfo = read("/proc/meminfo");
+    let (meminfo, vmstat) = (read("/proc/meminfo"), read("/proc/vmstat"));
     let kb = |key: &str| {
         let line = meminfo
             .lines()
             .find_map(|l| l.strip_prefix(key)?.strip_prefix(':'));
-        let value = line.and_then(|l| l.split_whitespace().next()?.parse::<u64>().ok());
-        value.unwrap_or(0)
+        line.and_then(first::<u64>).unwrap_or(0)
     };
     let total = kb("MemTotal").max(1);
-    let uptime = read("/proc/uptime");
-    (
-        read("/proc/loadavg")
-            .split(' ')
-            .next()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0.0),
-        100 - kb("MemAvailable").min(total) * 100 / total,
-        kb("SwapTotal").saturating_sub(kb("SwapFree")) / 1024,
-        uptime
-            .split(['.', ' '])
-            .next()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0),
-    )
+    let free = kb("MemAvailable").min(total);
+    let swap_out = vmstat
+        .lines()
+        .find_map(|l| first(l.strip_prefix("pswpout ")?));
+    Sample {
+        load_per_cpu: first(&read("/proc/loadavg")).unwrap_or(0.0),
+        mem_pressure_pct: 100 - free * 100 / total,
+        mem_free_mb: free / 1024,
+        mem_total_mb: total / 1024,
+        swap_used_mb: kb("SwapTotal").saturating_sub(kb("SwapFree")) / 1024,
+        swap_out_pages: swap_out.unwrap_or(0),
+        uptime_s: first(read("/proc/uptime").split('.').next().unwrap_or_default()).unwrap_or(0),
+        ..Sample::default()
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn probe() -> (f64, u64, u64, u64) {
+fn probe() -> Sample {
     let keys = [
         "vm.loadavg",
         "kern.memorystatus_level",
         "vm.swapusage",
         "kern.boottime",
+        "hw.memsize",
     ];
     parse_sysctl(
-        &stdout("sysctl", std::iter::once("-n").chain(keys)),
+        &stdout("/usr/sbin/sysctl", std::iter::once("-n").chain(keys)),
+        &stdout::<&str>("vm_stat", []),
         unix_now(),
     )
 }
 
 #[cfg(any(not(target_os = "linux"), test))]
-fn parse_sysctl(text: &str, now: u64) -> (f64, u64, u64, u64) {
+fn parse_sysctl(text: &str, vm_stat: &str, now: u64) -> Sample {
     let mut lines = text.lines();
     let mut next = || lines.next().unwrap_or_default();
     let load = next()
@@ -90,12 +102,20 @@ fn parse_sysctl(text: &str, now: u64) -> (f64, u64, u64, u64) {
     };
     let swap = after(next(), "used = ", '.');
     let boot = after(next(), "sec = ", ',');
-    (
-        load.unwrap_or(0.0),
-        100 - free,
-        swap.unwrap_or(0),
-        boot.map_or(0, |b| now.saturating_sub(b)),
-    )
+    let total = first::<u64>(next()).unwrap_or(0) >> 20;
+    let swap_out = vm_stat
+        .lines()
+        .find_map(|l| first(l.strip_prefix("Swapouts:")?));
+    Sample {
+        load_per_cpu: load.unwrap_or(0.0),
+        mem_pressure_pct: 100 - free,
+        mem_free_mb: total * free / 100,
+        mem_total_mb: total,
+        swap_used_mb: swap.unwrap_or(0),
+        swap_out_pages: swap_out.unwrap_or(0),
+        uptime_s: boot.map_or(0, |b| now.saturating_sub(b)),
+        ..Sample::default()
+    }
 }
 
 pub(crate) struct Stats {
@@ -178,8 +198,19 @@ mod tests {
     #[test]
     fn parses_macos_sysctl() {
         let text = "{ 3.20 2.10 1.90 }\n58\ntotal = 2048.00M  used = 1024.50M  free = 1023.50M  (encrypted)\n\
-                    { sec = 1762000000, usec = 5 } Thu Nov  6 10:00:00 2026\n";
-        assert_eq!(parse_sysctl(text, 1_762_003_600), (3.2, 42, 1024, 3600));
-        assert_eq!(parse_sysctl("", 5), (0.0, 0, 0, 0));
+                    { sec = 1762000000, usec = 5 } Thu Nov  6 10:00:00 2026\n34359738368\n";
+        let vm_stat = "Pageouts:     781987.\nSwapins:     25171290.\nSwapouts:     34195107.\n";
+        let sample = Sample {
+            load_per_cpu: 3.2,
+            mem_pressure_pct: 42,
+            mem_free_mb: 19_005,
+            mem_total_mb: 32_768,
+            swap_used_mb: 1024,
+            swap_out_pages: 34_195_107,
+            uptime_s: 3600,
+            ..Sample::default()
+        };
+        assert_eq!(parse_sysctl(text, vm_stat, 1_762_003_600), sample);
+        assert_eq!(parse_sysctl("", "", 5), Sample::default());
     }
 }

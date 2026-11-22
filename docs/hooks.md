@@ -36,6 +36,6 @@ from, kept in `crates/shed-server/tests/screens/<agent>-<id>.txt`.
 | --- | --- | --- | --- |
 | Claude Code | `~/.claude/` exists | `~/.claude/settings.json` (the `hooks` key) | `UserPromptSubmit` → working, `PostToolUse` → working, `PermissionRequest` → blocked, `Stop` → done, `StopFailure` → error |
 
-Each agent's table is the `[hooks]` of its provider record, `crates/shed-server/src/providers/<name>.toml` or
-a user file overriding it (docs/acp.md, Provider records); an agent without one
+Each agent's table is the `[hooks]` of its provider record, `crates/shed-catalog/providers/<name>.toml` or
+a user file overriding it (docs/acp/provider-records.md); an agent without one
 is not touched.

@@ -1,0 +1,59 @@
+import { EventEmitter } from "node:events";
+
+/** How many times a job may be retried. */
+export const RETRIES = 3;
+
+export interface Job {
+  id: number;
+  retries: number;
+}
+
+export type Outcome =
+  | { ok: true }
+  | { ok: false; retries: number };
+
+export enum State {
+  Waiting,
+  Running,
+}
+
+// function oldPush() was removed with the retries rework.
+
+export class Queue extends EventEmitter {
+  private jobs: Job[] = [];
+
+  constructor(private readonly limit: number) {
+    super();
+  }
+
+  /** Adds a job, or throws when the queue is full. */
+  push(job: Job): void {
+    if (this.jobs.length >= this.limit) {
+      throw new Error(`full after ${job.retries} retries`);
+    }
+    this.jobs.push(job);
+  }
+
+  static async drain<T>(
+    queue: Queue,
+    run: (job: Job) => Promise<T>,
+  ): Promise<T[]> {
+    return Promise.all(queue.jobs.map(run));
+  }
+
+  get size(): number {
+    return this.jobs.length;
+  }
+
+  private retry = (job: Job): Job => ({ ...job, retries: job.retries + 1 });
+}
+
+export async function runAll(queue: Queue): Promise<void> {
+  await Queue.drain(queue, async (job) => job.id);
+}
+
+export const fresh = (id: number): Job => ({ id, retries: 0 });
+
+export default function main() {
+  return fresh(1);
+}

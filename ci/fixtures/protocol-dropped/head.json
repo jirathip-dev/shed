@@ -1,0 +1,1 @@
+{"info": {"title": "shed", "x-protocol": 3}, "methods": [{"name": "get", "params": [{"name": "name", "schema": {"type": "string"}}, {"name": "lines", "schema": {"type": "string"}}], "result": {"schema": {"$ref": "#/components/schemas/TerminalInfo"}}}], "components": {"schemas": {"TerminalInfo": {"type": "object", "properties": {}}}}}

@@ -2,7 +2,7 @@
 //! through its driver and turns what the agent says into shed events (`emit`), reported states and a
 //! JSONL transcript that `read` renders.
 //!
-//! The bridge reads its PTY in raw mode: a line framed by [`frame`] (`send`, `approve`, `cancel`,
+//! The bridge reads its PTY in raw mode: a line framed by [`frame`](shed_proto::frame) (`send`, `approve`, `cancel`,
 //! `model`), a plain line typed in `attach` (a prompt), or `Esc` / `Ctrl+C` alone (cancel).
 //!
 //! Its own tokio runtime runs the driver and the lane on this thread and, on one worker beside it, a
@@ -22,13 +22,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Map, Value};
+use shed_accounts::{Store, choice, env::Injected, session};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 pub use shed_proto::Policy;
 use shed_proto::{
-    AcpSession, AcpUsage, ApprovalOption, EventKind, Method, Provider, Reported, StateParams,
-    Tokens,
+    Account, AccountsParams, AcpSession, AcpUsage, ApprovalOption, ErrorCode, EventKind, Input,
+    Method, Provider, Reported, RpcError, StateParams, Tokens,
 };
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWriteExt as _, BufReader};
 use tokio::process::Child;
@@ -37,41 +38,15 @@ use tokio::time::Instant;
 use transcript::{Preview, clean};
 use writer::{Out, Writer};
 
+use crate::Error;
 use crate::drivers::{acp, stream};
-use crate::{Client, Error};
+use shed_client::Conn;
 
 /// The states only an ACP lane reports, beside `working`, `done` and `error`.
 pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited", "hibernated"];
 
-/// One framed input to the bridge.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Input {
-    /// Start a turn (`session/prompt`).
-    Prompt(String),
-    /// Cancel the turn (`session/cancel`).
-    Cancel,
-    /// Switch to this model (`session/set_config_option`, the `model` option).
-    Model(String),
-    /// Report under this terminal name from now on: a spare session taken by `run --warm`.
-    Name(String),
-    /// Answer permission request `request` (else the oldest) with this option id or kind.
-    #[serde(untagged)]
-    Approve {
-        /// The option id or kind.
-        #[serde(rename = "approve")]
-        option: String,
-        /// The `approval_request`'s id.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        request: Option<String>,
-    },
-}
-
-/// The bytes that deliver `input` to a bridge through its terminal: `RS`, the JSON, a newline.
-#[must_use]
-pub fn frame(input: &Input) -> String {
-    format!("\x1e{}\n", serde_json::to_string(input).unwrap_or_default())
-}
+const GO_ON: &str = "Your account hit its usage limit, so shed moved this session to another account. \
+                     Go on where you left off.";
 
 /// Where the bridge of terminal `name` lends its PTY's master to a server on `socket` that starts again.
 #[must_use]
@@ -180,6 +155,9 @@ pub(crate) struct Lane {
     child: Option<String>,
     restart: bool,
     sleep_after: Option<Duration>,
+    hibernate_set: Option<String>,
+    auto: Option<(String, PathBuf)>,
+    switch: Option<(String, Option<Input>)>,
 }
 
 impl Lane {
@@ -212,6 +190,9 @@ impl Lane {
             child: None,
             restart: false,
             sleep_after: None,
+            hibernate_set: None,
+            auto: None,
+            switch: None,
         }
     }
 
@@ -250,7 +231,7 @@ impl Lane {
         let cancelled = self.input(Input::Cancel, driver);
         driver.forget();
         if let Some((_, resets)) = self.rules.limit_hit(&why) {
-            self.state("rate-limited", resets);
+            self.limited(resets);
             return cancelled;
         }
         let auth = self.auth(&why);
@@ -260,6 +241,59 @@ impl Lane {
         }
         self.state("error", Some(auth.unwrap_or(why)));
         cancelled
+    }
+
+    fn pick(&self, leave: bool) -> Result<String, RpcError> {
+        let none = || RpcError::new(ErrorCode::NoAccount, "no auto account with session files");
+        let auto = self
+            .auto
+            .as_ref()
+            .filter(|_| !self.rules.session_files.is_empty());
+        let (on, socket) = auto.ok_or_else(none)?;
+        let io = |e: shed_client::Error| RpcError::new(ErrorCode::Io, e.to_string());
+        let params = AccountsParams {
+            provider: Some(self.rules.agent.clone()),
+        };
+        let all: Vec<Account> = (Conn::connect(socket).map_err(io)?)
+            .call(Method::AccountLs, &params)
+            .map_err(io)?;
+        let leave = leave.then_some(on.as_str());
+        choice::pick(&all, leave, shed_core::clock::unix_now())
+    }
+
+    fn limited(&mut self, resets: Option<String>) {
+        self.state("rate-limited", resets);
+        match self.pick(true) {
+            Ok(to) => self.switch = Some((to, Some(Input::Prompt(GO_ON.to_owned())))),
+            Err(e) if e.code == ErrorCode::AccountLimited.code() => {
+                self.state("rate-limited", Some(e.message));
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn switched(&mut self, to: &str, state: &Path) -> Result<Injected, String> {
+        let (store, rules) = (Store::beside(state), &self.rules);
+        let injected = Injected::for_run(&store, rules, to, &BTreeMap::new());
+        let injected = injected.map_err(|e| e.message)?;
+        let was = self.auto.as_ref().map(|a| a.0.clone()).unwrap_or_default();
+        if let (Ok(Some(from)), Ok(Some(into))) =
+            (store.folder(rules, &was), store.folder(rules, to))
+        {
+            let copied = session::copy(rules, &self.shown.id, &from, &into);
+            copied.map_err(|e| format!("moving the session to {to}: {e}"))?;
+        }
+        if let Some((on, _)) = &mut self.auto {
+            to.clone_into(on);
+        }
+        self.last = ("idle".to_owned(), None);
+        let (account, why) = (to.to_owned(), "limit".to_owned());
+        self.emit(EventKind::Account {
+            account,
+            was: Some(was),
+            why,
+        });
+        Ok(injected)
     }
 
     fn settle(&mut self) {
@@ -300,6 +334,14 @@ impl Lane {
 
     fn input(&mut self, input: Input, driver: &mut impl Driver) -> Result<(), String> {
         self.heard = shed_core::clock::tokio_now();
+        if matches!(input, Input::Prompt(_))
+            && self.last.0 == "rate-limited"
+            && let Ok(to) = self.pick(false)
+            && self.auto.as_ref().is_some_and(|(on, _)| *on != to)
+        {
+            self.switch = Some((to, Some(input)));
+            return Ok(());
+        }
         match input {
             Input::Prompt(text) => {
                 self.reply.clear();
@@ -402,7 +444,7 @@ impl Lane {
                 self.shown.usage = usage;
                 self.show_usage();
             }
-            Heard::Limit(resets) => self.state("rate-limited", resets),
+            Heard::Limit(resets) => self.limited(resets),
             Heard::Ask(ask) => return self.ask(ask, driver),
             Heard::TurnEnd { stop, error, meta } => {
                 self.turns = self.turns.saturating_sub(1);
@@ -431,7 +473,7 @@ impl Lane {
         }
         self.emit(EventKind::Reply { text, stop_reason });
         if let Some(resets) = limited {
-            self.state("rate-limited", resets);
+            self.limited(resets);
         } else {
             (self.ended, self.child) = (Some(stop), self.spawned());
             self.settle();
@@ -566,14 +608,14 @@ impl Lane {
             }
             self.input(input, driver)?;
         }
-        let set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+        let set = self.hibernate_set.clone();
         self.sleep_after =
             hibernate_after(set, self.shown.cache_lifetime).filter(|_| opened.resumable);
         let (mut typing, mut polled) = (true, shed_core::clock::tokio_now());
         let gone = driver.gone();
         tokio::pin!(gone);
         loop {
-            if self.restart && self.turns == 0 {
+            if (self.restart || self.switch.is_some()) && self.turns == 0 {
                 return Ok(true);
             }
             tokio::select! {
@@ -653,14 +695,17 @@ pub fn bridge(
 ) -> Result<i32, Error> {
     let name = crate::config::var("SHED").ok_or_else(|| Error::Acp("$SHED is unset".to_owned()))?;
     let launch = if stream {
-        let record = rules.stream.clone();
-        Launch::Stream(Box::new(stream::Launch::from_env(cmd, record, state)?))
+        Launch::Stream(Box::new(stream::Launch::from_env(
+            cmd,
+            rules.clone(),
+            state,
+        )?))
     } else {
         Launch::Acp(acp::Launch::from_env()?)
     };
     let at = (socket, state);
     let result = run(cmd, cwd, at, (agent, policy, rules), (&name, launch, why));
-    if let (Err(e), Ok(mut server)) = (&result, Client::connect(socket)) {
+    if let (Err(e), Ok(mut server)) = (&result, Conn::connect(socket)) {
         let report = Reported {
             state: "error".to_owned(),
             note: Some(e.to_string()),
@@ -696,6 +741,15 @@ pub(crate) fn echo(stderr: impl AsyncRead + Send + Unpin + 'static, stirred: Arc
 enum Launch {
     Acp(acp::Launch),
     Stream(Box<stream::Launch>),
+}
+
+impl Launch {
+    fn set_account(&mut self, account: Injected) {
+        match self {
+            Self::Acp(launch) => launch.account = account,
+            Self::Stream(launch) => launch.account = account,
+        }
+    }
 }
 
 fn run(
@@ -739,6 +793,9 @@ fn run(
     let writer = runtime.spawn(writer.run(outs));
     runtime.spawn(writer::read_input(typed));
     let mut lane = Lane::new(out, policy, rules, turn_idle_timeout());
+    lane.hibernate_set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+    let auto = crate::config::var(crate::drivers::launch::AUTO_ACCOUNT);
+    lane.auto = auto.map(|on| (on, socket.to_owned()));
     if let Some(why) = why {
         lane.say(format!("shed: on ACP: {why}")).ok();
     }
@@ -767,14 +824,27 @@ fn run(
                 return Ok(child.wait().await?.code().unwrap_or(1));
             }
             stop(child);
-            let Some(input) = lane.asleep(&mut inputs).await else {
-                return Ok(0);
+            let deliver = match lane.switch.take() {
+                Some((to, deliver)) => match lane.switched(&to, state) {
+                    Ok(account) => {
+                        launch.set_account(account);
+                        deliver
+                    }
+                    Err(why) => {
+                        lane.state("rate-limited", Some(why));
+                        None
+                    }
+                },
+                None => match lane.asleep(&mut inputs).await {
+                    Some(input) => Some(input),
+                    None => return Ok(0),
+                },
             };
             let session = lane.shown.id.clone();
             start = Start {
                 session,
                 resumed: true,
-                deliver: Some(input),
+                deliver,
             };
         }
     });
@@ -800,21 +870,5 @@ mod tests {
         assert_eq!(secs(Some("900"), Some(300)), Some(900));
         assert_eq!(secs(Some("junk"), Some(300)), Some(600));
         assert_eq!(secs(Some("0"), Some(300)), None);
-    }
-
-    #[test]
-    fn frames_are_one_line_of_json() {
-        let framed = frame(&Input::Prompt("a\nb".to_owned()));
-        assert_eq!(framed, "\x1e{\"prompt\":\"a\\nb\"}\n");
-        assert_eq!(frame(&Input::Cancel), "\x1e\"cancel\"\n");
-        let approve = |request: Option<&str>| Input::Approve {
-            option: "allow".to_owned(),
-            request: request.map(str::to_owned),
-        };
-        let line = "{\"approve\":\"allow\",\"request\":\"7\"}";
-        assert_eq!(frame(&approve(Some("7"))), format!("\x1e{line}\n"));
-        let read = |l: &str| serde_json::from_str::<Input>(l).unwrap();
-        assert_eq!(read(line), approve(Some("7")));
-        assert_eq!(read("{\"approve\":\"allow\"}"), approve(None));
     }
 }

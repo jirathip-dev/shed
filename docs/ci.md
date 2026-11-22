@@ -1,8 +1,8 @@
 # CI
 
-`.github/workflows/ci.yml` runs every gate on Ubuntu (`msrv`, `rules`, the benches) and the tests on
-Ubuntu and macOS (`stable`). A new push to a PR cancels that PR's older run; pushes to `staging` and
-`main` are never cancelled.
+`.github/workflows/ci.yml` runs every gate on Ubuntu (`msrv`, `rules`, `idle-terminals`) and the tests on
+Ubuntu and macOS (`stable`). Each pull-request bench is its own `.github/workflows/bench-<name>.yml`. A new
+push to a PR cancels that PR's older run; pushes to `staging` and `main` are never cancelled.
 
 ## The macOS runner
 

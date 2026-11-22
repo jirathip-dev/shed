@@ -14,8 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use shed_client::Conn;
+use shed_server::Paths;
 use shed_server::proto::Method;
-use shed_server::{Client, Paths};
 
 fn ps(pid: u32, field: &str) -> String {
     let ps = Command::new("ps")
@@ -51,7 +52,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
     while UnixStream::connect(&socket).is_err() {
         std::thread::sleep(Duration::from_millis(20));
     }
-    let mut client = Client::connect(&socket).expect("connect");
+    let mut client = Conn::connect(&socket).expect("connect");
     let done = AtomicBool::new(false);
     let pid = server.id();
     let cpu = cpu_ms(pid);

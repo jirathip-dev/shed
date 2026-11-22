@@ -1,6 +1,6 @@
-//! What shed knows about each agent, as data: the built-in `providers/<name>.toml` files, each overridden
-//! key by key by `<name>.toml` in the user's providers folder, which can also add agents; and the line
-//! formats of the stream driver, `providers/<wire>.rs`.
+//! What shed knows about each agent: the records ([`Catalog`], the built-in ones under the user's providers
+//! folder), the agents installed and their timings, and the line formats of the stream driver,
+//! `providers/<wire>.rs`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -8,74 +8,17 @@ use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use toml::Table;
 
 use crate::Error;
 use crate::drivers::stream::Wire;
-use crate::proto::{AgentInfo, Medians, Provider};
+use crate::proto::{AgentInfo, Medians};
+pub use shed_catalog::Catalog;
 
-const BUILT_IN: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/providers.rs"));
 type MakeWire = fn() -> Box<dyn Wire>;
 include!(concat!(env!("OUT_DIR"), "/wires.rs"));
 
 pub(crate) fn wire(name: &str) -> Option<Box<dyn Wire>> {
     WIRES.iter().find(|w| w.0 == name).map(|w| (w.1)())
-}
-
-fn parse(text: &str) -> Result<Table, String> {
-    text.parse().map_err(|e: toml::de::Error| e.to_string())
-}
-
-fn record(table: &Table) -> Result<Provider, String> {
-    table
-        .clone()
-        .try_into()
-        .map_err(|e: toml::de::Error| e.to_string())
-}
-
-/// The provider records with where each came from (`built-in` or the user file), and an error for each
-/// user file in `dir` that is unreadable, not TOML, or not a record; those are skipped.
-#[must_use]
-pub fn load(dir: &Path) -> (Vec<(Provider, String)>, Vec<String>) {
-    let built_in = BUILT_IN.iter().filter_map(|(name, text)| {
-        let source = "built-in".to_owned();
-        Some(((*name).to_owned(), (parse(text).ok()?, source)))
-    });
-    let mut tables: BTreeMap<String, (Table, String)> = built_in.collect();
-    let mut bad = Vec::new();
-    let mut files: Vec<_> = fs::read_dir(dir).into_iter().flatten().flatten().collect();
-    files.sort_by_key(fs::DirEntry::path);
-    for path in files.iter().map(fs::DirEntry::path) {
-        let Some(name) = path
-            .file_stem()
-            .filter(|_| path.extension() == Some("toml".as_ref()))
-        else {
-            continue;
-        };
-        let name = name.to_string_lossy().into_owned();
-        let read = fs::read_to_string(&path).map_err(|e| e.to_string());
-        let merged = read.and_then(|t| parse(&t)).and_then(|user| {
-            let mut table = tables.get(&name).map(|t| t.0.clone()).unwrap_or_default();
-            table.extend(user);
-            record(&table).map(|_| table)
-        });
-        match merged {
-            Ok(table) => {
-                tables.insert(name, (table, path.display().to_string()));
-            }
-            Err(e) => bad.push(format!("{}: {e}", path.display())),
-        }
-    }
-    let records = tables.into_values();
-    let records = records.filter_map(|(t, source)| Some((record(&t).ok()?, source)));
-    (records.collect(), bad)
-}
-
-/// Agent `id`'s record (with no rules when it has none).
-#[must_use]
-pub fn find(dir: &Path, id: &str) -> Provider {
-    let found = load(dir).0.into_iter().find(|(p, _)| p.id == id);
-    found.map(|(p, _)| p).unwrap_or_default()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -144,8 +87,14 @@ fn medians(state: &Path) -> BTreeMap<String, Medians> {
 /// # Errors
 /// [`crate::agents::list`]'s.
 pub fn known(state: &Path, dir: &Path) -> Result<Vec<AgentInfo>, Error> {
-    let mut all: BTreeMap<_, _> = (load(dir).0.into_iter())
-        .map(|(p, source)| (p.id.clone(), (Some(p), Some(source), None)))
+    let catalog = Catalog::load(dir).0;
+    let mut all: BTreeMap<_, _> = (catalog.iter())
+        .map(|e| {
+            (
+                e.provider.id.clone(),
+                (Some(e.provider.clone()), Some(e.source.clone()), None),
+            )
+        })
         .collect();
     for agent in crate::agents::list(state)? {
         let slot = all.entry(agent.id.clone()).or_default();
@@ -164,10 +113,9 @@ pub fn known(state: &Path, dir: &Path) -> Result<Vec<AgentInfo>, Error> {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{find, load};
+    use super::Catalog;
     use crate::proto::{Provider, Tokens};
 
     pub(crate) fn fake_dir() -> PathBuf {
@@ -175,41 +123,11 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn fake(id: &str) -> Provider {
-        find(&fake_dir(), id)
-    }
-
-    #[test]
-    fn a_provider_is_one_data_file_and_no_rust() {
-        let (records, bad) = load(&fake_dir());
-        assert!(bad.is_empty(), "{bad:?}");
-        let file = fake_dir().join("fake.toml").display().to_string();
-        let sources: Vec<(&str, &str)> = records
-            .iter()
-            .map(|(p, s)| (p.id.as_str(), s.as_str()))
-            .collect();
-        assert_eq!(
-            sources,
-            [
-                ("claude-acp", "built-in"),
-                ("codex-acp", "built-in"),
-                ("fake-acp", file.as_str())
-            ]
-        );
-        let p = fake("fake-acp");
-        assert_eq!(
-            p.auth_failure("ok\nfake: login gone\n"),
-            Some("fake: login gone")
-        );
-        assert_eq!(
-            p.hooks.map(|h| h.file),
-            Some(".fake/settings.json".to_owned())
-        );
-        assert!(
-            find(&fake_dir(), "claude-acp")
-                .auth_failures
-                .contains(&"OAuth session expired".to_owned())
-        );
-        assert_eq!(find(&fake_dir(), "unknown-acp"), Provider::default());
+        Catalog::load(&fake_dir())
+            .0
+            .by_id(id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     #[test]
@@ -281,38 +199,5 @@ pub(crate) mod tests {
         );
         assert_eq!(fake("codex-acp").cache_lifetime(|_| true), None);
         assert_eq!(warm(None, 0), None);
-    }
-
-    #[test]
-    fn a_user_file_overrides_its_keys_and_a_bad_one_is_skipped() {
-        let dir = crate::temp_dir("providers");
-        let banner = "limit = [\n  \"out of tokens\"\n]\n# a comment\nresets = [\"until \"]\n";
-        fs::write(dir.join("claude.toml"), banner).expect("write");
-        fs::write(dir.join("codex.toml"), "limit = \"not a list\"\n").expect("write");
-        fs::write(
-            dir.join("new.toml"),
-            "id = \"new-acp\"\n[hooks]\nfile = 1\n",
-        )
-        .expect("write");
-        fs::write(dir.join("notes.txt"), "not a record").expect("write");
-        let (records, bad) = load(&dir);
-        let claude = find(&dir, "claude-acp");
-        assert_eq!(
-            claude.limit_hit("you are out of tokens until 5pm."),
-            Some(("you are out of tokens until 5pm.", Some("5pm".to_owned())))
-        );
-        assert_eq!(claude.limit_hit("You've hit your limit"), None);
-        assert_eq!(
-            claude.auth_failure("OAuth session expired"),
-            Some("OAuth session expired")
-        );
-        assert_eq!(find(&dir, "codex-acp").limit, ["hit your usage limit"]);
-        assert_eq!(records.len(), 2, "new-acp is skipped");
-        assert_eq!(bad.len(), 2, "{bad:?}");
-        assert!(
-            bad[0].starts_with(&dir.join("codex.toml").display().to_string()),
-            "{bad:?}"
-        );
-        assert!(bad[1].contains("new.toml"), "{bad:?}");
     }
 }

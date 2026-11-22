@@ -125,6 +125,7 @@ pub(crate) struct Launch {
     mcp: Vec<McpServer>,
     meta: Option<Meta>,
     model: Option<String>,
+    pub(crate) account: shed_accounts::env::Injected,
 }
 
 impl Launch {
@@ -136,7 +137,7 @@ impl Launch {
         Ok(Self {
             mcp,
             meta,
-            model: None,
+            ..Self::default()
         })
     }
 }
@@ -455,7 +456,7 @@ pub(crate) async fn run<T>(
     launch: &mut Launch,
     main: impl AsyncFnOnce(&mut Acp) -> Result<T, String>,
 ) -> Result<(Child, T), Error> {
-    let (child, stdin, stdout, stderr) = start(cmd, cwd)?;
+    let (child, stdin, stdout, stderr) = start(cmd, cwd, &launch.account)?;
     let pid = child.id().and_then(|p| i32::try_from(p).ok());
     let done = Box::pin(talk(stdin, stdout, stderr, pid, launch, main)).await?;
     Ok((child, done))
@@ -517,13 +518,13 @@ async fn connect<T>(
 fn start(
     cmd: &[String],
     cwd: &Path,
+    account: &shed_accounts::env::Injected,
 ) -> Result<(Child, ChildStdin, ChildStdout, ChildStderr), Error> {
     let (program, args) = cmd
         .split_first()
         .ok_or_else(|| Error::Acp("empty agent command".to_owned()))?;
-    let mut child =
-        shed_core::runner::piped(program, args, cwd, &["SHED_ACP_MCP", "SHED_ACP_META"])
-            .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
+    let mut child = super::launch::agent(program, args, cwd, account)
+        .map_err(|e| Error::Acp(format!("{program}: {e}")))?;
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.stdin.take(), child.stdout.take(), child.stderr.take())
     else {
@@ -541,7 +542,8 @@ fn oneshot<T>(
         .enable_all()
         .build()?;
     runtime.block_on(async {
-        let (child, stdin, stdout, stderr) = start(cmd, cwd)?;
+        let none = shed_accounts::env::Injected::default();
+        let (child, stdin, stdout, stderr) = start(cmd, cwd, &none)?;
         let talk = connect(stdin, stdout, stderr, async |cx, _, _, _| {
             let can = handshake(&cx).await?;
             act(cx, can).await
@@ -581,8 +583,9 @@ mod tests {
 
     use super::*;
     use crate::lane::writer::Out;
-    use crate::lane::{Input, Lane, turn_idle_timeout};
+    use crate::lane::{Lane, turn_idle_timeout};
     use crate::providers::tests::fake;
+    use shed_proto::Input;
 
     #[test]
     fn a_text_chunk_skips_the_sdk_parse_and_matches_it() {
@@ -865,7 +868,13 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_child_left_running_after_the_turn_keeps_the_lane_running_until_it_exits() {
         let script = ["-c", "read _; sleep 900; :"];
-        let mut agent = shed_core::runner::piped("sh", script, Path::new("/"), &[]).unwrap();
+        let mut agent = shed_core::runner::piped(
+            "sh",
+            script,
+            Path::new("/"),
+            (&[], &std::collections::BTreeMap::new()),
+        )
+        .unwrap();
         let pid = agent.id().and_then(|p| i32::try_from(p).ok());
         let stdin = agent.stdin.take().unwrap();
         let steps = vec![
@@ -911,7 +920,10 @@ mod tests {
     async fn a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild() {
         let dir = crate::temp_dir("acp-provider");
         let line = "Out of tokens, back at 6pm.";
-        let rules = || crate::providers::find(&dir, "claude-acp");
+        let rules = || {
+            let catalog = crate::providers::Catalog::load(&dir).0;
+            catalog.by_id("claude-acp").cloned().unwrap_or_default()
+        };
         let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
         assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
         let file = "limit = [\"Out of tokens\"]\nresets = [\"back at \"]\n";

@@ -1,4 +1,4 @@
-//! Machines over SSH: the `[machines]` table of the config file and a [`Client`] through
+//! Machines over SSH: the `[machines]` table of the config file and a [`Conn`] through
 //! `ssh <target> shed connect`.
 //!
 //! The config file is a small TOML subset, written by `shed machine add|rm`:
@@ -24,8 +24,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use crate::proto::{BUILD, ErrorCode, MachineStats, Method, StatsParams};
-use crate::{Client, Error};
+use crate::Error;
+use crate::proto::{
+    BUILD, ErrorCode, ExecParams, ExecResult, MachineStats, Method, RpcError, StatsParams,
+};
+use shed_client::Conn;
 
 const CONNECT_TIMEOUT: u32 = 10;
 static WRITES: AtomicU64 = AtomicU64::new(0);
@@ -65,27 +68,30 @@ pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
         text => text?,
     };
     let mut machines = Vec::new();
-    let mut in_machines = false;
+    let mut table = None;
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         let fail = |what: &str| Error::Config(format!("{}:{}: {what}", path.display(), n + 1));
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        if let Some(table) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            if table.trim() != "machines" {
+        if let Some(name) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
+            if !["machines", "script"].contains(&name.trim()) {
                 return Err(fail(&format!(
-                    "unknown table [{table}]; shed knows [machines]"
+                    "unknown table [{name}]; shed knows [machines] and [script]"
                 )));
             }
-            in_machines = true;
+            table = Some(name.trim() == "machines");
+            continue;
+        }
+        if table == Some(false) {
             continue;
         }
         let Some((name, value)) = line.split_once('=') else {
             return Err(fail("expected name = \"ssh-target\""));
         };
         let (name, value) = (name.trim(), value.trim());
-        if !in_machines {
+        if table.is_none() {
             return Err(fail(&format!(
                 "unknown key {name}; put machines under [machines]"
             )));
@@ -111,6 +117,20 @@ pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     for m in machines {
         writeln!(text, "{} = \"{}\"", m.name, m.target).ok();
     }
+    let old = fs::read_to_string(path).unwrap_or_default();
+    let mut script = false;
+    for line in old.lines() {
+        if let Some(name) = line
+            .trim()
+            .strip_prefix('[')
+            .and_then(|l| l.strip_suffix(']'))
+        {
+            script = name.trim() == "script";
+        }
+        if script {
+            writeln!(text, "{line}").ok();
+        }
+    }
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
@@ -121,10 +141,10 @@ pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Adds machine `name` for `target` to the config file at `path`.
+/// Adds machine `name` for `target` to the config file at `path`; the same pair again changes nothing.
 ///
 /// # Errors
-/// [`Error::Config`] for a bad name or target, or a name already taken; [`load`]'s and [`save`]'s.
+/// [`Error::Config`] for a bad name or target, or a name taken by another target; [`load`]'s and [`save`]'s.
 pub fn add(path: &Path, name: &str, target: &str) -> Result<Machine, Error> {
     if bad_name(name) {
         return Err(Error::Config(format!(
@@ -137,15 +157,19 @@ pub fn add(path: &Path, name: &str, target: &str) -> Result<Machine, Error> {
         )));
     }
     let mut machines = load(path)?;
-    if machines.iter().any(|m| m.name == name) {
-        return Err(Error::Config(format!(
-            "machine {name} exists; `shed machine rm {name}` first"
-        )));
-    }
     let machine = Machine {
         name: name.to_owned(),
         target: target.to_owned(),
     };
+    match machines.iter().find(|m| m.name == name) {
+        Some(m) if *m == machine => return Ok(machine),
+        Some(_) => {
+            return Err(Error::Config(format!(
+                "machine {name} exists; `shed machine rm {name}` first"
+            )));
+        }
+        None => {}
+    }
     machines.push(machine.clone());
     save(path, &machines)?;
     Ok(machine)
@@ -184,7 +208,7 @@ pub fn find(path: &Path, name: &str) -> Result<Machine, Error> {
 /// # Errors
 /// [`Error::MachineVersion`] when the shed there is another version; [`Error::Unreachable`] when
 /// `ssh` or the shed there gives no answer; [`Error::Io`] when `ssh` cannot start.
-pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Client, Error> {
+pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Conn, Error> {
     let (ours, theirs) = UnixStream::pair()?;
     fs::DirBuilder::new()
         .recursive(true)
@@ -207,25 +231,54 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
     }
     let mut child = shed_core::runner::over("ssh", args, OwnedFd::from(theirs))?;
     std::thread::spawn(move || child.wait());
-    match Client::over(ours) {
-        Err(Error::Rpc(e)) if e.code == ErrorCode::Version.code() => {
-            let there = e.message.split(" / server ").nth(1).unwrap_or_default();
-            let there = there
-                .split(" protocol ")
-                .next()
-                .unwrap_or_default()
-                .to_owned();
+    match Conn::over(ours) {
+        Err(shed_client::Error::Version {
+            theirs, refusal, ..
+        }) => {
+            let there = match (theirs, refusal) {
+                (Some(theirs), _) => theirs.label(),
+                (None, e) => {
+                    let message = e.map(|e| e.message).unwrap_or_default();
+                    let there = message.split(" / server ").nth(1).unwrap_or_default();
+                    let there = there.split(" protocol ").next().unwrap_or_default();
+                    there.to_owned()
+                }
+            };
             Err(Error::MachineVersion {
                 machine: machine.name.clone(),
                 here: BUILD.to_owned(),
                 there,
             })
         }
-        Err(Error::BadResponse(_) | Error::Io(_)) => Err(Error::Unreachable {
-            machine: machine.name.clone(),
-            target: machine.target.clone(),
-        }),
-        client => client,
+        Err(shed_client::Error::Bad(_) | shed_client::Error::Io { .. }) => {
+            Err(Error::Unreachable {
+                machine: machine.name.clone(),
+                target: machine.target.clone(),
+            })
+        }
+        conn => Ok(conn?),
+    }
+}
+
+pub(crate) fn facts(calls: &mut Conn) -> [Option<String>; 3] {
+    let script = "uname -s; uname -m; printf '%s\\n' \"$HOME\"";
+    let params = ExecParams {
+        cmd: ["sh", "-c", script].map(str::to_owned).into(),
+        timeout: Some(10.0),
+        ..ExecParams::default()
+    };
+    let ran = calls.call::<_, ExecResult>(Method::Exec, &params);
+    let out = ran.map(|r| String::from_utf8_lossy(&r.stdout).into_owned());
+    let out = out.unwrap_or_default();
+    let mut lines = out.lines().map(str::to_owned);
+    let mut next = || lines.next().filter(|l| !l.is_empty());
+    [next().map(|os| os.to_lowercase()), next(), next()]
+}
+
+pub(crate) fn refusal(e: Error) -> RpcError {
+    match e {
+        Error::Io(e) => RpcError::new(ErrorCode::Io, e),
+        e => RpcError::new(ErrorCode::InvalidParams, e),
     }
 }
 
@@ -257,8 +310,10 @@ pub fn stats(
     let (tx, rx) = mpsc::channel();
     let (m, dir) = (machine.clone(), control_dir.to_owned());
     std::thread::spawn(move || {
-        tx.send(connect(&m, &dir, false).and_then(|mut c| c.call(Method::MachineStats, &params)))
-            .ok();
+        tx.send(
+            connect(&m, &dir, false).and_then(|mut c| Ok(c.call(Method::MachineStats, &params)?)),
+        )
+        .ok();
     });
     let seen = seen_dir.join(&machine.name);
     match rx.recv_timeout(STATS_TIMEOUT) {
@@ -299,6 +354,21 @@ mod tests {
     }
 
     #[test]
+    fn the_script_table_is_skipped_and_kept() {
+        let path = dir("script").join("config.toml");
+        let script = "[script]\nguard = [\n  \"drover\", \"guard\",\n]\nguard_timeout = 5\n";
+        fs::write(
+            &path,
+            format!("[machines]\nbox = \"box.example\"\n{script}"),
+        )
+        .unwrap();
+        add(&path, "b2", "b2.example").unwrap();
+        let names: Vec<String> = load(&path).unwrap().into_iter().map(|m| m.name).collect();
+        assert_eq!(names, ["box", "b2"]);
+        assert!(fs::read_to_string(&path).unwrap().ends_with(script));
+    }
+
+    #[test]
     fn add_ls_rm_round_trip_through_the_file() {
         let path = dir("round").join("config.toml");
         assert_eq!(load(&path).unwrap(), vec![]);
@@ -308,6 +378,12 @@ mod tests {
         assert!(text.contains("[machines]\nbox = \"user@box.example\"\nb2 = \"b2.example\"\n"));
         assert_eq!(find(&path, "b2").unwrap().target, "b2.example");
         assert!(matches!(add(&path, "box", "x"), Err(Error::Config(_))));
+        add(&path, "box", "user@box.example").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            text,
+            "the same pair twice is one"
+        );
         assert_eq!(remove(&path, "box").unwrap().target, "user@box.example");
         assert!(matches!(remove(&path, "box"), Err(Error::NoMachine(_))));
         assert_eq!(load(&path).unwrap().len(), 1);

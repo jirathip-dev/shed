@@ -2,29 +2,11 @@
 """A fake ACP v1 agent for shed's tests: a scripted JSON-RPC server on stdio.
 
 It checks every client message against the fields the ACP schema requires and exits 3 (with the
-reason on stderr) on the first that does not fit. Prompts:
+reason on stderr) on the first that does not fit.
 
-- "tool": a plan, a mode change, a tool call and a permission request; then the tool completes and the
-  reply is "wrote notes.txt" (allowed), or it fails and the reply is "denied" (rejected).
-- "pair": two tool calls with `locations` and `rawInput`, then a permission request for each, both in
-  flight (ids 101 and 102, call-a's `rawInput` over 4 KiB); each call completes if allowed, else fails, and
-  the reply names each call's chosen option.
-- "slow": one chunk ("thinking"), then waits for session/cancel and stops with `cancelled`.
-- "auth": the expired-login reply of claude-acp 0.100.0, then like "slow" (that adapter never ends it).
-- "silent": nothing, then like "slow".
-- "busy": a tool call with a progress update every 0.3 s for 2.4 s, then the reply "busy done".
-- "flood N": N one-character chunks, then the reply. With `--canned` they are one pre-built write (no
-  per-update encoding) 0.2 s after the prompt (once shed has saved the turn's `working` state), so a
-  bench timing from the first chunk to the reply times shed's throughput rather than this agent.
-- "hog [MB]": starts a child holding MB (default 200) of memory for 60 s, then the reply "started it".
-- "unknown": an update of a kind no ACP schema has, then the reply "still here".
-- "usage": a usage_update (53,000 of 200,000 tokens, 0.045 USD), then the reply "counted".
-- "quota": the same usage_update, then the reply "counted" whose response's `_meta.quota.token_count`
-  has claude-acp 0.100.0's counters (100 input, 900 cache reads, 1,000 cache writes, 50 output).
-- "commands": the slash commands /plan, the same again, then /plan and /review (with an input hint).
-- "replay": with `--replay FILE`, FILE's recorded session updates (JSON lines) in order; a line
-  `{"request_permission": {...}}` is sent as that request and waits for its answer.
-- anything else: the reply "you said: <prompt>" ("[<model>] you said: …" after a switch from "fast").
+A prompt runs `fake_acp/<word>.py`, named by its first word (each file's docstring says what it does),
+else `fake_acp/echo.py`. The file's `run(agent, text)` is handed this module and returns the stop reason,
+or the whole result.
 
 It offers the models "fast" and "smart" (a `model` config option). `--history FILE` keeps the session's
 prompts and updates in FILE (JSON lines) and advertises loadSession, which replays them; without it
@@ -43,16 +25,18 @@ those `mcpCapabilities`.
 `--meta FILE` is the JSON object session/new and session/load must get as `_meta`; without it they
 must carry no `_meta` and no key shed did not send before.
 """
+import importlib.util
 import json
 import os
-import subprocess
 import sys
-import time
+
+sys.dont_write_bytecode = True
 
 UNIQUE = "--unique" in sys.argv
 SESSION = f"sess-{os.getpid()}" if UNIQUE else "sess-1"
 HISTORY = sys.argv[sys.argv.index("--history") + 1] if "--history" in sys.argv else None
 MODEL = "fast"
+PROMPTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_acp")
 
 
 MCP = json.load(open(sys.argv[sys.argv.index("--mcp") + 1])) if "--mcp" in sys.argv else []
@@ -154,55 +138,16 @@ def wait_response(rid):
             return outcome, cancelled
 
 
-def tool_turn():
-    update({"sessionUpdate": "plan", "entries": [
-        {"content": "Write notes", "priority": "high", "status": "in_progress"}]})
-    update({"sessionUpdate": "current_mode_update", "currentModeId": "code"})
-    update({"sessionUpdate": "tool_call", "toolCallId": "call-1", "title": "Write notes.txt",
-            "kind": "edit", "status": "pending"})
-    send({"id": 100, "method": "session/request_permission", "params": {
-        "sessionId": SESSION,
-        "toolCall": {"toolCallId": "call-1"},
-        "options": [
-            {"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
-            {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"},
-        ]}})
-    outcome, _ = wait_response(100)
-    if outcome["outcome"] == "cancelled":
-        return "cancelled"
-    if outcome["optionId"] == "allow-once":
-        update({"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "completed"})
-        update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "wrote "}})
-        update({"sessionUpdate": "agent_message_chunk",
-                "content": {"type": "text", "text": "notes.txt"}})
-    else:
-        update({"sessionUpdate": "tool_call_update", "toolCallId": "call-1", "status": "failed"})
-        update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "denied"}})
-    return "end_turn"
-
-
-def two_turn():
-    calls = {"call-a": ("Edit a.rs", "x" * 5000), "call-b": ("Run ls", "ls -la")}
-    for rid, (call, (title, raw)) in enumerate(calls.items(), 101):
-        tool = {"toolCallId": call, "title": title, "kind": "execute",
-                "locations": [{"path": f"/work/{call}.rs", "line": 3}], "rawInput": {"command": raw}}
-        update({"sessionUpdate": "tool_call", "status": "pending", **tool})
-        send({"id": rid, "method": "session/request_permission", "params": {
-            "sessionId": SESSION, "toolCall": {**tool, "content": [{"type": "content",
-                "content": {"type": "text", "text": "diff"}}]},
-            "options": [{"optionId": "allow-once", "name": "Allow", "kind": "allow_once"},
-                        {"optionId": "reject-once", "name": "Reject", "kind": "reject_once"}]}})
-    chosen = {}
-    while len(chosen) < 2:
-        msg = read()
-        if msg.get("id") in (101, 102) and "method" not in msg:
-            chosen[msg["id"]] = msg["result"]["outcome"].get("optionId", "cancelled")
-    for rid, call in enumerate(calls, 101):
-        status = "completed" if chosen[rid] == "allow-once" else "failed"
-        update({"sessionUpdate": "tool_call_update", "toolCallId": call, "status": status})
-    said = f"call-a {chosen[101]}, call-b {chosen[102]}"
-    update({"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": said}})
-    return "end_turn"
+def prompt(text):
+    """The `run` of the prompt file named by the text's first word, else echo.py's."""
+    word = text.split(" ", 1)[0]
+    path = os.path.join(PROMPTS, f"{word}.py")
+    if not (word.isalpha() and os.path.isfile(path)):
+        path = os.path.join(PROMPTS, "echo.py")
+    spec = importlib.util.spec_from_file_location(f"fake_acp_{word}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.run
 
 
 def main():
@@ -268,92 +213,9 @@ def main():
             text = blocks[0]["text"]
             KEPT.append({"sessionUpdate": "user_message_chunk",
                          "content": {"type": "text", "text": text}})
-            if text == "tool":
-                stop = tool_turn()
-            elif text == "pair":
-                stop = two_turn()
-            elif text == "replay" and REPLAY:
-                for n, line in enumerate(open(REPLAY)):
-                    u = json.loads(line)
-                    if "request_permission" in u:
-                        send({"id": 200 + n, "method": "session/request_permission",
-                              "params": {"sessionId": SESSION, **u["request_permission"]}})
-                        wait_response(200 + n)
-                    else:
-                        update(u)
-                stop = "end_turn"
-            elif text in ("slow", "auth", "silent"):
-                said = {"slow": "thinking", "silent": None, "auth": "Failed to authenticate: "
-                        "OAuth session expired and could not be refreshed"}[text]
-                if said:
-                    update({"sessionUpdate": "agent_message_chunk",
-                            "content": {"type": "text", "text": said}})
-                while read().get("method") != "session/cancel":
-                    pass
-                stop = "cancelled"
-            elif text == "busy":
-                update({"sessionUpdate": "tool_call", "toolCallId": "call-2", "title": "Build",
-                        "status": "in_progress"})
-                for _ in range(8):
-                    time.sleep(0.3)
-                    update({"sessionUpdate": "tool_call_update", "toolCallId": "call-2",
-                            "status": "in_progress"})
-                update({"sessionUpdate": "tool_call_update", "toolCallId": "call-2",
-                        "status": "completed"})
-                update({"sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "busy done"}})
-                stop = "end_turn"
-            elif text.startswith("flood ") and CANNED:
-                chunk = {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "x"}}
-                line = json.dumps({"jsonrpc": "2.0", "method": "session/update",
-                                   "params": {"sessionId": SESSION, "update": chunk}}) + "\n"
-                time.sleep(0.2)
-                sys.stdout.write(line * int(text.split()[1]))
-                stop = "end_turn"
-            elif text.startswith("flood "):
-                for _ in range(int(text.split()[1])):
-                    update({"sessionUpdate": "agent_message_chunk",
-                            "content": {"type": "text", "text": "x"}})
-                stop = "end_turn"
-            elif text == "commands":
-                plan = {"name": "plan", "description": "Make a plan"}
-                review = {"name": "review", "description": "Review the diff",
-                          "input": {"hint": "files"}}
-                for cmds in ([plan], [plan], [plan, review]):
-                    update({"sessionUpdate": "available_commands_update",
-                            "availableCommands": cmds})
-                update({"sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "commands sent"}})
-                stop = "end_turn"
-            elif text in ("usage", "quota"):
-                update({"sessionUpdate": "usage_update", "used": 53000, "size": 200000,
-                        "cost": {"amount": 0.045, "currency": "USD"}})
-                update({"sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "counted"}})
-                stop = "end_turn"
-            elif text == "hog" or text.startswith("hog "):
-                mb = int(text.split()[1]) if " " in text else 200
-                hold = f"import time; b = b'x' * ({mb} << 20); time.sleep(60)"
-                subprocess.Popen([sys.executable, "-c", hold, "https://user:secret@example.invalid/"],
-                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
-                update({"sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "started it"}})
-                stop = "end_turn"
-            elif text == "unknown":
-                update({"sessionUpdate": "brand_new_kind", "whatever": [1, 2]})
-                update({"sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "still here"}})
-                stop = "end_turn"
-            else:
-                said = f"you said: {text}" if MODEL == "fast" else f"[{MODEL}] you said: {text}"
-                update({"sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": said}})
-                stop = "end_turn"
+            result = prompt(text)(sys.modules[__name__], text)
             keep()
-            counts = {"totalTokens": 2050, "inputTokens": 100, "cachedInputTokens": 900,
-                      "cachedWriteTokens": 1000, "outputTokens": 50, "reasoningOutputTokens": 0}
-            meta = {"_meta": {"quota": {"token_count": counts}}} if text == "quota" else {}
-            send({"id": rid, "result": {"stopReason": stop, **meta}})
+            send({"id": rid, "result": result if isinstance(result, dict) else {"stopReason": result}})
         elif method == "session/cancel":
             pass
         else:

@@ -1,0 +1,45 @@
+sample.go
+  block func retries [23-27]
+    23: func retries(
+sample.md
+  section Job queue > section Retries [5-16]
+    11: queue retries --max 3
+sample.py
+  class Queue > fn push [26-33]
+    29:         retries=RETRIES,
+    32:             raise QueueError(f"full after {retries} retries")
+  fn fresh [42-42]
+    42: def fresh(job_id): return {"id": job_id, "retries": 0}
+sample.rs
+  struct Job [9-14]
+    13:     pub retries: usize,
+  enum QueueError [16-19]
+    18:     Closed { retries: usize },
+  (top level)
+    26: // fn old_push() was removed with the retries rework.
+  impl fmt::Display for Wrapper<T> > fn fmt [32-34]
+    33:         write!(f, "{} jobs, {RETRIES} retries", self.0.len())
+  impl Job > fn run [38-44]
+    42:         let retries = self.retries.min(budget);
+    43:         retry(retries).await
+  impl Job > fn fresh [46-48]
+    47:         Self { id, retries: 0 }
+  mod tests > fn fresh_has_no_retries [70-73]
+    72:         assert_eq!(job!(1).retries, 0);
+sample.toml
+  section limits [4-6]
+    6: retries = 3
+sample.ts
+  interface Job [6-9]
+    8:   retries: number;
+  type Outcome [11-13]
+    13:   | { ok: false; retries: number };
+  (top level)
+    20: // function oldPush() was removed with the retries rework.
+  class Queue > fn push [29-35]
+    32:       throw new Error(`full after ${job.retries} retries`);
+  class Queue > fn retry [48-48]
+    48:   private retry = (job: Job): Job => ({ ...job, retries: job.retries + 1 });
+  fn fresh [55-55]
+    55: export const fresh = (id: number): Job => ({ id, retries: 0 });
+20 matches in 6 files, 6 files searched

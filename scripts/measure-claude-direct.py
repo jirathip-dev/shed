@@ -9,7 +9,7 @@ to the turn's first update, the process tree's RSS once the turn is done (every 
 and the wake: the agent stopped, started again on the same session (ACP session/load, `claude --resume`),
 and the time from that start to the next turn's first update. Medians over --runs. Each run is two tiny
 turns on the account `claude` is logged in to. The agents run with only HOME, PATH, USER, TERM, LANG and
-TMPDIR from the environment (as the plan smoke in docs/acp.md), so no API key or parent session leaks in.
+TMPDIR from the environment (as the plan smoke in docs/acp/smoke/2026-11-05-plan-login.md), so no API key or parent session leaks in.
 
     scripts/measure-claude-direct.py [--runs 3] [--adapter @agentclientprotocol/claude-agent-acp@0.107.0]
                                      [--shed shed]

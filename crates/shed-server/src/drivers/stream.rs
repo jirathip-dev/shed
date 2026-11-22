@@ -16,7 +16,7 @@ use crate::lane::{Driver, Heard, Opened, Start, Stop, sessions};
 
 pub(crate) trait Wire: Send {
     fn prompt(&self, text: &str) -> String;
-    fn heard(&mut self, line: &Value, record: &Stream) -> Vec<Heard>;
+    fn heard(&mut self, line: &Value, record: &Provider) -> Vec<Heard>;
     fn mcp(&self, servers: &[Value]) -> String;
 }
 
@@ -92,7 +92,7 @@ fn mint() -> Result<String, String> {
 
 #[derive(Default)]
 pub(crate) struct Launch {
-    record: Stream,
+    record: Provider,
     state: PathBuf,
     mcp: Vec<Value>,
     shown: Vec<Value>,
@@ -102,19 +102,16 @@ pub(crate) struct Launch {
     cwd: PathBuf,
     session: String,
     resumed: bool,
+    pub(crate) account: shed_accounts::env::Injected,
 }
 
 impl Launch {
-    pub(crate) fn from_env(
-        cmd: &[String],
-        record: Option<Stream>,
-        state: &Path,
-    ) -> Result<Self, Error> {
+    pub(crate) fn from_env(cmd: &[String], record: Provider, state: &Path) -> Result<Self, Error> {
         let mcp = crate::config::var("SHED_ACP_MCP").unwrap_or_default();
         let mcp: Vec<Value> = serde_json::from_str(&mcp).unwrap_or_default();
         let shown = super::acp::mcp_servers(&mcp).map_err(Error::Acp)?;
         Ok(Self {
-            record: record.unwrap_or_default(),
+            record,
             state: state.to_owned(),
             cmd: cmd.to_vec(),
             shown: super::acp::redacted(&shown),
@@ -143,7 +140,8 @@ impl Agent {
     }
 
     fn spawn(&mut self) -> Result<(), String> {
-        let (record, launch) = (&self.launch.record, &self.launch);
+        let launch = &self.launch;
+        let record = launch.record.stream.clone().unwrap_or_default();
         let with = |args: &[String], key: &str, value: &str| -> Vec<String> {
             args.iter().map(|a| a.replace(key, value)).collect()
         };
@@ -162,8 +160,7 @@ impl Agent {
             args.extend(with(&record.mcp, "{file}", &file.to_string_lossy()));
         }
         let (program, args) = args.split_first().ok_or("empty agent command")?;
-        let unset = ["SHED_ACP_MCP", "SHED_ACP_META"];
-        let mut child = shed_core::runner::piped(program, args, &launch.cwd, &unset)
+        let mut child = super::launch::agent(program, args, &launch.cwd, &launch.account)
             .map_err(|e| format!("{program}: {e}"))?;
         let (Some(mut stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())
@@ -298,8 +295,9 @@ pub(crate) async fn run<T>(
     launch: &mut Launch,
     main: impl AsyncFnOnce(&mut Agent) -> Result<T, String>,
 ) -> Result<(Child, T), Error> {
-    let wire = crate::providers::wire(&launch.record.wire);
-    let wire = wire.ok_or_else(|| Error::Acp(format!("no wire {:?}", launch.record.wire)))?;
+    let name = (launch.record.stream.as_ref()).map_or("", |s| s.wire.as_str());
+    let wire =
+        crate::providers::wire(name).ok_or_else(|| Error::Acp(format!("no wire {name:?}")))?;
     let mut agent = Agent {
         launch: std::mem::take(launch),
         wire,
@@ -371,10 +369,9 @@ mod tests {
     #[test]
     fn a_lane_stays_on_acp_for_each_reason_it_cannot_be_served_whole() {
         let off = Err("the agent's record does not turn the stream driver on".to_owned());
-        let (records, _) = crate::providers::load(&crate::providers::tests::fake_dir());
-        let built_in: Vec<_> = records.iter().filter(|(_, s)| s == "built-in").collect();
-        assert!(!built_in.is_empty());
-        for (record, _) in built_in {
+        let catalog = crate::providers::Catalog::built_in();
+        assert!(catalog.iter().next().is_some());
+        for record in catalog.iter().map(|e| &e.provider) {
             assert_eq!(
                 chose(record, "allow", &[], &json!({})),
                 off,
