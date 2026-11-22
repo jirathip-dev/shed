@@ -8,6 +8,7 @@ mod code;
 mod machine;
 mod render;
 mod screen;
+mod script;
 mod terminal;
 
 use serde_json::{Map, Value, json, to_value};
@@ -43,6 +44,7 @@ fn example(method: Method) -> (Value, Value) {
             .or_else(|| screen::example(method))
             .or_else(|| machine::example(method))
             .or_else(|| code::example(method))
+            .or_else(|| script::example(method))
             .or_else(|| accounts::example(method))
             .unwrap_or_else(|| panic!("no golden example for {method:?}")),
     }

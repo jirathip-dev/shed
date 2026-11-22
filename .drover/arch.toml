@@ -114,13 +114,13 @@ reason = "shake hands through shed_client; only the server's hello handler answe
 [[ban]]
 pattern = "Command::new"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/runner.rs"]
+except = ["crates/shed-core/src/runner.rs", "crates/shed-core/src/runner/**"]
 reason = "start processes through shed_core::runner"
 
 [[ban]]
 pattern = "std::process"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/runner.rs"]
+except = ["crates/shed-core/src/runner.rs", "crates/shed-core/src/runner/**"]
 reason = "process types and calls come from shed_core::runner"
 
 [[ban]]

@@ -242,6 +242,9 @@ All notable changes to this project are documented here. The format follows
   link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
   total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
   and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
+- The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
+  called as they are, and every call that acts is first asked of the guard named in `[script]` of the
+  config file (refused when none is named); the reply lists every acting call with its result.
 - Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
   process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
   prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys

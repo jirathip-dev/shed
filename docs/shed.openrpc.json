@@ -1988,6 +1988,73 @@
       }
     },
     {
+      "name": "script",
+      "description": "Run a program in shed's JavaScript subset (the body of an async function, at most 256 KiB) beside the terminals: `shed.<method>(params)` calls a method by its wire name through the same path a request takes, and what the program returns is `result`. A read (`ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs`) is called as it is; any other method that acts is first shown to the guard of `[script]` in the server's config file (one process for the run, one JSON line each way per call, or with `guard_per = \"call\"` a process per call), and with none configured it is refused; streams, a person's input and the connection's own methods are refused (`NOT_IN_SCRIPT`). `caller` goes to the guard unchanged. Steps, live memory, calls, logs and the deadline (`timeout`, 60 s, at most 600) bound a run. The reply is `{result, logs, calls, acting, ms}` or, when the program failed, `{error, …}`; `acting` lists every guarded call with its params and its result or error. With `check` it is parsed and compiled only. Closing the connection cancels the calls in flight; `machine` runs it there, over the held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "code",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The program: the body of an async function, in shed's JavaScript subset; at most 256 KiB."
+          }
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Stop it after this many seconds: 60 unless given, at most 600."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run it on this machine's server, over its held link."
+          }
+        },
+        {
+          "name": "caller",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Caller"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who sends it, as the sender says; the guard gets it unchanged."
+          }
+        },
+        {
+          "name": "check",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Parse and compile only: nothing runs, no call is made, no guard is asked."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ScriptResult"
+        }
+      }
+    },
+    {
       "name": "send",
       "description": "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.",
       "paramStructure": "by-name",
@@ -6203,6 +6270,179 @@
           }
         ],
         "description": "A colour: a palette index (0–15 the named colours, up to 255 the xterm palette) or `[r, g, b]`."
+      },
+      "Caller": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal it runs in."
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its working directory."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its role (`impl`, `rev`, `orchestrator`, …), for the guard to refuse by; it never allows more."
+          }
+        },
+        "description": "What a script's sender says about itself. shed proves none of it."
+      },
+      "ScriptResult": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "What the program returned, as JSON; `null` when it returned nothing."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScriptError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it stopped."
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "One entry per `console` call, in order."
+          },
+          "calls": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many `shed` calls it made, refused ones included."
+          },
+          "acting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Acting"
+            },
+            "description": "Every call of a guarded method it made, in call order, with what came of it."
+          },
+          "ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How long it took, queueing and guards included."
+          }
+        },
+        "required": [
+          "logs",
+          "calls",
+          "acting",
+          "ms"
+        ],
+        "description": "`script` result: `result` when the program returned, `error` when it did not; never both."
+      },
+      "ScriptError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "`SyntaxError`, `ReferenceError`, `TypeError`, `RangeError`, `Error`, `ShedError`, `GuardError` or `LimitError`."
+          },
+          "message": {
+            "type": "string",
+            "description": "One line."
+          },
+          "line": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The line, from 1."
+          },
+          "column": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The column, from 1, in code points."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A shed error's name (`NO_SUCH_TERMINAL`), a guard's verdict (`GUARD_REFUSED`) or the limit (`FUEL`)."
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The shed method that failed or was refused."
+          }
+        },
+        "required": [
+          "name",
+          "message",
+          "line",
+          "column"
+        ],
+        "description": "A script's error: where, and what."
+      },
+      "Acting": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "The method's wire name."
+          },
+          "params": {
+            "description": "Its params, as the script gave them."
+          },
+          "result": {
+            "description": "What it answered."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActingError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its refusal (`GUARD_REFUSED`, …), shed's error or `CANCELLED`."
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "description": "One acting call: `result` when it was answered, `error` when the guard refused it, it failed or it was\nstill in flight when the run stopped (`CANCELLED`); never both. Over `REPLY_LIMIT` only `method` and\n`error` (or `result: true`) are kept."
+      },
+      "ActingError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`GUARD_REFUSED`, `GUARD_FAILED`, `GUARD_TIMEOUT`, `NO_GUARD`, `CANCELLED` or shed's own code."
+          },
+          "message": {
+            "type": "string",
+            "description": "One line."
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "description": "Why an acting call came to nothing."
       },
       "Children": {
         "oneOf": [
