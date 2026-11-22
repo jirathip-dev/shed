@@ -277,6 +277,10 @@ All notable changes to this project are documented here. The format follows
 - Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
   `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
   crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
+- `shed account use <provider> <name>` (`account.use`): the owner's switch. It makes a ready named account the
+  one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
+  session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
+  preference, and `account ls` shows it.
 
 ### Changed
 
@@ -352,3 +356,6 @@ All notable changes to this project are documented here. The format follows
 - An ACP or stream agent no longer inherits its lane's own variables (`SHED_ACP_HIBERNATE_AFTER`,
   `SHED_ACP_RESUME`, `SHED_ACP_MCP`, `SHED_ACP_META`), so a `shed serve` the agent starts, such as one in its
   tests, no longer picks up the lane's `--no-hibernate`.
+- `shed events` no longer drops agent text chunks for a reader that falls more than 256 chunks behind
+  but stays within the 4,096-event window: every chunk in the last 4,096 events is kept until it is read,
+  and only a reader past that window is dropped, with a `lagged` line.

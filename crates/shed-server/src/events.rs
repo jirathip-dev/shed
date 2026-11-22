@@ -10,6 +10,7 @@ use crate::{HEARTBEAT, lock, send};
 
 pub(crate) const RING: u64 = 4_096;
 const TEXT_RING: usize = 256;
+const SWEEP: u64 = 256;
 const BEAT: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"heartbeat\"}\n";
 
 type Labels = BTreeMap<String, String>;
@@ -58,6 +59,12 @@ pub(crate) fn redacted<T: serde::Serialize + serde::de::DeserializeOwned>(t: &T)
     serde_json::from_value(v).ok()
 }
 
+fn trim(ring: &mut Ring, floor: u64) {
+    while ring.len() > TEXT_RING && ring.front().is_some_and(|(e, _)| e.seq <= floor) {
+        ring.pop_front();
+    }
+}
+
 fn notice(method: &str, seq: u64) -> Vec<u8> {
     format!("{{\"jsonrpc\":\"2.0\",\"method\":\"{method}\",\"params\":{{\"seq\":{seq}}}}}\n")
         .into_bytes()
@@ -96,10 +103,11 @@ impl Events {
         log.seq = self.seq;
         if matches!(event.kind, EventKind::Text { .. }) {
             let ring = log.texts.entry(event.name.clone()).or_default();
-            if ring.len() >= TEXT_RING {
-                ring.pop_front();
-            }
             ring.push_back((event, bytes));
+            if self.seq.is_multiple_of(SWEEP) {
+                let floor = self.seq.saturating_sub(RING);
+                log.texts.values_mut().for_each(|ring| trim(ring, floor));
+            }
         } else {
             if u64::try_from(log.events.len()).unwrap_or(u64::MAX) >= RING
                 && let Some((gone, _)) = log.events.pop_front()
@@ -314,11 +322,15 @@ mod tests {
             .collect();
         assert_eq!(kept, state);
         assert!(got.windows(2).all(|w| w[0].seq < w[1].seq), "in seq order");
-        assert_eq!(
-            got.len(),
-            5 + 2 * TEXT_RING,
-            "each lane keeps its last text chunks"
-        );
+        let texts: Vec<u64> = (got.iter().filter(|e| e.name != "a"))
+            .map(|e| e.seq)
+            .collect();
+        let recent: Vec<u64> = (events.seq() - RING + 1..=events.seq())
+            .filter(|seq| !state.contains(seq))
+            .collect();
+        assert!(texts.ends_with(&recent), "every chunk of the last ring");
+        let bound = RING + SWEEP + 2 * u64::try_from(TEXT_RING).expect("small");
+        assert!(u64::try_from(texts.len()).is_ok_and(|n| n <= bound));
     }
 
     #[test]
