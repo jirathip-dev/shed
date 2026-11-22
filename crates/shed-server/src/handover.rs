@@ -121,14 +121,14 @@ pub(crate) async fn answer(
     let control = lock(registry).control.clone();
     let control = control.ok_or_else(|| refused("not a server"))?;
     let p: HandoverCheckParams = if method == Method::Handover {
-        let build = crate::params::<HandoverParams>(request)?.build;
+        let build = crate::call::params::<HandoverParams>(request)?.build;
         let candidate = control.again.exe.clone();
         HandoverCheckParams { build, candidate }
     } else {
-        crate::params(request)?
+        crate::call::params(request)?
     };
     let (program, args) = (p.candidate.clone(), control.again.preflight.clone());
-    let ran = crate::blocking(move || runner::output(program, args, &[])).await?;
+    let ran = crate::call::blocking(move || runner::output(program, args, &[])).await?;
     let ran = ran.map_err(|e| refused(format!("preflight: {e}")))?;
     let said = String::from_utf8_lossy(&ran.stdout);
     let found = (said.lines().last()).and_then(|l| serde_json::from_str::<Preflight>(l).ok());
@@ -166,7 +166,7 @@ pub(crate) async fn answer(
         control.asked.send(()).ok();
     }
     let from = BUILD.to_owned();
-    crate::json(&Handover {
+    crate::call::json(&Handover {
         from,
         to,
         terminals,
