@@ -195,6 +195,7 @@ impl Registry {
             parent: p.parent,
             mem_max_mb,
             redacted: false,
+            auto: p.env.contains_key(crate::drivers::launch::AUTO_ACCOUNT),
             account: p.account,
         };
         self.started(info.clone(), term);

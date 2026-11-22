@@ -7,6 +7,22 @@ use std::path::{Path, PathBuf};
 
 use shed_proto::Provider;
 
+use crate::store::{DEFAULT, Store};
+
+/// Where account `name`'s sessions live: its folder, or for `default` the record's `default_folder`, `~/`
+/// standing for `home`.
+#[must_use]
+pub fn folder(store: &Store, provider: &Provider, name: &str, home: &Path) -> Option<PathBuf> {
+    if name != DEFAULT {
+        return store.folder(provider, name).ok().flatten();
+    }
+    let dir = provider.default_folder.as_deref()?;
+    Some(
+        dir.strip_prefix("~/")
+            .map_or_else(|| dir.into(), |rest| home.join(rest)),
+    )
+}
+
 fn matches(dir: &Path, rel: &Path, parts: &[&str]) -> Vec<PathBuf> {
     let Some((part, rest)) = parts.split_first() else {
         return vec![rel.to_owned()];

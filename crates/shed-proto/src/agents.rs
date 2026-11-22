@@ -65,6 +65,8 @@ pub struct Provider {
     pub setup_files: Vec<String>,
     /// A session's files under the config folder, `{session}` standing for its id.
     pub session_files: Vec<String>,
+    /// The CLI's own config folder, `~/` for home: where `default`'s sessions are copied from, never to.
+    pub default_folder: Option<String>,
     /// Variables, besides `cache.api_vars`, a run on an account never inherits.
     pub scrub: Vec<String>,
     /// How the status command's output reads.
