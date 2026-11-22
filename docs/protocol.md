@@ -105,10 +105,10 @@ Stream events. After the response the server writes one event per line (see Even
 
 ### `exec`
 
-Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
+Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","machine":"box","timeout":30.0}}
+{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","env":{"GIT_PAGER":"cat"},"machine":"box","timeout":30.0}}
 {"jsonrpc":"2.0","id":1,"result":{"code":0,"stderr":[],"stdout":[32,77,32,115,114,99,47,108,105,98,46,114,115,10]}}
 ```
 
@@ -123,10 +123,10 @@ A file's bytes, or with `lines` only that span's; over `REPLY_LIMIT` bytes is `I
 
 ### `file.write`
 
-Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.
+Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept, or `mode` when given (the temp file has it before any byte is written). `machine` writes it there.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"path":"/home/user/project/VERSION"}}
+{"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"mode":384,"path":"/home/user/project/VERSION"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
@@ -202,22 +202,40 @@ List terminals, by name; `labels` keeps those that carry every given label, `par
 {"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
 ```
 
+### `machine.add`
+
+Add a machine to the config file, as `shed machine add` does, and start holding its link; the same name and target again is the same machine, another target under a taken name `INVALID_PARAMS`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.add","params":{"name":"box","target":"user@box.example"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
 ### `machine.links`
 
-Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
+Each configured machine's held link: `up`, `reconnecting` or `down`, since when, why it is down, and `down_since`, when it last left `up` (or was first tried; a retry does not move it); once up, the shed there (`hello`) and the machine's `os`, `arch` and `home`. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `terminal.procs`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":4,"version":"0.0.0"},"home":"/home/user","os":"linux","since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+```
+
+### `machine.rm`
+
+Remove a machine from the config file, as `shed machine rm` does, and drop its held link; removing one that is not there is a no-op.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.rm","params":{"name":"box"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
 ### `machine.stats`
 
-The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.
+The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000}}
-{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}}
+{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000,"top":1}}
+{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"top_cpu":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"top_mem":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"uptime_s":86400}}
 ```
 
 ### `read`
@@ -308,6 +326,15 @@ Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.procs`
+
+The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.procs","params":{"name":"lane-1"}}
+{"jsonrpc":"2.0","id":1,"result":[{"command":"node agent.js","cpu_pct":3,"depth":0,"elapsed_s":600,"own":true,"pid":4200,"ppid":1,"rss_mb":180},{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200}]}
 ```
 
 ### `terminal.readonly`

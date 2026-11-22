@@ -1,5 +1,6 @@
 //! The one module that starts processes; every other module asks it (CI bans `Command::new` elsewhere).
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io;
 use std::os::fd::OwnedFd;
@@ -84,7 +85,7 @@ pub fn piped<A: AsRef<OsStr>>(
         .spawn()
 }
 
-/// Runs `cmd` in `cwd` without a terminal, in a process group of its own that is ended when it
+/// Runs `cmd` in `cwd` with `env` over this process's variables, without a terminal, in a process group of its own that is ended when it
 /// returns or after `timeout`, `stdin` fed to it; its status, and stdout and stderr each read up
 /// to one byte past `limit`.
 ///
@@ -93,6 +94,7 @@ pub fn piped<A: AsRef<OsStr>>(
 pub async fn exec(
     cmd: &[String],
     cwd: &Path,
+    env: &BTreeMap<String, String>,
     stdin: Vec<u8>,
     timeout: Duration,
     limit: u64,
@@ -101,6 +103,7 @@ pub async fn exec(
     let mut child = tokio::process::Command::new(program)
         .args(args)
         .current_dir(cwd)
+        .envs(env)
         .process_group(0)
         .kill_on_drop(true)
         .stdin(Stdio::piped())

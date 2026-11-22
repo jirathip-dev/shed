@@ -12,6 +12,7 @@ mod connect;
 mod exec;
 mod golden;
 mod link;
+mod split;
 mod stats;
 
 use std::io::BufRead as _;

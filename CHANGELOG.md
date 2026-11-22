@@ -238,6 +238,13 @@ All notable changes to this project are documented here. The format follows
   the repository's top) and `info/exclude` (also through a worktree's `.git` file), skips `.git`, dot names
   without `--hidden`, symlinks and binary files. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`; a
   matched line over 4,096 bytes comes back `clipped` with its full `length`.
+- The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
+  `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
+  `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and
+  `home`; `machine.stats` adds free and total memory, pages swapped out, the volume's size, `top` (the
+  processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
+  `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
+  `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
 
 ### Changed
 
