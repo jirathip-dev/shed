@@ -58,6 +58,16 @@ impl Token {
         Ok(Self(token.to_owned()))
     }
 
+    /// The token on `screen` that starts with `prefix`, up to the first character no token holds.
+    #[must_use]
+    pub fn on_screen(screen: &str, prefix: &str) -> Option<Self> {
+        let at = screen.find(prefix).filter(|_| !prefix.is_empty())?;
+        let rest = screen.get(at..)?;
+        let held = |c: char| c.is_ascii_alphanumeric() || "-_.~+/=".contains(c);
+        let token: String = rest.chars().take_while(|c| held(*c)).collect();
+        (token.len() > prefix.len()).then_some(Self(token))
+    }
+
     pub(crate) fn expose(&self) -> &str {
         &self.0
     }

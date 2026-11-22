@@ -181,10 +181,13 @@ pub(crate) async fn dispatch(registry: &Shared, session: &mut Session, request: 
     }
     if let Some((machine, params)) = links::remote(method, request) {
         if method == Method::Run && params.get("account").is_some() {
-            let why = "account: a run on another machine has no account until the token proxy";
-            return Err(RpcError::new(ErrorCode::InvalidParams, why));
+            return crate::proxy::run_on(registry, &session.links, &machine, params).await;
         }
-        return session.links.call(&machine, method, params).await;
+        let value = session.links.call(&machine, method, params).await?;
+        if method == Method::Rm {
+            crate::proxy::removed(registry, request.params.get("name"));
+        }
+        return Ok(value);
     }
     let mut cx = Call {
         method,

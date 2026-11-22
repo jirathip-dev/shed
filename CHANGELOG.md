@@ -267,6 +267,9 @@ All notable changes to this project are documented here. The format follows
   picks, with `runs` and `limited_until`, and reads a stale usage again in the background; accounts with a run
   are read every `usage.fresh` seconds. A run on a limited account is refused `ACCOUNT_LIMITED`; `auto` with
   every account signed out is `ACCOUNT_SIGNED_OUT`.
+- A run on another machine can use an account: shed gives it a key for that one run, never the token, and the
+  token proxy on the main host signs its calls; `shed proxy keys|revoke` list and stop the keys, and
+  `shed account login --token` saves an account's setup token from the login screen.
 - The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
   `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
   `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and

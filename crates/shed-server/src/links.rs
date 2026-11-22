@@ -6,26 +6,28 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::call::blocking;
 use crate::machines::{self, Machine};
 use crate::proto::{
-    ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
+    ErrorCode, Event, EventKind, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
 };
 use crate::{Error, Shared, lock};
 use shed_client::Conn;
 
-#[derive(Default)]
 pub(crate) struct Links {
     pub(crate) config: PathBuf,
     control: PathBuf,
     held: Mutex<BTreeMap<String, Arc<Held>>>,
+    watched: UnboundedSender<Event>,
 }
 
-struct Held {
+pub(crate) struct Held {
     machine: Machine,
-    calls: Mutex<Option<Conn>>,
-    link: Mutex<Link>,
+    watched: UnboundedSender<Event>,
+    pub(crate) calls: Mutex<Option<Conn>>,
+    pub(crate) link: Mutex<Link>,
 }
 
 impl Held {
@@ -91,14 +93,23 @@ fn prefix(value: &mut Value, machine: &str) {
     }
 }
 
+impl Default for Links {
+    fn default() -> Self {
+        Self::new(PathBuf::new(), PathBuf::new()).0
+    }
+}
+
 impl Links {
-    pub(crate) fn new(config: PathBuf, control: PathBuf) -> Self {
+    pub(crate) fn new(config: PathBuf, control: PathBuf) -> (Self, UnboundedReceiver<Event>) {
+        let (watched, rx) = unbounded_channel();
         let held = Mutex::default();
-        Self {
+        let links = Self {
             config,
             control,
             held,
-        }
+            watched,
+        };
+        (links, rx)
     }
 
     pub(crate) fn sync(&self, registry: &Shared) {
@@ -113,6 +124,7 @@ impl Links {
             }
             let link = Arc::new(Held {
                 machine: machine.clone(),
+                watched: self.watched.clone(),
                 calls: Mutex::new(None),
                 link: Mutex::new(Link {
                     since: shed_core::clock::unix_now(),
@@ -202,8 +214,13 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                 if beating.is_ok() && events.call::<_, Value>(Method::Events, &params).is_ok() {
                     failures = 0;
                     held.learn(&mut calls);
+                    crate::proxy::sweep(&lock(registry).path.clone(), &machine.name, &mut calls);
+                    let relay = calls.call(Method::ProxyRelay, &serde_json::json!({})).ok();
                     *lock(&held.calls) = Some(calls);
                     held.set(LinkState::Up, None);
+                    let (to, local) = (Arc::clone(held), crate::proxy::socket(control));
+                    let there = machine.clone();
+                    std::thread::spawn(move || crate::proxy::forward(&to, &there, &local, relay));
                     let (reader, writer) = events.split();
                     reader
                         .get_ref()
@@ -221,7 +238,14 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                         since = Some(e.seq);
                         let name = format!("{}/{}", machine.name, e.name);
                         let parent = e.parent.map(|p| format!("{}/{p}", machine.name));
-                        lock(registry).events.push(Event { name, parent, ..e });
+                        let e = Event { name, parent, ..e };
+                        if matches!(
+                            e.kind,
+                            EventKind::Exited { .. } | EventKind::Killed | EventKind::State(_)
+                        ) {
+                            held.watched.send(e.clone()).ok();
+                        }
+                        lock(registry).events.push(e);
                     }
                     socket.and_then(|s| s.shutdown(Shutdown::Both)).ok();
                     *lock(&held.calls) = None;
