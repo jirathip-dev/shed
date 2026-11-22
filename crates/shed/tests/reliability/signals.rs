@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use shed_server::Paths;
 
 use crate::common::{eventually, temp_dir};
-use crate::{SHED, alive, ok, pids, run_sh, run_shell};
+use crate::{SHED, alive, ok, pids, run_sh};
 
 struct Serve(Child);
 
@@ -119,15 +119,23 @@ fn the_next_start_ends_a_tree_a_killed_serve_left_behind() {
 }
 
 #[test]
-fn sigterm_to_serve_with_20_shells_ends_in_under_a_second() {
+fn sigterm_to_serve_with_20_deaf_shells_ends_them_together() {
     let dir = temp_dir("rel-shells");
     let mut server = Serve::start(&dir, "", Stdio::null());
-    for i in 0..20 {
-        run_shell(&dir, &format!("s{i}"));
+    let names: Vec<String> = (0..20).map(|i| format!("s{i}")).collect();
+    for name in &names {
+        run_sh(
+            &dir,
+            name,
+            "trap '' TERM HUP; sleep 100 & echo child=$!; wait",
+        );
     }
+    let trees: Vec<_> = names.iter().map(|n| pids(&dir, n)).collect();
     let started = Instant::now();
     server.signal("-TERM");
     server.0.wait().expect("serve exits");
     let took = started.elapsed();
-    assert!(took < Duration::from_secs(1), "serve took {took:?}");
+    let left = survivors(&trees, Duration::ZERO);
+    assert!(left.is_empty(), "alive after serve exited: {left:?}");
+    assert!(took < Duration::from_secs(10), "serve took {took:?}");
 }
