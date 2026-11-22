@@ -253,7 +253,8 @@ mod tests {
             (read.state, read.limited_until),
             (AccountState::Ready, None)
         );
-        assert!(!stale(&p, &read, now) && stale(&p, &read, now + 300));
+        let at = read.checked_at.expect("checked");
+        assert!(!stale(&p, &read, at) && stale(&p, &read, at + 300));
         fs::remove_file(&usage).expect("rm");
         let read = limit(&store, &p, "work", None).await.expect("limit");
         let until = read.limited_until.expect("held");
