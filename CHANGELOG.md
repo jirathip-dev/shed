@@ -238,6 +238,10 @@ All notable changes to this project are documented here. The format follows
   the repository's top) and `info/exclude` (also through a worktree's `.git` file), skips `.git`, dot names
   without `--hidden`, symlinks and binary files. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`; a
   matched line over 4,096 bytes comes back `clipped` with its full `length`.
+- `shed code find [--top N] [--hidden] [-g GLOB]… 'WORDS' [PATH]` (`code.find`, with `machine` over a held
+  link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
+  total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
+  and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
 - The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
   `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
   `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and
@@ -245,10 +249,6 @@ All notable changes to this project are documented here. The format follows
   processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
   `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
   `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
-- `shed code find [--top N] [--hidden] [-g GLOB]… 'WORDS' [PATH]` (`code.find`, with `machine` over a held
-  link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
-  total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
-  and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
 
 ### Changed
 
