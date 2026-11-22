@@ -362,3 +362,6 @@ All notable changes to this project are documented here. The format follows
 - An ACP or stream agent no longer inherits its lane's own variables (`SHED_ACP_HIBERNATE_AFTER`,
   `SHED_ACP_RESUME`, `SHED_ACP_MCP`, `SHED_ACP_META`), so a `shed serve` the agent starts, such as one in its
   tests, no longer picks up the lane's `--no-hibernate`.
+- `shed events` no longer drops agent text chunks for a reader that falls more than 256 chunks behind
+  but stays within the 4,096-event window: every chunk in the last 4,096 events is kept until it is read,
+  and only a reader past that window is dropped, with a `lagged` line.
