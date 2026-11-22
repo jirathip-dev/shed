@@ -41,6 +41,24 @@ and key as drover's, and only the macOS job reads them:
 | `ASC_API_KEY_ID` | its key id |
 | `ASC_API_ISSUER_ID` | its issuer id |
 
+## Client releases (#267)
+
+Drover, cooee and any other client depend on shed's client crates at a tag instead of hand-rolling a client:
+
+```toml
+shed-client = { git = "https://github.com/jirathip-dev/shed", tag = "client-v4.0" }
+```
+
+The release workflow's `client-tag` job runs after `ci` ends green on a push to main. `scripts/client-tag.sh`
+finds the newest `client-v*` tag reachable from the commit and, when `crates/shed-proto`, `crates/shed-client`
+or `crates/shed-catalog` changed since then (or there is no tag yet), pushes `client-v<PROTOCOL>.<n>` on it:
+`<PROTOCOL>` is `shed_proto::PROTOCOL` at that commit and `<n>` counts from 0 within each protocol. A run with no
+client change, or a re-run on a tagged commit, pushes nothing. The tag is git only, with no release assets.
+
+Starting the workflow by hand (`gh workflow run release.yml -R jirathip-dev/shed`) is a dry run: it builds and
+publishes nothing and prints the tag it would push, or `no client change since <tag>`. Locally,
+`scripts/client-tag.sh [<commit>]` prints the same; `--push` pushes it.
+
 ## A manual install
 
 Download the asset for the machine from the release of the sha you want, check it, and put it in place:

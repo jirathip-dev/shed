@@ -265,6 +265,9 @@ All notable changes to this project are documented here. The format follows
   processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
   `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
   `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
+- Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
+  `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
+  crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
 
 ### Changed
 
