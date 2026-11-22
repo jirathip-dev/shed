@@ -116,7 +116,7 @@ All notable changes to this project are documented here. The format follows
   reason, `read` renders the JSONL transcript (prompts, one line per tool call, replies), and `events` gains
   `turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved` and `reply`. `shed agents
   [add|rm]` installs agents from the ACP registry, pinned. The protocol gains `emit`; a terminal carries
-  `acp`. See docs/acp.md.
+  `acp`. See docs/acp/.
 - Events and resources (M2b): `shed events [--label k=v] [--since N]` streams `started`, `state`,
   `exited {code}`, `killed` and `resources {rss_mb, cpu_pct}` as JSON lines, each with a `seq`; `--since`
   replays from a ring of the last 1,000. `shed serve --sample S` (default 2) samples every process
@@ -153,7 +153,7 @@ All notable changes to this project are documented here. The format follows
   in `providers/` beside the config file, without a rebuild. `shed doctor` names a bad user file, which is
   skipped. `shed agents --json` and the new `agents` method list each record (with its `source`) beside the
   installed adapter (now under `installed`); `agents.match {id, text}` applies an agent's limit and auth
-  rules to a caller's text. See docs/acp.md.
+  rules to a caller's text. See docs/acp/provider-records.md.
 - cooee and drover: read program facts from `shed agents --json` in place of their own copies.
 - Screen rules for PTY agents: a terminal labelled `agent=<agent>` checks its provider record's `[[rules]]`
   (a state, a priority, the last N screen lines and texts to match) on screen changes, at most every 250 ms;
@@ -206,7 +206,7 @@ All notable changes to this project are documented here. The format follows
 - Claude can run on the stream driver: `claude`'s own stream-json mode with shed's bridge, no Node adapter
   (about 120 MB less per awake lane). It is off by default; a host turns it on with `driver = "stream"` in
   its own `providers/claude.toml`. Lanes with policy `ask`, another command or an unmapped `--meta` option
-  stay on ACP. What a client sees differently is in docs/acp.md, "The stream driver".
+  stay on ACP. What a client sees differently is in docs/acp/stream-driver.md.
 - `read` returns a `cursor`, and `read` with `since: <cursor>` returns only what is new: the lines that
   scrolled off since, then the screen only when it changed (`changed`). Lines scrollback dropped before
   they were read are counted in `lost`. ACP terminals take `since` for their events by `seq`.
@@ -232,9 +232,45 @@ All notable changes to this project are documented here. The format follows
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or
   256 MiB it is the new error `LIMIT`, naming the limit, its value and the file.
 - `shed file read --lines N-M` (`file.read` with `lines`) returns just that span of lines.
+- `shed code grep [-F] [-i] [-w] [--count] [--hidden] [-g GLOB]… PATTERN [PATH]` (`code.grep`, with `machine`
+  over a held link): the matching lines under a folder, grouped by the function or type that holds each one,
+  files in name order. The walk keeps to `.gitignore` (the root's, every folder's, the folders' above it up to
+  the repository's top) and `info/exclude` (also through a worktree's `.git` file), skips `.git`, dot names
+  without `--hidden`, symlinks and binary files. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`; a
+  matched line over 4,096 bytes comes back `clipped` with its full `length`.
+- `shed code find [--top N] [--hidden] [-g GLOB]… 'WORDS' [PATH]` (`code.find`, with `machine` over a held
+  link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
+  total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
+  and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
 - The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
   called as they are, and every call that acts is first asked of the guard named in `[script]` of the
   config file (refused when none is named); the reply lists every acting call with its result.
+- `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
+  on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
+  what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
+  account, a folder holding a setup, and a token file's age and mode.
+- `shed run --acp <id> --account <name>` (`run`'s `account`) runs the agent on one of shed's accounts: its
+  folder set, its setup token too while its own login is signed out, and none of the record's `scrub` or API-key
+  variables inherited from shed; a caller `env` that sets one of them is refused. `get` shows the `account`, an
+  `account` event says which one it started on, and the token is in no log, event, state file or hibernated
+  session. This reverses "shed never handles provider credentials" (docs/accounts/accounts.md). Protocol 5.
+- `shed run --acp <id> --account auto` runs on the provider's signed-in named account with the most headroom
+  (never `default`), and when the lane hits a usage limit shed marks that account limited, copies the session's
+  files to the next account, starts the agent there on the same session and sends one prompt to go on (an
+  `account` event with `was` and `why: limit`). `account.ls` lists each provider's accounts in the order `auto`
+  picks, with `runs` and `limited_until`, and reads a stale usage again in the background; accounts with a run
+  are read every `usage.fresh` seconds. A run on a limited account is refused `ACCOUNT_LIMITED`; `auto` with
+  every account signed out is `ACCOUNT_SIGNED_OUT`.
+- The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
+  `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
+  `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and
+  `home`; `machine.stats` adds free and total memory, pages swapped out, the volume's size, `top` (the
+  processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
+  `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
+  `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
+- Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
+  `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
+  crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
 
 ### Changed
 
@@ -281,6 +317,12 @@ All notable changes to this project are documented here. The format follows
   on a matcher whose time is bounded by pattern size times line length. `(`, `)`, `|`, and `^` or `$` in
   the middle of a pattern are now operators; a construct shed lacks (lookaround, backreferences) is an
   error that names it.
+- `shed install`, `shed uninstall`, `shed doctor` and `--autostart` write, load, remove and read the two user
+  jobs through farrier-service. On Linux the units are named after the labels (`dev.shed.serve.service`,
+  `dev.shed.update.timer`) and `shed install` removes the old `shed.service` and `shed-update.*`; on macOS
+  the logs are `~/Library/Logs/dev.shed.serve.log` and `dev.shed.update.log`. `shed uninstall` unloads and
+  removes both jobs instead of printing the lines, and `shed install` loads only a job that changed or is
+  not loaded. The job templates in `dist/` are gone: their golden copies are farrier's `fixtures/units/`.
 
 ### Fixed
 
@@ -301,3 +343,6 @@ All notable changes to this project are documented here. The format follows
   that answers while the job is not loaded.
 - `shed state` (and the agent hooks that run it) gives up after 2 s with a nonzero exit when the server
   accepts but never answers, instead of hanging; `$SHED_STATE_TIMEOUT` sets the seconds.
+- An ACP or stream agent no longer inherits its lane's own variables (`SHED_ACP_HIBERNATE_AFTER`,
+  `SHED_ACP_RESUME`, `SHED_ACP_MCP`, `SHED_ACP_META`), so a `shed serve` the agent starts, such as one in its
+  tests, no longer picks up the lane's `--no-hibernate`.

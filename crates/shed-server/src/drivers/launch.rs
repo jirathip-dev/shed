@@ -83,6 +83,27 @@ pub(crate) fn bridge(
     Ok(())
 }
 
+pub(crate) const AUTO_ACCOUNT: &str = "SHED_ACP_AUTO";
+
+pub(crate) const LANE_ONLY: [&str; 5] = [
+    AUTO_ACCOUNT,
+    "SHED_ACP_RESUME",
+    "SHED_ACP_MCP",
+    "SHED_ACP_META",
+    "SHED_ACP_HIBERNATE_AFTER",
+];
+
+pub(crate) fn agent<A: AsRef<std::ffi::OsStr>>(
+    program: &str,
+    args: impl IntoIterator<Item = A>,
+    cwd: &Path,
+    account: &shed_accounts::env::Injected,
+) -> std::io::Result<tokio::process::Child> {
+    let unset = account.unset.iter().map(String::as_str);
+    let unset: Vec<_> = LANE_ONLY.into_iter().chain(unset).collect();
+    shed_core::runner::piped(program, args, cwd, (&unset, &account.set))
+}
+
 pub(crate) fn vars(p: &RunParams, name: &str) -> serde_json::Result<Vec<(String, String)>> {
     let mut vars: Vec<_> = p.env.clone().into_iter().collect();
     vars.push(("SHED".to_owned(), name.to_owned()));

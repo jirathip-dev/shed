@@ -162,6 +162,16 @@ fn env_is_not_in_a_hibernated_session_and_comes_back_with_the_agent() {
 }
 
 #[test]
+fn the_lanes_own_variables_do_not_reach_the_agent() {
+    let (dir, _server) = lab("env-lane-only", &[("SHED_ACP_HIBERNATE_AFTER", "3600")]);
+    started(&dir, "o");
+    assert_eq!(
+        turn(&dir, "o", "env SHED_ACP_HIBERNATE_AFTER"),
+        "no SHED_ACP_HIBERNATE_AFTER"
+    );
+}
+
+#[test]
 fn an_effort_the_record_does_not_take_is_refused() {
     let (dir, _server) = lab("env-bad-effort", &[]);
     let out = start(&dir, "b", "max");

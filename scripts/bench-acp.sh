@@ -10,8 +10,8 @@
 set -euo pipefail
 base=$(cd "$1" && pwd) head=$(cd "$2" && pwd)
 target=${BENCH_TARGET:-$head/target}
-for f in crates/shed/tests/acp_bench.rs crates/shed/tests/fake_acp.py; do
-  [ "$base" = "$head" ] || cp "$head/$f" "$base/$f"
+for f in crates/shed/tests/acp_bench.rs crates/shed/tests/fake_acp.py crates/shed/tests/fake_acp; do
+  [ "$base" = "$head" ] || cp -R "$head/$f" "$(dirname "$base/$f")"
 done
 if [ "$base" != "$head" ] && ! (cd "$base" && CARGO_TARGET_DIR="$target/acp-base" cargo test -q -p shed --release \
   --locked --test acp_bench --no-run); then

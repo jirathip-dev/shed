@@ -593,9 +593,9 @@ LimitError 12:1: the reply is 9,437,201 bytes, over the limit of 8,388,608: retu
 
 | class | methods | in a script |
 |---|---|---|
-| read | `ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover` | called as they are; work with no guard configured |
-| guarded | `run`, `send`, `keys`, `kill`, `rm`, `resize`, `state`, `acp.model`, `exec`, `file.write`, `file.read` (it changes nothing but reads any file the server's user can: the owner's decision), `code.outline` (it reads files too) | the guard first |
-| refused | `events`, `attach`, `screen.watch`, `terminal.input`, `terminal.keys`, `terminal.resize`, `terminal.readonly`, `handover`, `handover.check`, `hello`, `heartbeat`, `emit`, `script` | `ShedError` `NOT_IN_SCRIPT`: they stream, belong to a person's keyboard or to the connection, or replace the server |
+| read | `ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs` | called as they are; work with no guard configured |
+| guarded | `run`, `send`, `keys`, `kill`, `rm`, `resize`, `state`, `acp.model`, `exec`, `file.write`, `file.read` (it changes nothing but reads any file the server's user can: the owner's decision), `code.outline`, `code.grep` and `code.find` (they read files too), `machine.add`, `machine.rm`, `account.add`, `account.rm`, `account.ls` and `account.status` (they run the provider's status command) | the guard first |
+| refused | `events`, `attach`, `screen.watch`, `terminal.input`, `account.login` (a person signs in at its screen), `terminal.keys`, `terminal.resize`, `terminal.readonly`, `handover`, `handover.check`, `hello`, `heartbeat`, `emit`, `script` | `ShedError` `NOT_IN_SCRIPT`: they stream, belong to a person's keyboard or to the connection, or replace the server |
 
 A script runs under the guard of the server it runs on: with `--on box`, box's `[script]`. A call it
 forwards to another machine (`machine`, `box/t1`) is guarded here, with that machine named, and arrives

@@ -149,7 +149,8 @@ impl Method {
             | Self::MachineLinks
             | Self::Agents
             | Self::AgentsMatch
-            | Self::Discover => Access::Read,
+            | Self::Discover
+            | Self::TerminalProcs => Access::Read,
             Self::Run
             | Self::Send
             | Self::Keys
@@ -161,12 +162,21 @@ impl Method {
             | Self::Exec
             | Self::FileWrite
             | Self::FileRead
-            | Self::CodeOutline => Access::Guarded,
+            | Self::CodeOutline
+            | Self::CodeGrep
+            | Self::CodeFind
+            | Self::MachineAdd
+            | Self::MachineRm
+            | Self::AccountAdd
+            | Self::AccountRm
+            | Self::AccountLs
+            | Self::AccountStatus => Access::Guarded,
             Self::Hello
             | Self::Events
             | Self::Attach
             | Self::ScreenWatch
             | Self::Input
+            | Self::AccountLogin
             | Self::TerminalKeys
             | Self::TerminalResize
             | Self::ReadOnly

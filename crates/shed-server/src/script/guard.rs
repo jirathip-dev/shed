@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;
 use std::time::Duration;
@@ -9,7 +10,7 @@ use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader, Lines};
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
 
-use crate::proto::{Caller, Method};
+use crate::proto::{Caller, Method, Route};
 use crate::runner;
 
 const REASON: usize = 400;
@@ -157,19 +158,16 @@ impl Held {
                 return Err(late(timeout));
             }
         };
-        if answer.allow {
-            return Ok(());
-        }
-        Err((
-            "GUARD_REFUSED",
-            format!("refused by the guard: {}", cut(&answer.reason)),
-        ))
+        let why = format!("refused by the guard: {}", cut(&answer.reason));
+        answer.allow.then_some(()).ok_or(("GUARD_REFUSED", why))
     }
 }
 
 fn start(guard: &[String]) -> Result<Alive, Refusal> {
-    let (process, stdin, stdout) =
-        runner::held(guard).map_err(|e| failed(&format!("could not start: {e}")))?;
+    let started = runner::held(guard, Path::new("."), &BTreeMap::new(), false);
+    let mut process = started.map_err(|e| failed(&format!("could not start: {e}")))?;
+    let pipes = process.child.stdin.take().zip(process.child.stdout.take());
+    let (stdin, stdout) = pipes.ok_or_else(|| failed("could not start: no pipes"))?;
     Ok(Alive {
         stdin,
         lines: BufReader::new(stdout).lines(),
@@ -178,7 +176,8 @@ fn start(guard: &[String]) -> Result<Alive, Refusal> {
 }
 
 async fn once(guard: &[String], line: Vec<u8>, timeout: Duration) -> Result<(), Refusal> {
-    let ran = runner::exec(guard, Path::new("."), line, timeout, 64 << 10).await;
+    let none = BTreeMap::new();
+    let ran = runner::exec(guard, Path::new("."), &none, line, timeout, 64 << 10).await;
     let (status, stdout, stderr) = match ran {
         Err(e) if e.kind() == io::ErrorKind::TimedOut => return Err(late(timeout)),
         Err(e) => return Err(failed(&format!("could not start: {e}"))),
@@ -206,10 +205,8 @@ fn failed(why: &str) -> Refusal {
 
 fn late(timeout: Duration) -> Refusal {
     let secs = timeout.as_secs_f64();
-    (
-        "GUARD_TIMEOUT",
-        format!("refused: the guard did not answer within {secs} s"),
-    )
+    let why = format!("refused: the guard did not answer within {secs} s");
+    ("GUARD_TIMEOUT", why)
 }
 
 fn cut(text: &str) -> String {
@@ -218,11 +215,9 @@ fn cut(text: &str) -> String {
 
 fn acts_on(m: Method, params: &Value) -> Option<&str> {
     let field = |k: &str| params.get(k).and_then(Value::as_str);
-    match m {
-        Method::Run | Method::Exec | Method::FileRead | Method::FileWrite | Method::CodeOutline => {
-            field("machine")
-        }
-        _ => field("name")?.split_once('/').map(|(machine, _)| machine),
+    match m.route()? {
+        Route::Machine => field("machine"),
+        Route::Name => field("name")?.split_once('/').map(|(machine, _)| machine),
     }
 }
 

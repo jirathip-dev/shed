@@ -58,6 +58,7 @@ impl Server {
             .env("SHELL", "/bin/sh")
             .env("PS1", "$ ")
             .env_remove("ENV")
+            .env_remove("SHED_ACP_HIBERNATE_AFTER")
             .envs(env.iter().copied())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

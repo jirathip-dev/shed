@@ -102,6 +102,7 @@ pub(crate) struct Launch {
     cwd: PathBuf,
     session: String,
     resumed: bool,
+    pub(crate) account: shed_accounts::env::Injected,
 }
 
 impl Launch {
@@ -159,8 +160,7 @@ impl Agent {
             args.extend(with(&record.mcp, "{file}", &file.to_string_lossy()));
         }
         let (program, args) = args.split_first().ok_or("empty agent command")?;
-        let unset = ["SHED_ACP_MCP", "SHED_ACP_META"];
-        let mut child = shed_core::runner::piped(program, args, &launch.cwd, &unset)
+        let mut child = super::launch::agent(program, args, &launch.cwd, &launch.account)
             .map_err(|e| format!("{program}: {e}"))?;
         let (Some(mut stdin), Some(stdout), Some(stderr)) =
             (child.stdin.take(), child.stdout.take(), child.stderr.take())

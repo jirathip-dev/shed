@@ -369,6 +369,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "farrier-service"
+version = "0.1.0"
+source = "git+https://github.com/jirathip-dev/farrier?rev=d34a7bb8388ef183c981dc01483634a87f0d3495#d34a7bb8388ef183c981dc01483634a87f0d3495"
+
+[[package]]
 name = "fastrand"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1008,12 +1013,24 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "farrier-service",
  "rustix",
  "serde",
  "serde_json",
  "shed-client",
  "shed-core",
  "shed-server",
+]
+
+[[package]]
+name = "shed-accounts"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shed-core",
+ "shed-proto",
+ "tokio",
 ]
 
 [[package]]
@@ -1073,6 +1090,8 @@ dependencies = [
 name = "shed-search"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
+ "shed-pattern",
  "shed-proto",
 ]
 
@@ -1085,6 +1104,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "shed-accounts",
  "shed-catalog",
  "shed-client",
  "shed-core",

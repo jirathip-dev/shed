@@ -39,7 +39,7 @@ pub(crate) trait Tty {
 }
 
 pub(crate) fn watch(
-    server: &crate::Server,
+    server: &crate::cx::Server<'_>,
     labels: BTreeMap<String, String>,
 ) -> anyhow::Result<()> {
     if !isatty(io::stdin()) || !isatty(io::stdout()) {

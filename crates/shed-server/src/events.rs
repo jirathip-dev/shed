@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use serde_json::Value;
 use shed_proto::{Event, EventKind, EventsParams, TerminalInfo};
 use tokio::net::unix::OwnedWriteHalf;
 use tokio::sync::watch;
@@ -42,6 +43,21 @@ fn line(event: &Event) -> Line {
     line.into()
 }
 
+fn mask(v: &mut Value) {
+    match v {
+        Value::String(s) => *s = shed_core::redact(s),
+        Value::Array(a) => a.iter_mut().for_each(mask),
+        Value::Object(o) => o.values_mut().for_each(mask),
+        _ => {}
+    }
+}
+
+pub(crate) fn redacted<T: serde::Serialize + serde::de::DeserializeOwned>(t: &T) -> Option<T> {
+    let mut v = serde_json::to_value(t).ok()?;
+    mask(&mut v);
+    serde_json::from_value(v).ok()
+}
+
 fn notice(method: &str, seq: u64) -> Vec<u8> {
     format!("{{\"jsonrpc\":\"2.0\",\"method\":\"{method}\",\"params\":{{\"seq\":{seq}}}}}\n")
         .into_bytes()
@@ -53,6 +69,14 @@ impl Events {
     }
 
     pub(crate) fn emit_as(&mut self, t: &TerminalInfo, kind: EventKind, replay: bool) {
+        let kind = if t.redacted {
+            let Some(kind) = redacted(&kind) else {
+                return;
+            };
+            kind
+        } else {
+            kind
+        };
         self.push(Event {
             seq: 0,
             name: t.name.clone(),

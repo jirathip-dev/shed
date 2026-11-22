@@ -9,11 +9,12 @@ use shed_script::vm::{Limit, Limits, Run, Step};
 use shed_script::{Call, Host, HostError, Program};
 use tokio::sync::Semaphore;
 
+use crate::call::{Session, json};
 use crate::proto::{
     self, Access, Acting, ActingError, Caller, ErrorCode, Method, Request, RpcError, ScriptParams,
     ScriptResult,
 };
-use crate::{Session, Shared, clock, json, links, lock};
+use crate::{Shared, clock, links, lock};
 use guard::Guard;
 
 const CODE_LIMIT: usize = 256 << 10;
@@ -229,7 +230,12 @@ impl ScriptHost<'_> {
             ..Session::default()
         };
         let request = Request::new(0, m, params);
-        let answer = Box::pin(crate::dispatch(self.registry, &mut session, &request)).await;
+        let answer = Box::pin(crate::dispatch::dispatch(
+            self.registry,
+            &mut session,
+            &request,
+        ))
+        .await;
         answer.map_err(|e| {
             let (code, _) = e.message.split_once(": ").unwrap_or((&e.message, ""));
             HostError {

@@ -6,12 +6,12 @@ release in [releases.md](releases.md#a-manual-install), followed once by `shed i
 
 ## The job
 
-`shed install` writes and starts two user jobs, read from [`dist/`](../dist/):
+`shed install` writes and starts two user jobs through farrier-service ([service.md](service.md)):
 
 | | serve | self-update, every 5 minutes |
 |---|---|---|
-| macOS | `dev.shed.serve` | `dev.shed.update` (`StartInterval` 300), log `~/Library/Logs/shed-update.log` |
-| Linux | `shed.service` | `shed-update.timer` running `shed-update.service` (oneshot), log `journalctl --user -u shed-update` |
+| macOS | `dev.shed.serve` | `dev.shed.update` (`StartInterval` 300), log `~/Library/Logs/dev.shed.update.log` |
+| Linux | `dev.shed.serve.service` | `dev.shed.update.timer` running `dev.shed.update.service` (oneshot), log `journalctl --user -u dev.shed.update` |
 
 ## One pass
 

@@ -15,7 +15,16 @@ fn outline_reads_the_file_and_stops_at_each_limit() {
         path: path.clone(),
         machine: None,
     };
-    let run = |symbols, bytes| outline(&p, &Limits { symbols, bytes });
+    let run = |symbols, bytes| {
+        outline(
+            &p,
+            &Limits {
+                symbols,
+                bytes,
+                ..shed_search::LIMITS
+            },
+        )
+    };
     let (fits, symbols, bytes) = (run(3, 30), run(2, 30), run(3, 29));
     fs::remove_file(&path).unwrap();
     let missing = run(3, 30);

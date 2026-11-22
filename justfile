@@ -1,14 +1,19 @@
 # Every CI gate, locally.
-check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch protocol lessons temp-left
+check: generate fmt clippy banned budget doc deny cap deps hygiene neutral boundary comments actionlint self-hosted arch protocol lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
-# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json).
+# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json), then the
+# goldens the CLI, ACP, server and machines tests write (crates/shed/tests/golden/, their `golden.rs`), then
+# Cargo.lock from the manifests, then README.md's command table from docs/commands/.
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
     SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
     SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
+    SHED_BLESS=1 cargo test -p shed --locked --test cli --test acp --test server --test machines golden::
+    cargo metadata --format-version 1 > /dev/null
+    python3 -I "{{justfile_directory()}}/scripts/commands.py"
 
 fmt:
     cargo fmt --all --check
@@ -61,6 +66,11 @@ neutral:
     scripts/neutral-core.sh
     ! scripts/neutral-core.sh ci/fixtures/leaky-core
 
+# No workflow or chat code in shed (#257); the fixture proves the check bites.
+boundary:
+    scripts/boundary.sh
+    ! scripts/boundary.sh ci/fixtures/boundary
+
 # The comment rule (#65); the two breaking fixtures prove the check bites, the allowed one that it passes.
 comments:
     scripts/comment-rule.py
@@ -80,26 +90,10 @@ self-hosted:
 
 # Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
 # environment only in shed_server::config, a hello only in shed_client and the server's dispatch), size
-# limits and generated files in .drover/arch.toml; one fixture breaks each. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
+# limits and generated files in .drover/arch.toml; each ci/fixtures/arch-*/ folder breaks one. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
 arch:
     drover arch-check ${ARCH_BASE:+--base "$ARCH_BASE"}
-    cd ci/fixtures/arch-layer && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-spawn && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-process && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-sleep && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-env && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-system-time && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-instant && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-size && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-generated && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-pattern && ! drover arch-check --config ../../../.drover/arch.toml
-    for d in ci/fixtures/arch-script-pure/*/; do (cd "$d" && ! drover arch-check --config ../../../../.drover/arch.toml) || exit 1; done
-    cd ci/fixtures/arch-search-fs && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-search-net && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-search-layer && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-client && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-catalog && ! drover arch-check --config ../../../.drover/arch.toml
-    cd ci/fixtures/arch-hello && ! drover arch-check --config ../../../.drover/arch.toml
+    for d in ci/fixtures/arch-*/; do (cd "$d" && ! drover arch-check --config ../../../.drover/arch.toml) || exit 1; done
 
 # A change that drops or retypes a method, field or type in docs/shed.openrpc.json raises PROTOCOL (against ARCH_BASE, else HEAD); the fixture proves the check bites.
 protocol:
