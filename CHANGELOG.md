@@ -242,6 +242,12 @@ All notable changes to this project are documented here. The format follows
   link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
   total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
   and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
+- Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
+  process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
+  prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys
+  when it shows; `send` waits for a ready state, types the text, retypes it until its start shows, presses
+  enter and waits for an accepted state, else fails `NOT_DELIVERED`. dsh-TUI is the first:
+  `providers/dsh.toml`.
 - `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
   on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
   what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out

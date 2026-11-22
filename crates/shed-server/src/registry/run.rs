@@ -160,6 +160,8 @@ impl Registry {
         let mut vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
         let Injected { set, unset } = account.unwrap_or_default();
         vars.extend(set);
+        let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
+        p.idle_after = (p.idle_after).or_else(|| self.terminal_record(agent)?.idle_after);
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
         let cmd = command(&p.cmd, &unset, mem_max_mb);
         let term = spawn(
@@ -172,7 +174,7 @@ impl Registry {
             p.acp.is_some(),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
-        if let Some(agent) = p.labels.get("agent").filter(|_| p.acp.is_none()) {
+        if let Some(agent) = agent {
             term.set_rules(self.rules(agent));
         }
         let info = TerminalInfo {
