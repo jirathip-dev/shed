@@ -381,6 +381,30 @@ mod tests {
         assert_eq!(names, ["big", "after"]);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_live_reader_within_the_ring_gets_every_text_chunk() {
+        let mut events = Events::default();
+        let (server, client) = tokio::net::UnixStream::pair().expect("pair");
+        let (_read, mut out) = server.into_split();
+        let sub = events.subscribe(EventsParams::default());
+        tokio::spawn(async move { sub.stream(&mut out, false).await });
+        let flood = 1_000;
+        for _ in 0..flood {
+            events.emit(&named("a"), text());
+        }
+        events.emit(&named("a"), EventKind::Killed);
+        let mut lines = tokio::io::BufReader::new(client).lines();
+        let mut texts = 0;
+        while let Some(line) = lines.next_line().await.expect("read") {
+            let event: Event = serde_json::from_str(&line).expect("an event");
+            if matches!(event.kind, EventKind::Killed) {
+                break;
+            }
+            texts += 1;
+        }
+        assert_eq!(texts, flood);
+    }
+
     #[test]
     fn a_subscriber_more_than_the_ring_behind_has_missed_events() {
         let mut events = Events::default();
