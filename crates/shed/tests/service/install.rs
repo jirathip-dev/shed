@@ -175,7 +175,10 @@ fn install_replaces_the_old_job_names_with_the_label_named_ones() {
     want.sort();
     assert_eq!(left, want, "only the dev.shed.* jobs, one updater");
     if cfg!(target_os = "linux") {
-        let timers = left.iter().filter(|f| f.ends_with(".timer")).count();
+        let timers = left
+            .iter()
+            .filter(|f| Path::new(f).extension().is_some_and(|e| e == "timer"))
+            .count();
         assert_eq!(timers, 1, "{left:?}");
     }
 }
