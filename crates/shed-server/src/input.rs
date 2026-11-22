@@ -59,7 +59,7 @@ pub(crate) enum Input {
 }
 
 async fn write(term: Arc<Terminal>, bytes: Vec<u8>) -> Result<(), RpcError> {
-    let wrote = crate::blocking(move || term.write(&bytes)).await?;
+    let wrote = crate::call::blocking(move || term.write(&bytes)).await?;
     wrote.map_err(|e| RpcError::new(ErrorCode::Internal, e))
 }
 
@@ -114,7 +114,12 @@ mod tests {
         method: Method,
         params: Value,
     ) -> Result<Value, RpcError> {
-        crate::input(registry, method, &Request::new(1, method, params)).await
+        let mut session = crate::call::Session {
+            protocol: Some(shed_proto::PROTOCOL),
+            ..crate::call::Session::default()
+        };
+        let request = Request::new(1, method, params);
+        crate::dispatch::dispatch(registry, &mut session, &request).await
     }
 
     async fn shows(term: &Terminal, text: &str) {

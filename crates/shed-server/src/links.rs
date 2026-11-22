@@ -7,11 +7,12 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
+use crate::call::blocking;
 use crate::machines::{self, Machine};
 use crate::proto::{
     ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
 };
-use crate::{Error, Shared, blocking, lock};
+use crate::{Error, Shared, lock};
 use shed_client::Conn;
 
 #[derive(Default)]
