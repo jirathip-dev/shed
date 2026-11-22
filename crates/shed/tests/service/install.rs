@@ -36,7 +36,7 @@ fn loads(home: &Path) -> usize {
     ctl_log(home).lines().filter(|l| l.contains(verb)).count()
 }
 
-fn update_files(home: &Path) -> Vec<PathBuf> {
+pub fn update_files(home: &Path) -> Vec<PathBuf> {
     if cfg!(target_os = "macos") {
         vec![home.join("Library/LaunchAgents/dev.shed.update.plist")]
     } else {
@@ -139,15 +139,13 @@ fn install_writes_and_loads_both_jobs_once_and_refuses_other_contents_without_fo
     }
 }
 
-#[cfg(target_os = "linux")]
 #[test]
-fn install_replaces_the_old_unit_names_with_the_label_named_ones() {
-    let home = temp_dir("oom");
-    let units = home.join(".config/systemd/user");
-    std::fs::create_dir_all(&units).expect("unit dir");
-    let old = ["shed.service", "shed-update.service", "shed-update.timer"].map(|u| units.join(u));
+fn install_replaces_the_old_job_names_with_the_label_named_ones() {
+    let home = temp_dir("old-names");
+    let old = old_files(&home);
+    std::fs::create_dir_all(old.first().and_then(|f| f.parent()).expect("dir")).expect("job dir");
     for file in &old {
-        std::fs::write(file, "[Service]\nExecStart=shed serve\n").expect("old unit");
+        std::fs::write(file, "old\n").expect("old job");
     }
     let out = shed(&home, &["install"]);
     assert!(out.status.success(), "{out:?}");
@@ -155,14 +153,41 @@ fn install_replaces_the_old_unit_names_with_the_label_named_ones() {
         assert!(!file.exists(), "{} removed", file.display());
     }
     let log = ctl_log(&home);
-    assert!(
-        log.contains("systemctl --user disable --now shed.service\n"),
-        "{log}"
-    );
-    assert!(
-        log.contains("disable --now shed-update.timer shed-update.service\n"),
-        "{log}"
-    );
-    let unit = std::fs::read_to_string(job_file(&home)).expect("the unit");
-    assert!(unit.contains("\nOOMPolicy=continue\n"), "{unit}");
+    let stops = if cfg!(target_os = "macos") {
+        ["shed", "shed-update"].map(|l| format!("launchctl bootout gui/{}/{l}\n", uid()))
+    } else {
+        ["shed.service", "shed-update.timer shed-update.service"]
+            .map(|u| format!("systemctl --user disable --now {u}\n"))
+    };
+    for stop in stops {
+        assert!(log.contains(&stop), "{stop} in {log}");
+    }
+    let dir = old.first().and_then(|f| f.parent()).expect("dir");
+    let mut left: Vec<String> = std::fs::read_dir(dir)
+        .expect("job dir")
+        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    let mut want: Vec<String> = std::iter::once(job_file(&home))
+        .chain(update_files(&home))
+        .map(|f| f.file_name().expect("name").to_string_lossy().into_owned())
+        .collect();
+    want.sort();
+    assert_eq!(left, want, "only the dev.shed.* jobs, one updater");
+    if cfg!(target_os = "linux") {
+        let timers = left.iter().filter(|f| f.ends_with(".timer")).count();
+        assert_eq!(timers, 1, "{left:?}");
+    }
+}
+
+pub fn old_files(home: &Path) -> Vec<PathBuf> {
+    if cfg!(target_os = "macos") {
+        let agents = home.join("Library/LaunchAgents");
+        vec![agents.join("shed.plist"), agents.join("shed-update.plist")]
+    } else {
+        let units = home.join(".config/systemd/user");
+        ["shed.service", "shed-update.service", "shed-update.timer"]
+            .map(|u| units.join(u))
+            .into()
+    }
 }

@@ -4,6 +4,7 @@
 
 mod common;
 
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -38,6 +39,14 @@ impl Host {
     fn new(name: &str) -> Self {
         let dir = temp_dir(name);
         std::fs::create_dir(dir.join("bin")).expect("bin");
+        std::fs::create_dir(dir.join("fake-bin")).expect("fake bin");
+        for ctl in ["launchctl", "systemctl"] {
+            let file = dir.join("fake-bin").join(ctl);
+            let script =
+                "#!/bin/sh\necho \"$(basename \"$0\") $*\" >> \"$(dirname \"$0\")/ctl.log\"\n";
+            std::fs::write(&file, script).expect("fake ctl");
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).expect("chmod");
+        }
         let exe = dir.join("bin/shed");
         std::fs::copy(SHED, &exe).expect("the live binary");
         let repo = dir.join("repo");
@@ -87,6 +96,12 @@ impl Host {
         let releases = format!("file://{}", self.dir.join("releases").display());
         let mut shed = Command::new(&self.exe);
         shed.arg("--dir").arg(&self.dir).args(args);
+        let path = std::env::var("PATH").unwrap_or_default();
+        let path = format!("{}:{path}", self.dir.join("fake-bin").display());
+        shed.env("HOME", &self.dir)
+            .env("XDG_RUNTIME_DIR", &self.dir)
+            .env("PATH", path)
+            .env_remove("XDG_CONFIG_HOME");
         shed.env("SHED_UPDATE_REPO", self.dir.join("repo"))
             .env("SHED_UPDATE_RELEASES", releases)
             .stdout(Stdio::piped())
@@ -271,5 +286,52 @@ fn one_pass_installs_mains_release_and_hands_serve_over_keeping_the_terminals() 
     assert!(
         says(&again).contains(&format!("up to date on {}", host.main)),
         "{again:?}"
+    );
+}
+
+fn update_jobs(dir: &Path, label: &str) -> Vec<PathBuf> {
+    if cfg!(target_os = "macos") {
+        vec![dir.join(format!("Library/LaunchAgents/{label}.plist"))]
+    } else {
+        let units = dir.join(".config/systemd/user");
+        ["service", "timer"]
+            .map(|ext| units.join(format!("{label}.{ext}")))
+            .into()
+    }
+}
+
+#[test]
+fn a_pass_from_a_build_with_the_old_job_names_leaves_only_the_dev_shed_update_job() {
+    let host = Host::new("update-jobs");
+    let old = update_jobs(&host.dir, "shed-update");
+    std::fs::create_dir_all(old.first().and_then(|f| f.parent()).expect("dir")).expect("job dir");
+    for file in &old {
+        std::fs::write(file, "old\n").expect("old job");
+    }
+    let stamped = host.stamped();
+    host.release(&format!("build-{}", host.main), &stamped, None);
+
+    let out = host.shed(&["self-update"]);
+    assert!(out.status.success(), "{out:?}");
+    let line = format!("updated {BUILD} -> {}", host.main);
+    assert!(says(&out).contains(&line), "{out:?}");
+    for file in &old {
+        assert!(!file.exists(), "{} removed", file.display());
+    }
+    let exe = host.exe.display();
+    for file in update_jobs(&host.dir, "dev.shed.update") {
+        let text = std::fs::read_to_string(&file).expect("the dev.shed.update job");
+        assert!(
+            text.contains(&format!("{exe}</string>\n    <string>self-update<"))
+                || text.contains(&format!("ExecStart={exe} self-update\n"))
+                || text.contains("OnUnitActiveSec=300\n"),
+            "{text}"
+        );
+    }
+    assert!(
+        !update_jobs(&host.dir, "dev.shed.serve")
+            .iter()
+            .any(|f| f.exists()),
+        "a pass leaves the serve job alone"
     );
 }
