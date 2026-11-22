@@ -32,8 +32,24 @@ fn each_built_in_record_is_one_file_and_gemini_has_one_id() {
         [
             ("claude-acp", "built-in"),
             ("codex-acp", "built-in"),
+            ("dsh", "built-in"),
             ("gemini", "built-in")
         ]
+    );
+    let dsh = catalog.by_agent("dsh").and_then(|p| p.terminal.clone());
+    let dsh = dsh.unwrap_or_default();
+    assert_eq!(dsh.processes, words(&["dsh-tui"]));
+    assert_eq!(dsh.version.map(|v| v.pin).as_deref(), Some("0.17.0"));
+    let wizard = dsh.wizard.unwrap_or_default();
+    assert_eq!((wizard.keys, wizard.settle), (words(&["esc"]), 2));
+    assert_eq!(
+        (dsh.ready.secs, dsh.echo.chars, dsh.echo.attempts),
+        (90, 20, 3)
+    );
+    assert!(
+        catalog
+            .by_agent("claude")
+            .is_some_and(|p| p.terminal.is_none())
     );
     let gemini = catalog.by_agent("gemini").cloned().unwrap_or_default();
     assert_eq!(gemini.id, "gemini");

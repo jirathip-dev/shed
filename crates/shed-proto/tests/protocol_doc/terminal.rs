@@ -28,6 +28,7 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         mem_max_mb: None,
         redacted: false,
         account: None,
+        auto: false,
     }
 }
 

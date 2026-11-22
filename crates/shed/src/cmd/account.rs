@@ -45,6 +45,13 @@ enum Action {
         provider: String,
         name: String,
     },
+    Use {
+        provider: String,
+        #[arg(required_unless_present = "clear", conflicts_with = "clear")]
+        name: Option<String>,
+        #[arg(long)]
+        clear: bool,
+    },
 }
 
 fn table(list: &[Account]) -> String {
@@ -58,7 +65,9 @@ fn table(list: &[Account]) -> String {
         });
         let state = format!("{:?}", a.state).to_lowercase();
         let who = a.who.as_deref().unwrap_or("-");
-        let (account, usage) = (format!("{}/{}", a.provider, a.name), usage.join(","));
+        let preferred = if a.preferred { " (preferred)" } else { "" };
+        let account = format!("{}/{}{preferred}", a.provider, a.name);
+        let usage = usage.join(",");
         writeln!(out, "{account}  {state}  {who}  {usage}  {token}  {}", a.line).ok();
     }
     out
@@ -75,6 +84,20 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         Action::Rm { provider, name } => {
             shed.account_rm(&provider, &name)?;
             out::line(format_args!("{provider}/{name} removed"));
+            return Ok(ExitCode::SUCCESS);
+        }
+        Action::Use { provider, name, .. } => {
+            let moves = shed.account_use(&provider, name.as_deref())?;
+            cx.print(&moves, || {
+                let mut out = String::new();
+                for t in &moves.moved {
+                    writeln!(out, "{t}  moved").ok();
+                }
+                for s in &moves.stayed {
+                    writeln!(out, "{}  stayed: {}", s.terminal, s.why).ok();
+                }
+                out
+            })?;
             return Ok(ExitCode::SUCCESS);
         }
         Action::Add {

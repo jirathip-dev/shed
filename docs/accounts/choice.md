@@ -2,7 +2,8 @@
 
 `run`'s `account` may be `auto` (`shed run --acp <id> --account auto`). shed then picks among the provider's
 named accounts, never `default` (the owner's own folder: a caller that wants it names it). A candidate is
-`ready` and its folder holds no setup; the one with the most headroom wins, then the one with fewer runs, then
+`ready` and its folder holds no setup; the preferred one (`shed account use`) wins, then the one with the most
+headroom, then the one with fewer runs, then
 by name. Headroom is 100 less the used percentage of its fullest usage window; a window past its reset reads
 as 0 % used, and an account never read has all of it. `account.ls` lists each provider's accounts in that
 order, after `default`. With no candidate the run is refused: `NO_ACCOUNT` without a named account,
@@ -23,9 +24,9 @@ When a lane on `auto` hits a limit (the record's limit line, or the stream drive
 4. it sends one prompt to go on, and emits `account` with `was` (the old account) and `why: limit`.
 
 A `rate-limited` lane on `auto` picks again when its next turn starts: if another account is ready the turn
-starts there, else on the same account. shed starts no turn by itself, and moves a lane only on a limit
-(moving a healthy one would cost it its prompt cache). An agent whose record has no `session_files` never
-moves: its lane stays `rate-limited`. A fallback to another agent (Claude, then Codex) is the caller's.
+starts there, else on the same account. shed starts no turn by itself, and moves a lane only on a limit or on
+`account use` ([accounts.md](accounts.md)). An agent whose record has no `session_files` never moves: its lane
+stays `rate-limited`. A fallback to another agent (Claude, then Codex) is the caller's.
 
 The live check that a Claude Code session copied between two folders loads is
 `crates/shed-accounts/tests/live_session.rs` (ignored by default; its header has the command).

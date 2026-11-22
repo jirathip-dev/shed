@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt as _;
@@ -46,8 +47,15 @@ pub(crate) async fn connection(
         if line.trim().is_empty() {
             continue;
         }
-        let (response, changed) =
-            registry::answering(respond(&registry, &mut session, &line)).await;
+        let answering = registry::answering(respond(&registry, &mut session, &line));
+        let (response, changed) = if scripted(&line) {
+            tokio::select! {
+                answered = answering => answered,
+                () = gone(out.as_ref()) => return,
+            }
+        } else {
+            answering.await
+        };
         let flushed = lock(&registry).saver.flushed_to(changed);
         flushed.await;
         if let (Some(response), Some(out)) = (response, &mut out) {
@@ -63,6 +71,24 @@ pub(crate) async fn connection(
         {
             streaming.spawn(stream.run(out, session.beats));
         }
+    }
+}
+
+fn scripted(line: &str) -> bool {
+    line.contains("\"script\"")
+        && serde_json::from_str::<Request>(line).is_ok_and(|r| r.method == Method::Script.name())
+}
+
+async fn gone(out: Option<&tokio::net::unix::OwnedWriteHalf>) {
+    let Some(out) = out else {
+        return std::future::pending().await;
+    };
+    loop {
+        let ready = out.ready(tokio::io::Interest::WRITABLE).await;
+        if ready.map_or(true, tokio::io::Ready::is_write_closed) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 

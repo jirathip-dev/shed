@@ -6,6 +6,7 @@ mod autostart;
 #[path = "../common/mod.rs"]
 mod common;
 mod doctor;
+mod drift;
 mod install;
 
 use std::os::unix::fs::PermissionsExt as _;

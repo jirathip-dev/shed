@@ -24,6 +24,7 @@ pub mod providers;
 mod proxy;
 mod registry;
 mod screen;
+mod script;
 pub mod serve;
 mod stats;
 

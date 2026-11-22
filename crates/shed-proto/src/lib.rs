@@ -28,6 +28,8 @@ pub mod method;
 pub use method::*;
 pub mod screen;
 pub use screen::*;
+pub mod script;
+pub use script::*;
 pub mod terminal;
 pub use terminal::*;
 
