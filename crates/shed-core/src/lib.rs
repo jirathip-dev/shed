@@ -7,12 +7,14 @@ pub mod clock;
 pub mod history;
 pub mod keys;
 pub mod proctree;
+pub mod redact;
 pub mod runner;
 pub mod screen;
 pub mod terminal;
 
 pub use history::History;
 pub use proctree::Usage;
+pub use redact::redact;
 pub use screen::{Color, Pen, Report, Run, STATES, Screen, Size, Snapshot};
 pub use terminal::{Detached, Rule, Terminal, Wake};
 

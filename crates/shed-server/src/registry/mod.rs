@@ -95,6 +95,14 @@ impl Entry {
             resources: self.resources,
             ..self.info.clone()
         };
+        if info.redacted {
+            info.reported = info.reported.as_ref().and_then(crate::events::redacted);
+            info.records = info
+                .records
+                .iter()
+                .filter_map(crate::events::redacted)
+                .collect();
+        }
         let idle = ["done", "idle", "hibernated"];
         let reported = info.reported.as_ref().map(|r| r.state.as_str());
         if let Some(s) =

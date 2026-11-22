@@ -26,6 +26,7 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         session: None,
         parent: Some(lead()),
         mem_max_mb: None,
+        redacted: false,
     }
 }
 

@@ -379,7 +379,8 @@ pub enum State {
 /// and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
 /// slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
 /// tokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with
-/// `outlive` and `notify` as `run` set them.
+/// `outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,
+/// `wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalInfo {
@@ -423,4 +424,7 @@ pub struct TerminalInfo {
     /// The most memory its process tree may hold, in MB, if limited.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mem_max_mb: Option<u64>,
+    /// Its screen passes through `redact` on every read, and `attach` is refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub redacted: bool,
 }

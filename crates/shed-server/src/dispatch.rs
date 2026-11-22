@@ -181,10 +181,23 @@ mod tests {
     use crate::{HEARTBEAT, clock, temp_dir};
     use tokio::net::unix::OwnedWriteHalf;
 
-    async fn peer(name: &str, beat: bool) -> (tokio::task::JoinHandle<()>, OwnedWriteHalf) {
+    type Lines = tokio::io::Lines<tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>>;
+
+    fn registry(name: &str) -> Registry {
         let dir = temp_dir(name);
         let reg = Registry::load(&dir.join("state.json"), &dir.join("shed.sock"), Vec::new());
-        let registry = Arc::new(Mutex::new(reg.expect("a registry")));
+        reg.expect("a registry")
+    }
+
+    async fn peer(name: &str, beat: bool) -> (tokio::task::JoinHandle<()>, OwnedWriteHalf) {
+        let (conn, _, write) = served(Arc::new(Mutex::new(registry(name))), beat).await;
+        (conn, write)
+    }
+
+    async fn served(
+        registry: Shared,
+        beat: bool,
+    ) -> (tokio::task::JoinHandle<()>, Lines, OwnedWriteHalf) {
         let (server, client) = tokio::net::UnixStream::pair().expect("pair");
         let conn = tokio::spawn(connection(registry, Arc::default(), server));
         let (read, mut write) = client.into_split();
@@ -207,7 +220,80 @@ mod tests {
             let heartbeat = shed_client::notification(Method::Heartbeat, &empty()).expect("json");
             write.write_all(&heartbeat).await.expect("heartbeat sent");
         }
-        (conn, write)
+        (conn, lines, write)
+    }
+
+    async fn call(peer: &mut (Lines, OwnedWriteHalf), method: Method, params: Value) -> Value {
+        let mut line = serde_json::to_vec(&Request::new(2, method, params)).expect("json");
+        line.push(b'\n');
+        peer.1.write_all(&line).await.expect("sent");
+        next(&mut peer.0).await
+    }
+
+    async fn next(lines: &mut Lines) -> Value {
+        let line = lines.next_line().await.expect("read").expect("a line");
+        assert!(!line.contains(TOKEN), "{line}");
+        serde_json::from_str(&line).expect("json")
+    }
+
+    const TOKEN: &str = "sk-ant-oat01-abc123def456ghi789";
+
+    #[tokio::test]
+    async fn a_redacted_terminal_shows_no_token_on_any_read_path() {
+        let mut reg = registry("redacted");
+        let (head, tail) = TOKEN.split_at(12);
+        let cmd = [
+            "sh",
+            "-c",
+            "printf 'paste %s%s here\\n' \"$0\" \"$1\"; exec sleep 60",
+            head,
+            tail,
+        ];
+        let run = serde_json::json!({"name": "login", "cwd": "/", "cmd": cmd});
+        reg.run(serde_json::from_value(run).expect("run"))
+            .expect("run");
+        reg.mark_redacted("login");
+        let reg = Arc::new(Mutex::new(reg));
+        let open = || async {
+            let (_, lines, write) = served(Arc::clone(&reg), false).await;
+            (lines, write)
+        };
+        let mut peer = open().await;
+        let wait = |output: &str, timeout: u64| serde_json::json!({"name": "login", "output": output, "timeout": timeout});
+        let shown = call(&mut peer, Method::Wait, wait("paste .redacted. here", 10)).await;
+        assert_eq!(shown["result"]["outcome"], "matched", "{shown}");
+        let raw = call(&mut peer, Method::Wait, wait("abc123", 0)).await;
+        assert_eq!(raw["result"]["outcome"], "timeout", "{raw}");
+        let read = call(
+            &mut peer,
+            Method::Read,
+            serde_json::json!({"name": "login"}),
+        )
+        .await;
+        let text = read["result"]["text"].as_str().unwrap_or_default();
+        assert!(text.contains("paste [redacted] here"), "{read}");
+        let attach = call(
+            &mut peer,
+            Method::Attach,
+            serde_json::json!({"name": "login"}),
+        )
+        .await;
+        assert_eq!(attach["error"]["code"], -32006, "{attach}");
+        let mut watch = open().await;
+        let at = serde_json::json!({"terminal": "login"});
+        call(&mut watch, Method::ScreenWatch, at).await;
+        let screen = next(&mut watch.0).await.to_string();
+        assert!(screen.contains("paste [redacted] here"), "{screen}");
+        let mut events = open().await;
+        call(&mut events, Method::Events, serde_json::json!({})).await;
+        let note = serde_json::json!({"name": "login", "state": "blocked", "note": TOKEN});
+        call(&mut peer, Method::State, note).await;
+        let event = next(&mut events.0).await;
+        assert_eq!(event["note"], "[redacted]", "{event}");
+        lock(&reg)
+            .live("login")
+            .map(|t| t.kill(Duration::ZERO))
+            .ok();
     }
 
     #[tokio::test(start_paused = true)]
