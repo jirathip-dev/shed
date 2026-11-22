@@ -104,10 +104,6 @@ impl Events {
         if matches!(event.kind, EventKind::Text { .. }) {
             let ring = log.texts.entry(event.name.clone()).or_default();
             ring.push_back((event, bytes));
-            if self.seq.is_multiple_of(SWEEP) {
-                let floor = self.seq.saturating_sub(RING);
-                log.texts.values_mut().for_each(|ring| trim(ring, floor));
-            }
         } else {
             if u64::try_from(log.events.len()).unwrap_or(u64::MAX) >= RING
                 && let Some((gone, _)) = log.events.pop_front()
@@ -117,6 +113,10 @@ impl Events {
                 (log.texts).retain(|_, ring| ring.back().is_some_and(|(e, _)| e.seq > evicted));
             }
             log.events.push_back((event, bytes));
+        }
+        if self.seq.is_multiple_of(SWEEP) {
+            let floor = self.seq.saturating_sub(RING);
+            log.texts.values_mut().for_each(|ring| trim(ring, floor));
         }
         self.last.send_replace(self.seq);
     }
@@ -331,6 +331,20 @@ mod tests {
         assert!(texts.ends_with(&recent), "every chunk of the last ring");
         let bound = RING + SWEEP + 2 * u64::try_from(TEXT_RING).expect("small");
         assert!(u64::try_from(texts.len()).is_ok_and(|n| n <= bound));
+    }
+
+    #[test]
+    fn a_text_ring_stays_bounded_whatever_kind_each_sweep_lands_on() {
+        let mut events = Events::default();
+        for _ in 0..40 {
+            for _ in 1..SWEEP {
+                events.emit(&named("a"), text());
+            }
+            events.emit(&named("a"), EventKind::Killed);
+        }
+        let held = lock(&events.log).texts.get("a").map_or(0, VecDeque::len);
+        let bound = RING + SWEEP + u64::try_from(TEXT_RING).expect("small");
+        assert!(u64::try_from(held).is_ok_and(|n| n <= bound), "{held} held");
     }
 
     #[test]
