@@ -184,6 +184,7 @@ async fn listen(
     }
     tokio::spawn(registry::keep_saved(Arc::clone(&registry)));
     tokio::spawn(sample(Arc::clone(&registry), sample_every));
+    tokio::spawn(crate::accounts::beat(Arc::clone(&registry)));
     let first = record_stats(&registry).await;
     let recorder = Arc::clone(&registry);
     tokio::spawn(async move {

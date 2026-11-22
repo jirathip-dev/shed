@@ -3,9 +3,206 @@
   "info": {
     "title": "shed",
     "version": "0.0.0",
-    "x-protocol": 4
+    "x-protocol": 5
   },
   "methods": [
+    {
+      "name": "account.add",
+      "description": "Make an account: an empty config folder of mode 0700 under `accounts/<provider>/<name>`, or with `folder` a link to that existing folder, adopted in place; a folder holding one of the record's `setup_files` is refused (`ACCOUNT_SETUP`). `token_file`, a file of mode 0600 on this host, is copied in as the account's setup token. The same call twice is one account.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`[a-z0-9-]+`."
+          }
+        },
+        {
+          "name": "folder",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Adopt this existing folder in place, by link."
+          }
+        },
+        {
+          "name": "token_file",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A setup token file on this host (0600), copied in."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Account"
+        }
+      }
+    },
+    {
+      "name": "account.login",
+      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Login"
+        }
+      }
+    },
+    {
+      "name": "account.ls",
+      "description": "The accounts, per provider `default` first, then in the order `auto` picks: what shed last read of each, its token's dates (never the token), the setup files its folder holds and the terminals on it. A reading older than the record's `usage.fresh` is read again in the background.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this provider's."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Account"
+          }
+        }
+      }
+    },
+    {
+      "name": "account.rm",
+      "description": "The record's `logout`, then the account's folder (an adopted one: only its link), its token and its readings; refused for `default` and while its login runs.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "account.status",
+      "description": "Run the record's status command and usage probe for the account now, and keep what they say.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Account"
+        }
+      }
+    },
+    {
+      "name": "account.use",
+      "description": "Make a named, ready account the provider's preferred one, which `auto` picks first while it is ready and not limited, and move every live ACP or stream lane of the provider on `auto` or `default` to it: the lane stops its agent (a busy one once its tool call ends), copies the session's `session_files` and loads the session on the account, now on `auto`; a lane that was mid-turn or rate-limited gets one prompt to go on. Refused for `default`, an unknown, signed-out, limited or set-up account. Without `name` it only drops the preference.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The named account to prefer and move the lanes to; none drops the preference."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/AccountMoves"
+        }
+      }
+    },
     {
       "name": "acp.model",
       "description": "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.",
@@ -97,6 +294,79 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/TerminalInfo"
+        }
+      }
+    },
+    {
+      "name": "code.find",
+      "description": "The files under `root` that best answer `query`'s words, best first: the top 10 (`top`, at most 50) of a stated `total`. A word earns points in a file's name, its folders, its symbols' names and its lines; the sum is multiplied by the words that earned any and halved for a test. Each file names its score, short `why` reasons and the symbols that earned them. The walk and its limits are `code.grep`'s. `machine` searches there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "root",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "A folder or one file."
+          }
+        },
+        {
+          "name": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Words; a file is ranked by how many of them it answers, and where."
+          }
+        },
+        {
+          "name": "top",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0,
+            "description": "How many files to return: default 10, at most 50."
+          }
+        },
+        {
+          "name": "hidden",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Also dot files and dot folders, never `.git`.",
+            "default": false
+          }
+        },
+        {
+          "name": "glob",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`*.rs` keeps, `!tests/` drops, in `.gitignore` syntax."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/FindResult"
         }
       }
     },
@@ -612,6 +882,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start`, `limit` or `owner`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
           }
         ],
         "description": "`emit` params."
@@ -619,7 +919,7 @@
     },
     {
       "name": "events",
-      "description": "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{\"jsonrpc\":\"2.0\",\"method\":\"reset\",\"params\":{\"seq\":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{\"jsonrpc\":\"2.0\",\"method\":\"lagged\",\"params\":{\"seq\":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{\"jsonrpc\":\"2.0\",\"method\":\"heartbeat\"}` lines when idle.",
+      "description": "Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events, and each terminal's last 256 `text` chunks before them), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{\"jsonrpc\":\"2.0\",\"method\":\"reset\",\"params\":{\"seq\":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{\"jsonrpc\":\"2.0\",\"method\":\"lagged\",\"params\":{\"seq\":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{\"jsonrpc\":\"2.0\",\"method\":\"heartbeat\"}` lines when idle.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -660,7 +960,7 @@
     },
     {
       "name": "exec",
-      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
+      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -709,6 +1009,17 @@
               "maximum": 255
             },
             "description": "Bytes fed to its stdin, then closed."
+          }
+        },
+        {
+          "name": "env",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Variables for it, over the server's own. Kept in memory only."
           }
         },
         {
@@ -776,6 +1087,19 @@
           }
         },
         {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "`file.write`: the file's mode (e.g. `0o600`), set before any byte is written; default the old file's."
+          }
+        },
+        {
           "name": "machine",
           "required": false,
           "schema": {
@@ -802,7 +1126,7 @@
     },
     {
       "name": "file.write",
-      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.",
+      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept, or `mode` when given (the temp file has it before any byte is written). `machine` writes it there.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -843,6 +1167,19 @@
               }
             ],
             "description": "`file.read`: only these lines."
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "`file.write`: the file's mode (e.g. `0o600`), set before any byte is written; default the old file's."
           }
         },
         {
@@ -1103,8 +1440,37 @@
       }
     },
     {
+      "name": "machine.add",
+      "description": "Add a machine to the config file, as `shed machine add` does, and start holding its link; the same name and target again is the same machine, another target under a taken name `INVALID_PARAMS`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The machine's name."
+          }
+        },
+        {
+          "name": "target",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Its `ssh` target, `[user@]host`."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "machine.links",
-      "description": "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.",
+      "description": "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, why it is down, and `down_since`, when it last left `up` (or was first tried; a retry does not move it); once up, the shed there (`hello`) and the machine's `os`, `arch` and `home`. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `terminal.procs`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -1118,8 +1484,29 @@
       }
     },
     {
+      "name": "machine.rm",
+      "description": "Remove a machine from the config file, as `shed machine rm` does, and drop its held link; removing one that is not there is a no-op.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "machine.stats",
-      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.",
+      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1133,6 +1520,30 @@
             "format": "uint64",
             "minimum": 0,
             "description": "Add the kept samples taken after this time (unix seconds) as `history`."
+          }
+        },
+        {
+          "name": "top",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "Add the processes using the most CPU and the most memory, this many of each."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ask this machine, over its held link."
           }
         }
       ],
@@ -1311,7 +1722,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1551,6 +1962,17 @@
             "maximum": 65535,
             "description": "Columns; default the server's `$SHED_SIZE`, else 200."
           }
+        },
+        {
+          "name": "account",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing."
+          }
         }
       ],
       "result": {
@@ -1595,6 +2017,73 @@
       },
       "x-stream": {
         "$ref": "#/components/schemas/ScreenUpdate"
+      }
+    },
+    {
+      "name": "script",
+      "description": "Run a program in shed's JavaScript subset (the body of an async function, at most 256 KiB) beside the terminals: `shed.<method>(params)` calls a method by its wire name through the same path a request takes, and what the program returns is `result`. A read (`ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs`) is called as it is; any other method that acts is first shown to the guard of `[script]` in the server's config file (one process for the run, one JSON line each way per call, or with `guard_per = \"call\"` a process per call), and with none configured it is refused; streams, a person's input and the connection's own methods are refused (`NOT_IN_SCRIPT`). `caller` goes to the guard unchanged. Steps, live memory, calls, logs and the deadline (`timeout`, 60 s, at most 600) bound a run. The reply is `{result, logs, calls, acting, ms}` or, when the program failed, `{error, …}`; `acting` lists every guarded call with its params and its result or error. With `check` it is parsed and compiled only. Closing the connection cancels the calls in flight; `machine` runs it there, over the held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "code",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The program: the body of an async function, in shed's JavaScript subset; at most 256 KiB."
+          }
+        },
+        {
+          "name": "timeout",
+          "required": false,
+          "schema": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Stop it after this many seconds: 60 unless given, at most 600."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Run it on this machine's server, over its held link."
+          }
+        },
+        {
+          "name": "caller",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Caller"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who sends it, as the sender says; the guard gets it unchanged."
+          }
+        },
+        {
+          "name": "check",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Parse and compile only: nothing runs, no call is made, no guard is asked."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/ScriptResult"
+        }
       }
     },
     {
@@ -1877,6 +2366,30 @@
       }
     },
     {
+      "name": "terminal.procs",
+      "description": "The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Proc"
+          }
+        }
+      }
+    },
+    {
       "name": "terminal.readonly",
       "description": "Mark the terminal read-only for this connection: from then on, until it closes, the connection's `send`, `keys`, `resize`, `attach`, `terminal.input`, `terminal.keys` and `terminal.resize` to the terminal are refused with `READONLY`. The connection may resize only the terminals it has not marked.",
       "paramStructure": "by-name",
@@ -2033,9 +2546,314 @@
   },
   "components": {
     "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          },
+          "name": {
+            "type": "string",
+            "description": "`[a-z0-9-]+`, or `default`: the CLI's own default folder."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its config folder; none for `default`."
+          },
+          "adopted": {
+            "type": "boolean",
+            "description": "An adopted folder, linked in: `account.rm` removes the link, never the folder.",
+            "default": false
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccountState",
+            "description": "Signed out, ready, limited or drifted."
+          },
+          "who": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The email or organisation the status command reports."
+          },
+          "line": {
+            "type": "string",
+            "description": "The status on one line, redacted.",
+            "default": ""
+          },
+          "drift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Drift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether its keychain item and credentials file agree; none without a check."
+          },
+          "checked_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When the status command last ran."
+          },
+          "limited_until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "While `state` is `limited`: when the limit ends."
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Usage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last usage reading."
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its setup token's dates, never the token."
+          },
+          "setup": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The record's `setup_files` found in its folder; not empty: no run.",
+            "default": []
+          },
+          "runs": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The terminals on it now.",
+            "default": 0
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its login terminal, while one runs."
+          },
+          "preferred": {
+            "type": "boolean",
+            "description": "`auto` picks it first while it is ready (`account.use`)."
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "state"
+        ],
+        "description": "An account: a provider's login in a config folder shed keeps, and what shed last read of it."
+      },
+      "AccountState": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "signed-out",
+            "description": "Neither signed in nor holding a token."
+          },
+          {
+            "type": "string",
+            "const": "ready",
+            "description": "The status command says signed in, or it has a token."
+          },
+          {
+            "type": "string",
+            "const": "limited",
+            "description": "It hit a limit."
+          },
+          {
+            "type": "string",
+            "const": "drifted",
+            "description": "Its keychain item and credentials file hold different logins."
+          }
+        ],
+        "description": "An account's state."
+      },
+      "Drift": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "clear",
+            "description": "They agree, or one of them is missing."
+          },
+          {
+            "type": "string",
+            "const": "drifted",
+            "description": "Both are there and differ."
+          },
+          {
+            "type": "string",
+            "const": "unknown",
+            "description": "The keychain could not be read."
+          }
+        ],
+        "description": "What the drift check found."
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Window"
+            },
+            "description": "Its windows."
+          },
+          "read_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was read."
+          }
+        },
+        "required": [
+          "windows",
+          "read_at"
+        ],
+        "description": "A usage reading."
+      },
+      "Window": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "used_pct": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The percentage used."
+          },
+          "resets_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it resets."
+          }
+        },
+        "required": [
+          "id",
+          "used_pct"
+        ],
+        "description": "One usage window."
+      },
+      "TokenInfo": {
+        "type": "object",
+        "properties": {
+          "saved_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was saved."
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it lapses, by the record's `token.days`."
+          },
+          "rejected": {
+            "type": "boolean",
+            "description": "The upstream refused it.",
+            "default": false
+          }
+        },
+        "required": [
+          "saved_at"
+        ],
+        "description": "A setup token's dates."
+      },
+      "Login": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": "string",
+            "description": "The redacted terminal the login runs in."
+          }
+        },
+        "required": [
+          "terminal"
+        ],
+        "description": "`account.login`'s result."
+      },
       "Empty": {
         "type": "object",
         "additionalProperties": false
+      },
+      "AccountMoves": {
+        "type": "object",
+        "properties": {
+          "moved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The lanes told to move."
+          },
+          "stayed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Stayed"
+            },
+            "description": "The provider's terminals that stay, and why."
+          }
+        },
+        "required": [
+          "moved",
+          "stayed"
+        ],
+        "description": "`account.use`'s result."
+      },
+      "Stayed": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": "string",
+            "description": "The terminal."
+          },
+          "why": {
+            "type": "string",
+            "description": "Why it stays."
+          }
+        },
+        "required": [
+          "terminal",
+          "why"
+        ],
+        "description": "A terminal `account.use` leaves where it is."
       },
       "AgentInfo": {
         "type": "object",
@@ -2288,6 +3106,110 @@
               }
             ],
             "description": "The stream driver's data: the agent's own JSON-lines mode.",
+            "default": null
+          },
+          "setup_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The files and folders that make a config folder a setup: an account's folder holds none of them.",
+            "default": []
+          },
+          "session_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "A session's files under the config folder, `{session}` standing for its id.",
+            "default": []
+          },
+          "default_folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The CLI's own config folder, `~/` for home: where `default`'s sessions are copied from, never to.",
+            "default": null
+          },
+          "scrub": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables, besides `cache.api_vars`, a run on an account never inherits.",
+            "default": []
+          },
+          "status_read": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatusRead"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the status command's output reads.",
+            "default": null
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageProbe"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The usage probe.",
+            "default": null
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenSetup"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The setup token.",
+            "default": null
+          },
+          "proxy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProxyRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The token proxy.",
+            "default": null
+          },
+          "credentials": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CredentialsRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the login lives, for the drift check.",
+            "default": null
+          },
+          "terminal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TerminalRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.",
             "default": null
           }
         },
@@ -2577,6 +3499,443 @@
         },
         "description": "How the stream driver starts an agent in its own JSON-lines mode."
       },
+      "StatusRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/StatusFormat",
+            "description": "The output's format."
+          },
+          "signed_in": {
+            "type": "string",
+            "description": "The key whose `true` means signed in."
+          },
+          "who": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys that name who it is signed in as, the first one set wins.",
+            "default": []
+          },
+          "how": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key that names how it signed in.",
+            "default": null
+          }
+        },
+        "required": [
+          "format",
+          "signed_in"
+        ],
+        "description": "How the status command's output reads; without it, exit 0 is signed in and the output is the status."
+      },
+      "StatusFormat": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "json",
+            "description": "One JSON object."
+          }
+        ],
+        "description": "A status command's output format."
+      },
+      "UsageProbe": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command."
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Variables it runs with.",
+            "default": {}
+          },
+          "unset": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Variables it runs without.",
+            "default": []
+          },
+          "fresh": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds a reading stands."
+          },
+          "hold": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds a limit mark stands when no reading gives a reset time."
+          },
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WindowRead"
+            },
+            "description": "The windows it reads."
+          }
+        },
+        "required": [
+          "command",
+          "fresh",
+          "hold",
+          "windows"
+        ],
+        "description": "The usage probe: the command that prints an account's usage, and how its lines read."
+      },
+      "WindowRead": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The window's name."
+          },
+          "line": {
+            "type": "string",
+            "description": "The text its line starts with."
+          },
+          "used": {
+            "type": "string",
+            "description": "The marker the percentage used comes before."
+          },
+          "resets": {
+            "type": "string",
+            "description": "The marker the reset time comes after."
+          }
+        },
+        "required": [
+          "id",
+          "line",
+          "used",
+          "resets"
+        ],
+        "description": "How one usage window's line reads."
+      },
+      "TokenSetup": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The command that prints a new token."
+          },
+          "prefix": {
+            "type": "string",
+            "description": "The text the token on the screen starts with."
+          },
+          "days": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The days it lasts."
+          }
+        },
+        "required": [
+          "command",
+          "prefix",
+          "days"
+        ],
+        "description": "The setup token: the command that makes one, how it starts and how long it lasts."
+      },
+      "ProxyRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "upstream": {
+            "type": "string",
+            "description": "The provider's API."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The path prefixes it signs; a request outside them is refused."
+          },
+          "base_url_var": {
+            "type": "string",
+            "description": "The variable that points the agent at the proxy."
+          },
+          "key_var": {
+            "type": "string",
+            "description": "The variable that carries the run's key."
+          },
+          "auth": {
+            "type": "string",
+            "description": "The header that carries the token, `{token}` standing for it."
+          },
+          "append": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values added to a header's list when the request lacks them.",
+            "default": {}
+          }
+        },
+        "required": [
+          "upstream",
+          "paths",
+          "base_url_var",
+          "key_var",
+          "auth"
+        ],
+        "description": "The token proxy: where a run on another machine's calls go, and how they are signed."
+      },
+      "CredentialsRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file under the config folder."
+          },
+          "default_dir": {
+            "type": "string",
+            "description": "The default config folder, under the home folder."
+          },
+          "service": {
+            "type": "string",
+            "description": "The keychain item's service for the default folder."
+          },
+          "folder_hash": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "A named folder's service: `service`, `-`, then this many hex digits of the folder path's sha256."
+          },
+          "keychain": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command that prints an item's secret, `{service}` standing for its service."
+          },
+          "missing": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The command's exit status when the item is missing."
+          }
+        },
+        "required": [
+          "file",
+          "default_dir",
+          "service",
+          "folder_hash",
+          "keychain",
+          "missing"
+        ],
+        "description": "Where a login lives besides its status command: a file in the config folder and a keychain item, whose\nsha256 are compared for drift."
+      },
+      "TerminalRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command line that starts it, `{file}` standing for its settings patch.",
+            "default": []
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names of its processes.",
+            "default": []
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionPin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version it is pinned at.",
+            "default": null
+          },
+          "idle_after": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds of silence after which it reads `idle`, for a `run` that sets no `idle_after`.",
+            "default": null
+          },
+          "wizard": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Wizard"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first-run screen `run` dismisses.",
+            "default": null
+          },
+          "ready": {
+            "$ref": "#/components/schemas/StateWait",
+            "description": "The states a `send` waits for before it types.",
+            "default": {
+              "states": [],
+              "secs": 0
+            }
+          },
+          "echo": {
+            "$ref": "#/components/schemas/EchoCheck",
+            "description": "How a `send` checks that its text reached the screen.",
+            "default": {
+              "chars": 0,
+              "attempts": 0,
+              "secs": 0
+            }
+          },
+          "accepted": {
+            "$ref": "#/components/schemas/StateWait",
+            "description": "The states that, after enter, show the prompt was taken.",
+            "default": {
+              "states": [],
+              "secs": 0
+            }
+          }
+        },
+        "description": "A terminal agent: its start, its setup wizard and how a `send` delivers a prompt to its screen."
+      },
+      "VersionPin": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command that prints the version."
+          },
+          "line": {
+            "type": "string",
+            "description": "The text that starts the output line the version follows."
+          },
+          "pin": {
+            "type": "string",
+            "description": "The pinned version."
+          }
+        },
+        "required": [
+          "command",
+          "line",
+          "pin"
+        ],
+        "description": "The version a terminal agent is pinned at, and how to read the installed one."
+      },
+      "Wizard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "any": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The texts that show it, any one of them."
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys pressed when it shows."
+          },
+          "settle": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds to wait after the keys before a `send` may type."
+          }
+        },
+        "required": [
+          "any",
+          "keys",
+          "settle"
+        ],
+        "description": "A first-run screen and the keys that dismiss it."
+      },
+      "StateWait": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The states, any one of them."
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds before the `send` fails."
+          }
+        },
+        "required": [
+          "states",
+          "secs"
+        ],
+        "description": "States to wait for, and for how long."
+      },
+      "EchoCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "chars": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "How many characters of the prompt's first line it looks for; 0 skips the check."
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "How many times the text is typed before the `send` fails."
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds each attempt waits for the echo."
+          }
+        },
+        "required": [
+          "chars",
+          "attempts",
+          "secs"
+        ],
+        "description": "The prompt's echo: its first `chars` characters must show on the screen before enter."
+      },
       "Agent": {
         "type": "object",
         "additionalProperties": false,
@@ -2789,6 +4148,21 @@
             "format": "uint64",
             "minimum": 0,
             "description": "The most memory its process tree may hold, in MB, if limited."
+          },
+          "redacted": {
+            "type": "boolean",
+            "description": "Its screen passes through `redact` on every read, and `attach` is refused."
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account it runs on (`run`'s `account`)."
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "Its account is `auto`'s pick: a limit or `account.use` moves it."
           }
         },
         "required": [
@@ -2799,7 +4173,7 @@
           "keep",
           "state"
         ],
-        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them."
+        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,\n`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused;\n`account` is the account it runs on."
       },
       "State": {
         "oneOf": [
@@ -3146,21 +4520,21 @@
         ],
         "description": "A child's link to the terminal that started it."
       },
-      "GrepResult": {
+      "FindResult": {
         "type": "object",
         "properties": {
           "files": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FileMatches"
+              "$ref": "#/components/schemas/Found"
             },
-            "description": "The files with a match, in name order, paths relative to `root` with `/`."
+            "description": "The best files, best first, ties by path."
           },
-          "matches": {
+          "total": {
             "type": "integer",
             "format": "uint",
             "minimum": 0,
-            "description": "Matched lines in all."
+            "description": "Files that earned anything; `files` is the first `top` of them."
           },
           "searched": {
             "type": "integer",
@@ -3171,12 +4545,12 @@
         },
         "required": [
           "files",
-          "matches",
+          "total",
           "searched"
         ],
-        "description": "`code.grep` result."
+        "description": "`code.find` result."
       },
-      "FileMatches": {
+      "Found": {
         "type": "object",
         "properties": {
           "path": {
@@ -3187,27 +4561,42 @@
             "$ref": "#/components/schemas/Lang",
             "description": "Its language."
           },
-          "count": {
+          "lines": {
             "type": "integer",
             "format": "uint",
             "minimum": 0,
-            "description": "Its matched lines."
+            "description": "Its lines."
           },
-          "groups": {
+          "score": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "Its rank's score."
+          },
+          "why": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Group"
+              "type": "string"
             },
-            "description": "The lines by the symbol that holds them; empty with `count`."
+            "description": "What earned it: `name is pattern`, `path has lane`, `lines: wait 89, output 6`, `a test`."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Symbol"
+            },
+            "description": "At most 5 symbols whose name holds a word, exact names first."
           }
         },
         "required": [
           "path",
           "lang",
-          "count",
-          "groups"
+          "lines",
+          "score",
+          "why",
+          "symbols"
         ],
-        "description": "One file's matches."
+        "description": "One ranked file."
       },
       "Lang": {
         "oneOf": [
@@ -3248,30 +4637,6 @@
           }
         ],
         "description": "A file's language, by its extension."
-      },
-      "Group": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Symbol"
-            },
-            "description": "The symbols around the lines, outermost first; empty at top level."
-          },
-          "lines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GrepLine"
-            },
-            "description": "The lines, in file order."
-          }
-        },
-        "required": [
-          "scope",
-          "lines"
-        ],
-        "description": "Matched lines under one symbol."
       },
       "Symbol": {
         "type": "object",
@@ -3381,6 +4746,93 @@
           }
         ],
         "description": "A symbol's kind."
+      },
+      "GrepResult": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileMatches"
+            },
+            "description": "The files with a match, in name order, paths relative to `root` with `/`."
+          },
+          "matches": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Matched lines in all."
+          },
+          "searched": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Files read."
+          }
+        },
+        "required": [
+          "files",
+          "matches",
+          "searched"
+        ],
+        "description": "`code.grep` result."
+      },
+      "FileMatches": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative to `root`, with `/`."
+          },
+          "lang": {
+            "$ref": "#/components/schemas/Lang",
+            "description": "Its language."
+          },
+          "count": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Its matched lines."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "description": "The lines by the symbol that holds them; empty with `count`."
+          }
+        },
+        "required": [
+          "path",
+          "lang",
+          "count",
+          "groups"
+        ],
+        "description": "One file's matches."
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Symbol"
+            },
+            "description": "The symbols around the lines, outermost first; empty at top level."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrepLine"
+            },
+            "description": "The lines, in file order."
+          }
+        },
+        "required": [
+          "scope",
+          "lines"
+        ],
+        "description": "Matched lines under one symbol."
       },
       "GrepLine": {
         "type": "object",
@@ -3849,6 +5301,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start`, `limit` or `owner`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
           }
         ],
         "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
@@ -3994,6 +5476,47 @@
               "null"
             ],
             "description": "Why it is down: the last connect's error."
+          },
+          "down_since": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it last left `up` (or was first tried), unix seconds; a retry does not move it, `up` clears it."
+          },
+          "hello": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Hello"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The shed there, as its `hello` answered: version, build and protocol."
+          },
+          "os": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its `uname -s`, lowercase: `darwin`, `linux`."
+          },
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its `uname -m`: `arm64`, `x86_64`."
+          },
+          "home": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its `HOME`."
           }
         },
         "required": [
@@ -4042,17 +5565,45 @@
             "minimum": 0,
             "description": "Percent of memory not available."
           },
+          "mem_free_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Memory available without swapping, MiB.",
+            "default": 0
+          },
+          "mem_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Physical memory, MiB.",
+            "default": 0
+          },
           "swap_used_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Swap in use, MiB."
           },
+          "swap_out_pages": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Pages swapped out since boot; the rate is the difference of two samples.",
+            "default": 0
+          },
           "disk_free_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Free space on the volume of the state file, MiB."
+          },
+          "disk_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The size of that volume, MiB.",
+            "default": 0
           },
           "cpus": {
             "type": "integer",
@@ -4081,6 +5632,20 @@
               "$ref": "#/components/schemas/Sample"
             },
             "description": "The kept samples (one a minute, 24 h) after `since`, oldest first."
+          },
+          "top_cpu": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proc"
+            },
+            "description": "With `top`: the processes using the most CPU, most first."
+          },
+          "top_mem": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proc"
+            },
+            "description": "With `top`: the processes using the most memory, most first."
           }
         },
         "required": [
@@ -4115,17 +5680,45 @@
             "minimum": 0,
             "description": "Percent of memory not available."
           },
+          "mem_free_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Memory available without swapping, MiB.",
+            "default": 0
+          },
+          "mem_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Physical memory, MiB.",
+            "default": 0
+          },
           "swap_used_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Swap in use, MiB."
           },
+          "swap_out_pages": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Pages swapped out since boot; the rate is the difference of two samples.",
+            "default": 0
+          },
           "disk_free_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Free space on the volume of the state file, MiB."
+          },
+          "disk_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The size of that volume, MiB.",
+            "default": 0
           },
           "cpus": {
             "type": "integer",
@@ -4160,6 +5753,71 @@
           "terminals"
         ],
         "description": "One sample of a machine's health."
+      },
+      "Proc": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its id."
+          },
+          "ppid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its parent's id."
+          },
+          "depth": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "`terminal.procs`: how far below the terminal's own process it is."
+          },
+          "cpu_pct": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "CPU used over its life, percent of one core."
+          },
+          "rss_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Resident memory, MiB."
+          },
+          "elapsed_s": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds since it started."
+          },
+          "command": {
+            "type": "string",
+            "description": "Its command line."
+          },
+          "terminal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`machine.stats`: the terminal whose process tree holds it."
+          },
+          "own": {
+            "type": "boolean",
+            "description": "`terminal.procs`: the agent's own process, not work it started.",
+            "default": false
+          }
+        },
+        "required": [
+          "pid",
+          "ppid",
+          "depth",
+          "cpu_pct",
+          "rss_mb",
+          "elapsed_s",
+          "command"
+        ],
+        "description": "One process, as `terminal.procs` and `machine.stats`'s `top` report it."
       },
       "Cursor": {
         "type": "object",
@@ -4575,6 +6233,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start`, `limit` or `owner`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
           }
         ],
         "description": "One event of an ACP terminal's transcript."
@@ -4766,6 +6454,179 @@
         ],
         "description": "A colour: a palette index (0–15 the named colours, up to 255 the xterm palette) or `[r, g, b]`."
       },
+      "Caller": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The terminal it runs in."
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its working directory."
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its role (`impl`, `rev`, `orchestrator`, …), for the guard to refuse by; it never allows more."
+          }
+        },
+        "description": "What a script's sender says about itself. shed proves none of it."
+      },
+      "ScriptResult": {
+        "type": "object",
+        "properties": {
+          "result": {
+            "description": "What the program returned, as JSON; `null` when it returned nothing."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScriptError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it stopped."
+          },
+          "logs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "One entry per `console` call, in order."
+          },
+          "calls": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many `shed` calls it made, refused ones included."
+          },
+          "acting": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Acting"
+            },
+            "description": "Every call of a guarded method it made, in call order, with what came of it."
+          },
+          "ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How long it took, queueing and guards included."
+          }
+        },
+        "required": [
+          "logs",
+          "calls",
+          "acting",
+          "ms"
+        ],
+        "description": "`script` result: `result` when the program returned, `error` when it did not; never both."
+      },
+      "ScriptError": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "`SyntaxError`, `ReferenceError`, `TypeError`, `RangeError`, `Error`, `ShedError`, `GuardError` or `LimitError`."
+          },
+          "message": {
+            "type": "string",
+            "description": "One line."
+          },
+          "line": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The line, from 1."
+          },
+          "column": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The column, from 1, in code points."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A shed error's name (`NO_SUCH_TERMINAL`), a guard's verdict (`GUARD_REFUSED`) or the limit (`FUEL`)."
+          },
+          "method": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The shed method that failed or was refused."
+          }
+        },
+        "required": [
+          "name",
+          "message",
+          "line",
+          "column"
+        ],
+        "description": "A script's error: where, and what."
+      },
+      "Acting": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "description": "The method's wire name."
+          },
+          "params": {
+            "description": "Its params, as the script gave them."
+          },
+          "result": {
+            "description": "What it answered."
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActingError"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its refusal (`GUARD_REFUSED`, …), shed's error or `CANCELLED`."
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "description": "One acting call: `result` when it was answered, `error` when the guard refused it, it failed or it was\nstill in flight when the run stopped (`CANCELLED`); never both. Over `REPLY_LIMIT` only `method` and\n`error` (or `result: true`) are kept."
+      },
+      "ActingError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`GUARD_REFUSED`, `GUARD_FAILED`, `GUARD_TIMEOUT`, `NO_GUARD`, `CANCELLED` or shed's own code."
+          },
+          "message": {
+            "type": "string",
+            "description": "One line."
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "description": "Why an acting call came to nothing."
+      },
       "Children": {
         "oneOf": [
           {
@@ -4917,6 +6778,26 @@
       "LIMIT": {
         "code": -32011,
         "message": "LIMIT"
+      },
+      "NO_ACCOUNT": {
+        "code": -32012,
+        "message": "NO_ACCOUNT"
+      },
+      "ACCOUNT_SETUP": {
+        "code": -32013,
+        "message": "ACCOUNT_SETUP"
+      },
+      "ACCOUNT_SIGNED_OUT": {
+        "code": -32014,
+        "message": "ACCOUNT_SIGNED_OUT"
+      },
+      "ACCOUNT_LIMITED": {
+        "code": -32015,
+        "message": "ACCOUNT_LIMITED"
+      },
+      "NOT_DELIVERED": {
+        "code": -32016,
+        "message": "NOT_DELIVERED"
       },
       "INVALID_REQUEST": {
         "code": -32600,

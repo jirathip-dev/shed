@@ -143,6 +143,19 @@ fn outline_and_lines(dir: &Path, shed: &dyn Fn(&[&str], &[u8]) -> Output) {
         json!({"scope": [{"kind": "struct", "name": "Job", "start": 1, "end": 3, "depth": 0}],
                "lines": [{"n": 2, "text": "    id: u64,"}]})
     );
+    let ranked = shed(&["code", "find", "-g", "*.rs", "job run", dir_path], b"");
+    let want = "1. job.rs (rust, 7 lines)\n     why: name is job; lines: job 2, run 1\n     struct Job [1-3]\n     impl Job [5-7]\n     fn run [6-6]\n1 of 1 file, 1 searched\n";
+    assert_eq!(String::from_utf8_lossy(&ranked.stdout), want, "{ranked:?}");
+    let json = shed(
+        &["--json", "code", "find", "--top", "1", "id", dir_path],
+        b"",
+    )
+    .stdout;
+    let json: Value = serde_json::from_slice(&json).expect("json");
+    assert_eq!(
+        (&json["files"][0]["path"], &json["files"][0]["why"]),
+        (&json!("job.rs"), &json!(["lines: id 1"]))
+    );
     let bad = shed(&["code", "grep", "a(?=b)", dir_path], b"");
     let stderr = String::from_utf8_lossy(&bad.stderr);
     assert!(

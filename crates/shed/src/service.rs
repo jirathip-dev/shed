@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::{Context as _, bail};
@@ -11,6 +12,7 @@ include!(concat!(env!("OUT_DIR"), "/doctor.rs"));
 
 pub const LABEL: &str = "dev.shed.serve";
 pub const UPDATE: &str = "dev.shed.update";
+const OLD_UPDATE: &str = "shed-update";
 
 pub enum Mark {
     Ok,
@@ -45,7 +47,7 @@ pub struct Checks<'a> {
 }
 
 pub fn doctor(paths: &Paths) -> anyhow::Result<Vec<Row>> {
-    let [job, update] = services()?;
+    let [job, update] = services(true)?;
     let (status, commands) = (job.status(), job.commands());
     let fix = format!("fix: {}", commands.load);
     let server = Conn::connect(&paths.socket);
@@ -61,7 +63,7 @@ pub fn doctor(paths: &Paths) -> anyhow::Result<Vec<Row>> {
     Ok(ROWS.iter().flat_map(|rows| rows(&cx)).collect())
 }
 
-fn services() -> anyhow::Result<[Service; 2]> {
+fn services(drop_old: bool) -> anyhow::Result<[Service; 2]> {
     let env = farrier_service::Env::host().context("this host's job manager")?;
     let exe = std::env::current_exe().context("this binary's path")?;
     let h = env.home.display();
@@ -85,12 +87,12 @@ fn services() -> anyhow::Result<[Service; 2]> {
             process_type: ProcessType::Background,
             abandon_process_group: false,
         })
-        .supersedes(["shed-update"]);
+        .supersedes(drop_old.then_some(OLD_UPDATE));
     Ok([Service::new(serve, &env), Service::new(update, &env)])
 }
 
 pub fn install(force: bool) -> anyhow::Result<()> {
-    let services = services()?;
+    let services = services(true)?;
     for service in &services {
         if !force && service.status()?.files == Files::Differs {
             let label = service.label();
@@ -105,7 +107,7 @@ pub fn install(force: bool) -> anyhow::Result<()> {
 }
 
 pub fn start_job() -> anyhow::Result<bool> {
-    let Ok([serve, _]) = services() else {
+    let Ok([serve, _]) = services(true) else {
         return Ok(false);
     };
     if serve.files().iter().any(|(file, _)| !file.exists()) {
@@ -116,10 +118,29 @@ pub fn start_job() -> anyhow::Result<bool> {
 }
 
 pub fn uninstall() -> anyhow::Result<()> {
-    for service in services()? {
+    for service in services(true)? {
         let done = service.uninstall()?;
         crate::out::line(format_args!("{}: {done}", service.label()));
     }
+    Ok(())
+}
+
+pub fn old_updater(update: &Service) -> Vec<PathBuf> {
+    let old = update.files().into_iter().filter_map(|(file, _)| {
+        let name = file.file_name()?.to_str()?.replacen(UPDATE, OLD_UPDATE, 1);
+        Some(file.with_file_name(name))
+    });
+    old.filter(|file| file.exists()).collect()
+}
+
+pub fn migrate_updater() -> anyhow::Result<()> {
+    let [_, update] = services(true)?;
+    if old_updater(&update).is_empty() {
+        return Ok(());
+    }
+    let [_, fresh] = services(false)?;
+    fresh.install()?;
+    update.install()?;
     Ok(())
 }
 

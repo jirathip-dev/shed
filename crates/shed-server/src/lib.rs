@@ -4,6 +4,7 @@
 //! Unix socket, one tokio task per connection. `shed_client` is the other end.
 #![forbid(unsafe_code)]
 
+mod accounts;
 pub mod agents;
 mod call;
 mod code;
@@ -22,6 +23,7 @@ pub mod machines;
 pub mod providers;
 mod registry;
 mod screen;
+mod script;
 pub mod serve;
 mod stats;
 

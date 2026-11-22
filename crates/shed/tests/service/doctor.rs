@@ -6,6 +6,7 @@ use serde_json::json;
 use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
 
 use crate::common::{Server, temp_dir};
+use crate::install::old_files;
 use crate::{SHED, job_file, shed, shed_with, text};
 
 #[test]
@@ -172,4 +173,31 @@ fn doctor_flags_a_server_outside_a_failed_job() {
         home.join("shed.sock").display()
     );
     assert!(text(&out).contains(&line), "{}", text(&out));
+}
+
+#[test]
+fn doctor_fails_a_leftover_old_named_update_job_until_install_removes_it() {
+    let home = temp_dir("doctor-old-update");
+    let d = home.to_str().expect("utf-8 dir");
+    assert!(shed(&home, &["install"]).status.success());
+    let old: Vec<_> = old_files(&home)
+        .into_iter()
+        .filter(|f| f.to_string_lossy().contains("shed-update"))
+        .collect();
+    for file in &old {
+        std::fs::write(file, "old\n").expect("old job");
+    }
+    let out = shed(&home, &["--dir", d, "doctor"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let files: Vec<String> = old.iter().map(|f| f.display().to_string()).collect();
+    let line = format!(
+        "FAIL  update   {}: an old-named updater; fix: shed install\n",
+        files.join(", ")
+    );
+    assert!(text(&out).contains(&line), "{line} in {}", text(&out));
+
+    assert!(shed(&home, &["install"]).status.success());
+    let report = text(&shed(&home, &["--dir", d, "doctor"]));
+    let update = "ok    update   dev.shed.update: no pass yet\n";
+    assert!(report.contains(update), "{report}");
 }

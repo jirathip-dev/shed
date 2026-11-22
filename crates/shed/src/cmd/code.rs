@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use shed_server::proto::{GrepParams, GrepResult, Method, OutlineParams, OutlineResult};
+use shed_server::proto::{
+    FindParams, FindResult, GrepParams, GrepResult, Method, OutlineParams, OutlineResult,
+};
 use shed_server::runner::ExitCode;
 use shed_server::search;
 
@@ -18,6 +20,7 @@ pub struct Args {
 #[derive(Subcommand)]
 enum Action {
     Grep(GrepArgs),
+    Find(FindArgs),
     Outline { file: PathBuf },
 }
 
@@ -43,10 +46,23 @@ struct GrepArgs {
     path: Option<PathBuf>,
 }
 
+#[derive(clap::Args)]
+struct FindArgs {
+    #[arg(long, value_name = "N")]
+    top: Option<usize>,
+    #[arg(long)]
+    hidden: bool,
+    #[arg(short, long, value_name = "G")]
+    glob: Vec<String>,
+    words: String,
+    path: Option<PathBuf>,
+}
+
 pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
     let server = &cx.server;
     let file = match args.command {
         Action::Grep(args) => return grep(cx, args),
+        Action::Find(args) => return find(cx, args),
         Action::Outline { file } => file,
     };
     let params = OutlineParams {
@@ -79,5 +95,20 @@ fn grep(cx: &Cx<'_>, a: GrepArgs) -> anyhow::Result<ExitCode> {
     };
     let found: GrepResult = server.connect(None)?.call(Method::CodeGrep, &params)?;
     cx.print(&found, || search::text::grep(&found))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn find(cx: &Cx<'_>, a: FindArgs) -> anyhow::Result<ExitCode> {
+    let server = &cx.server;
+    let params = FindParams {
+        root: server.resolve(a.path.unwrap_or_else(|| PathBuf::from(".")))?,
+        query: a.words,
+        top: a.top,
+        hidden: a.hidden,
+        glob: a.glob,
+        machine: server.machine(),
+    };
+    let found: FindResult = server.connect(None)?.call(Method::CodeFind, &params)?;
+    cx.print(&found, || search::text::find(&found))?;
     Ok(ExitCode::SUCCESS)
 }

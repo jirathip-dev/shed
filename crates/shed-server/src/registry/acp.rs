@@ -1,12 +1,15 @@
 use super::{Registry, not_found};
 use crate::input::Input;
-use shed_proto::{AcpSession, EmitParams, ErrorCode, EventKind, ModelParams, RpcError};
+use shed_accounts::store::DEFAULT;
+use shed_proto::{
+    AcpSession, EmitParams, ErrorCode, EventKind, ModelParams, Provider, RpcError, State,
+};
 use std::sync::Arc;
 use std::time::Instant;
 
 impl Registry {
     pub(crate) fn emit(&mut self, mut p: EmitParams) -> Result<(), RpcError> {
-        if !p.kind.is_acp() {
+        if !p.kind.is_acp() && !matches!(p.kind, EventKind::Account { .. }) {
             return Err(RpcError::new(
                 ErrorCode::InvalidParams,
                 "emit takes only ACP events",
@@ -50,6 +53,10 @@ impl Registry {
                     Some(shed_core::clock::unix_now());
                 true
             }
+            EventKind::Account { account, .. } if !p.replay => {
+                info.account = Some(account.clone());
+                true
+            }
             EventKind::Usage(u) => {
                 info.session.get_or_insert_default().usage = Some(u.clone());
                 false
@@ -86,5 +93,37 @@ impl Registry {
             Arc::clone(self.live(&p.name)?),
             text.into_bytes(),
         ))
+    }
+
+    pub(crate) fn use_account(
+        &mut self,
+        provider: &Provider,
+        to: &str,
+    ) -> Vec<(String, Result<Input, String>)> {
+        let text = shed_proto::frame(&shed_proto::Input::Account(to.to_owned()));
+        let mut told = Vec::new();
+        for entry in self.entries.values_mut() {
+            let info = &mut entry.info;
+            let lane = info.acp.as_deref() == Some(provider.id.as_str());
+            let pty = info.acp.is_none() && info.labels.get("agent") == Some(&provider.agent);
+            let on = info.account.clone().unwrap_or_else(|| DEFAULT.to_owned());
+            let why = match &entry.term {
+                _ if info.state != State::Running || !(lane || pty) => continue,
+                _ if pty => "not an ACP or stream lane: never switched".to_owned(),
+                _ if provider.session_files.is_empty() => "no session files to copy".to_owned(),
+                _ if on == to => format!("already on {to}"),
+                _ if on != DEFAULT && !info.auto => format!("on named account {on}"),
+                None => continue,
+                Some(term) => {
+                    info.auto = true;
+                    let input = Input::Now(Arc::clone(term), text.clone().into_bytes());
+                    told.push((info.name.clone(), Ok(input)));
+                    continue;
+                }
+            };
+            told.push((info.name.clone(), Err(why)));
+        }
+        self.save();
+        told
     }
 }

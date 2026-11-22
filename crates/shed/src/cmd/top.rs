@@ -1,10 +1,6 @@
-use std::collections::BTreeSet;
-
-use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
 use shed_client::Calls as _;
-use shed_server::proctree::{self, ProcessTable as _};
-use shed_server::proto::{LsParams, TerminalInfo};
+use shed_server::proto::{LsParams, Proc};
 use shed_server::runner::ExitCode;
 
 use crate::cx::{Cx, On};
@@ -22,10 +18,7 @@ pub struct Args {
 pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
     let client = cx.server.connect(None)?;
     if let Some(name) = args.name {
-        if cx.server.on.is_some() {
-            bail!("shed top <terminal> reads this machine's process table; run it there");
-        }
-        processes(cx, &client.get(&name)?, args.full)?;
+        processes(cx, client.procs(&name)?, args.full)?;
         return Ok(ExitCode::SUCCESS);
     }
     let mut list = client.ls(&LsParams::default())?;
@@ -34,23 +27,15 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn processes(cx: &Cx<'_>, info: &TerminalInfo, full: bool) -> anyhow::Result<()> {
-    let pid = info
-        .pid
-        .with_context(|| format!("{} is not running", info.name))?;
-    let procs = proctree::system().list().context("the process table")?;
-    let mut tree = proctree::tree(&procs, pid, &BTreeSet::new());
-    tree.retain(|p| p.rss_bytes > 50 << 20);
-    tree.sort_by_key(|p| std::cmp::Reverse(p.rss_bytes));
-    let rows: Vec<Value> = (tree.iter())
-        .filter_map(|p| {
-            let (cmd, age) = proctree::command(p.pid)?;
-            let name = cmd.split_whitespace().next().unwrap_or_default();
+fn processes(cx: &Cx<'_>, mut tree: Vec<Proc>, full: bool) -> anyhow::Result<()> {
+    tree.retain(|p| p.rss_mb > 50);
+    tree.sort_by_key(|p| std::cmp::Reverse(p.rss_mb));
+    let rows: Vec<Value> = (tree.into_iter())
+        .map(|p| {
+            let name = p.command.split_whitespace().next().unwrap_or_default();
             let name = name.rsplit('/').next().unwrap_or_default().to_owned();
-            let cpu_pct = p.cpu.as_millis() * 100 / age.as_millis().max(1000);
-            let cmd = if full { cmd } else { name };
-            let (rss_mb, age_s) = (p.rss_bytes >> 20, age.as_secs());
-            Some(json!({"pid": p.pid, "rss_mb": rss_mb, "cpu_pct": cpu_pct, "age_s": age_s, "cmd": cmd}))
+            let cmd = if full { p.command } else { name };
+            json!({"pid": p.pid, "rss_mb": p.rss_mb, "cpu_pct": p.cpu_pct, "age_s": p.elapsed_s, "cmd": cmd})
         })
         .collect();
     cx.print(&rows, || {

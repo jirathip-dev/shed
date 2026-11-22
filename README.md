@@ -48,6 +48,7 @@ The v0.1 commands:
 <!-- commands -->
 | Command | What it does |
 |---|---|
+| `shed account add\|ls\|login\|status\|rm\|use` | The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `status` reads it now, `ls` lists them (the preferred one marked) and `rm` signs one out and removes it (docs/accounts/store.md). `use <provider> <name>` makes a ready named account the one `auto` picks first and moves every live `auto` and `default` lane to it; `use <provider> --clear` drops the preference (docs/accounts/accounts.md). |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
@@ -116,8 +117,8 @@ shed runs them as a second kind of terminal, through the same API:
 | `shed read <t>` | The transcript as text: prompts, one line per tool call, final replies. |
 
 `shed events` adds `turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply` and `session`, and
-`shed wait --until done` is exact. The PTY mode stays for agents without ACP. shed never handles provider
-credentials: each agent logs in its own way. See [docs/acp/accounts.md](docs/acp/accounts.md), including the Claude adapter caveat.
+`shed wait --until done` is exact. The PTY mode stays for agents without ACP. `run --account` runs an agent on one of
+shed's accounts; see [docs/accounts/accounts.md](docs/accounts/accounts.md).
 
 ## Integration with herdsman
 

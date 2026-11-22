@@ -101,6 +101,9 @@ pub fn pass(paths: &Paths, dir: &Path, exe: &Path, dry: bool) -> anyhow::Result<
         let since = meta.modified()?.duration_since(UNIX_EPOCH)?.as_secs();
         return Ok(format!("paused since {since}; shed self-update --resume"));
     }
+    if !dry {
+        crate::service::migrate_updater()?;
+    }
     let (repo, releases) = config::update_source();
     let to = main_head(&repo)?;
     let tag = format!("build-{to}");

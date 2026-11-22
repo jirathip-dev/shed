@@ -16,11 +16,12 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_json::{Map, Value};
 pub use shed_proto as proto;
 use shed_proto::{
-    AcpSession, AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
-    HandoverCheckParams, HandoverParams, Input, KeysParams, Link, LsParams, MachineStats,
-    MatchParams, Matched, Method, ModelParams, ReadParams, ReadResult, Reported, ResizeParams,
-    RunParams, SendParams, StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult,
-    frame,
+    Account, AccountAdd, AccountMoves, AccountName, AccountUse, AccountsParams, AcpSession,
+    AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
+    HandoverCheckParams, HandoverParams, Input, KeysParams, Link, Login, LsParams, MachineParams,
+    MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ReadParams, ReadResult,
+    Reported, ResizeParams, RunParams, SendParams, StateParams, StatsParams, Target, TerminalInfo,
+    WaitParams, WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -50,6 +51,11 @@ fn unit<C: Calls + ?Sized>(
 fn target(name: &str) -> Target {
     let name = name.to_owned();
     Target { name }
+}
+
+fn account(provider: &str, name: &str) -> AccountName {
+    let (provider, name) = (provider.to_owned(), name.to_owned());
+    AccountName { provider, name }
 }
 
 fn names(list: &[&str]) -> Vec<String> {
@@ -222,6 +228,22 @@ pub trait Calls {
         typed(self, Method::MachineLinks, &Map::new())
     }
 
+    /// Adds a machine and holds its link; the same pair twice is one machine.
+    fn machine_add(&self, name: &str, target: &str) -> Result<(), Error> {
+        let (name, target) = (name.to_owned(), target.to_owned());
+        unit(self, Method::MachineAdd, &MachineParams { name, target })
+    }
+
+    /// Removes a machine and drops its link.
+    fn machine_rm(&self, name: &str) -> Result<(), Error> {
+        unit(self, Method::MachineRm, &target(name))
+    }
+
+    /// A terminal's process tree, parents first.
+    fn procs(&self, name: &str) -> Result<Vec<Proc>, Error> {
+        typed(self, Method::TerminalProcs, &target(name))
+    }
+
     /// Runs a program without a terminal.
     fn exec(&self, params: &ExecParams) -> Result<ExecResult, Error> {
         typed(self, Method::Exec, params)
@@ -240,6 +262,38 @@ pub trait Calls {
     /// Replaces a file with `params.data`.
     fn file_write(&self, params: &FileParams) -> Result<(), Error> {
         unit(self, Method::FileWrite, params)
+    }
+
+    /// The accounts, of one provider or all, per provider `default` first.
+    fn accounts(&self, provider: Option<&str>) -> Result<Vec<Account>, Error> {
+        let provider = provider.map(str::to_owned);
+        typed(self, Method::AccountLs, &AccountsParams { provider })
+    }
+
+    /// Makes an account, or adopts a folder for it.
+    fn account_add(&self, params: &AccountAdd) -> Result<Account, Error> {
+        typed(self, Method::AccountAdd, params)
+    }
+
+    /// Starts the account's login in a redacted terminal.
+    fn account_login(&self, provider: &str, name: &str) -> Result<Login, Error> {
+        typed(self, Method::AccountLogin, &account(provider, name))
+    }
+
+    /// Reads the account's status and usage now.
+    fn account_status(&self, provider: &str, name: &str) -> Result<Account, Error> {
+        typed(self, Method::AccountStatus, &account(provider, name))
+    }
+
+    /// Logs the account out and removes it.
+    fn account_rm(&self, provider: &str, name: &str) -> Result<(), Error> {
+        unit(self, Method::AccountRm, &account(provider, name))
+    }
+
+    /// Prefers the named account and moves the provider's `auto` and `default` lanes to it; none drops the preference.
+    fn account_use(&self, provider: &str, name: Option<&str>) -> Result<AccountMoves, Error> {
+        let (provider, name) = (provider.to_owned(), name.map(str::to_owned));
+        typed(self, Method::AccountUse, &AccountUse { provider, name })
     }
 
     /// Emits an ACP terminal's structured event.

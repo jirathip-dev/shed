@@ -2,11 +2,13 @@ name: release
 # #160: after ci ends green on a push to main or staging, build shed for macOS (signed, notarized) and Linux and
 # publish a GitHub release: build-<sha7> on main (kept), build-staging-<sha7> on staging (a prerelease, pruned after 14
 # days). A failed step ends its job green with an ::error:: annotation and publishes nothing (docs/releases.md).
+# #267: on main it also tags client-v<PROTOCOL>.<n> when a client crate changed; started by hand it is a dry run.
 on:
   workflow_run:
     workflows: [ci]
     types: [completed]
     branches: [main, staging]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,6 +18,26 @@ env:
   BRANCH: ${{ github.event.workflow_run.head_branch }}
 
 jobs:
+  client-tag:
+    if: >-
+      github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA || github.sha }}
+          fetch-depth: 0
+      - name: tag a client release (a dry run when started by hand)
+        run: |
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            scripts/client-tag.sh HEAD
+          elif ! scripts/client-tag.sh --push HEAD; then
+            echo "::error::the client release tag failed"
+          fi
+
   linux:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-22.04

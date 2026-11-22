@@ -2,7 +2,7 @@
 # A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
 # A frozen file takes no new line, a `shared` one stays under its `[[size]]` limit, and a row of a `[[collect]]`
 # folder is a new file there (#246).
-frozen = ["ci/cap.toml", "docs/acp/README.md"]
+frozen = ["docs/acp/README.md"]
 generated = [
     "CHANGELOG.md",
     "docs/protocol.md",
@@ -87,7 +87,13 @@ may_use = ["proto", "pattern"]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script"]
+may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script", "accounts"]
+
+[[layer]]
+name = "accounts"
+paths = ["crates/shed-accounts/src/**"]
+mods = ["shed_accounts"]
+may_use = ["core", "proto"]
 
 [[layer]]
 name = "cli"
@@ -108,13 +114,13 @@ reason = "shake hands through shed_client; only the server's hello handler answe
 [[ban]]
 pattern = "Command::new"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/runner.rs"]
+except = ["crates/shed-core/src/runner.rs", "crates/shed-core/src/runner/**"]
 reason = "start processes through shed_core::runner"
 
 [[ban]]
 pattern = "std::process"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/runner.rs"]
+except = ["crates/shed-core/src/runner.rs", "crates/shed-core/src/runner/**"]
 reason = "process types and calls come from shed_core::runner"
 
 [[ban]]
@@ -202,6 +208,12 @@ except = []
 reason = "search and patterns open no socket"
 
 [[ban]]
+pattern = ".expose()"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-accounts/src/env.rs", "crates/shed-accounts/src/proxy.rs"]
+reason = "a token leaves its type only into a main-host run's environment or the proxy's upstream header"
+
+[[ban]]
 pattern = "launchctl"
 paths = ["crates/*/src/**"]
 except = []
@@ -217,6 +229,14 @@ reason = "#238: jobs are written, loaded and restarted only by farrier-service"
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
 max_fn_lines = 150
+
+[[collect]]
+dir = "docs/accounts"
+glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-accounts/src"
+glob = "*.rs"
 
 [[collect]]
 dir = "crates/shed-core/src/terminal"
@@ -300,7 +320,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 410
+max_file_lines = 430
 
 [[collect]]
 dir = "crates/shed/tests"

@@ -2,7 +2,7 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
-Version: `0.0.0`, protocol `4`, oldest served `1`.
+Version: `0.0.0`, protocol `5`, oldest served `1`.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
@@ -27,9 +27,65 @@ running; an ACP terminal's `session` is its agent session (`id`, for `run`'s `re
 and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's
 slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
 tokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with
-`outlive` and `notify` as `run` set them.
+`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,
+`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused;
+`account` is the account it runs on.
 
 ## Methods
+
+### `account.add`
+
+Make an account: an empty config folder of mode 0700 under `accounts/<provider>/<name>`, or with `folder` a link to that existing folder, adopted in place; a folder holding one of the record's `setup_files` is refused (`ACCOUNT_SETUP`). `token_file`, a file of mode 0600 on this host, is copied in as the account's setup token. The same call twice is one account.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.add","params":{"name":"work","provider":"claude","token_file":"/home/user/claude-work.token"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+```
+
+### `account.login`
+
+The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.login","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{"terminal":"login-claude-work"}}
+```
+
+### `account.ls`
+
+The accounts, per provider `default` first, then in the order `auto` picks: what shed last read of each, its token's dates (never the token), the setup files its folder holds and the terminals on it. A reading older than the record's `usage.fresh` is read again in the background.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.ls","params":{"provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":[{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}]}
+```
+
+### `account.rm`
+
+The record's `logout`, then the account's folder (an adopted one: only its link), its token and its readings; refused for `default` and while its login runs.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.rm","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `account.status`
+
+Run the record's status command and usage probe for the account now, and keep what they say.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.status","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+```
+
+### `account.use`
+
+Make a named, ready account the provider's preferred one, which `auto` picks first while it is ready and not limited, and move every live ACP or stream lane of the provider on `auto` or `default` to it: the lane stops its agent (a busy one once its tool call ends), copies the session's `session_files` and loads the session on the account, now on `auto`; a lane that was mid-turn or rate-limited gets one prompt to go on. Refused for `default`, an unknown, signed-out, limited or set-up account. Without `name` it only drops the preference.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.use","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{"moved":["lane-1"],"stayed":[{"terminal":"lane-2","why":"on named account home"}]}}
+```
 
 ### `acp.model`
 
@@ -46,7 +102,7 @@ Each agent shed has a provider record for or has installed, by id, as `shed agen
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
-{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"settings_var":null,"status":"fake login status","stream":null,"token_var":"FAKE_TOKEN"},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"terminal":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
 ```
 
 ### `agents.match`
@@ -65,6 +121,15 @@ Take over the terminal. After the response the server writes a redraw (clear, th
 ```json
 {"jsonrpc":"2.0","id":1,"method":"attach","params":{"name":"build"}}
 {"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
+```
+
+### `code.find`
+
+The files under `root` that best answer `query`'s words, best first: the top 10 (`top`, at most 50) of a stated `total`. A word earns points in a file's name, its folders, its symbols' names and its lines; the sum is multiplied by the words that earned any and halved for a test. Each file names its score, short `why` reasons and the symbols that earned them. The walk and its limits are `code.grep`'s. `machine` searches there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"code.find","params":{"hidden":false,"query":"job retries","root":"/home/user/project","top":2}}
+{"jsonrpc":"2.0","id":1,"result":{"files":[{"lang":"rust","lines":49,"path":"src/job.rs","score":136,"symbols":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9},{"depth":0,"end":49,"kind":"impl","name":"Job","start":37}],"why":["name is job","lines: job 9, retries 4"]}],"searched":12,"total":1}}
 ```
 
 ### `code.grep`
@@ -96,7 +161,7 @@ Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `p
 
 ### `events`
 
-Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
+Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events, and each terminal's last 256 `text` chunks before them), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"events","params":{"labels":{"issue":"7"},"since":120}}
@@ -105,10 +170,10 @@ Stream events. After the response the server writes one event per line (see Even
 
 ### `exec`
 
-Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
+Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","machine":"box","timeout":30.0}}
+{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","env":{"GIT_PAGER":"cat"},"machine":"box","timeout":30.0}}
 {"jsonrpc":"2.0","id":1,"result":{"code":0,"stderr":[],"stdout":[32,77,32,115,114,99,47,108,105,98,46,114,115,10]}}
 ```
 
@@ -123,10 +188,10 @@ A file's bytes, or with `lines` only that span's; over `REPLY_LIMIT` bytes is `I
 
 ### `file.write`
 
-Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.
+Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept, or `mode` when given (the temp file has it before any byte is written). `machine` writes it there.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"path":"/home/user/project/VERSION"}}
+{"jsonrpc":"2.0","id":1,"method":"file.write","params":{"data":[49,46,51,46,48,10],"mode":384,"path":"/home/user/project/VERSION"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
@@ -171,8 +236,8 @@ Keep the connection alive. Once a connection sends one, the server closes it whe
 The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
 ```
 
 ### `keys`
@@ -202,22 +267,40 @@ List terminals, by name; `labels` keeps those that carry every given label, `par
 {"jsonrpc":"2.0","id":1,"result":[{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}]}
 ```
 
+### `machine.add`
+
+Add a machine to the config file, as `shed machine add` does, and start holding its link; the same name and target again is the same machine, another target under a taken name `INVALID_PARAMS`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.add","params":{"name":"box","target":"user@box.example"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
 ### `machine.links`
 
-Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
+Each configured machine's held link: `up`, `reconnecting` or `down`, since when, why it is down, and `down_since`, when it last left `up` (or was first tried; a retry does not move it); once up, the shed there (`hello`) and the machine's `os`, `arch` and `home`. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `terminal.procs`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"since":1762416000,"state":"up"},"old":{"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":5,"version":"0.0.0"},"home":"/home/user","os":"linux","since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+```
+
+### `machine.rm`
+
+Remove a machine from the config file, as `shed machine rm` does, and drop its held link; removing one that is not there is a no-op.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"machine.rm","params":{"name":"box"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
 ### `machine.stats`
 
-The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.
+The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000}}
-{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_pressure_pct":42,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}}
+{"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000,"top":1}}
+{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"top_cpu":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"top_mem":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"uptime_s":86400}}
 ```
 
 ### `read`
@@ -253,12 +336,12 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":4},"openrpc":"1.3.2"}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":5},"openrpc":"1.3.2"}}
 ```
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"mem_max_mb":4096,"name":"build","parent":{"name":"lead","notify":true}}}
@@ -272,6 +355,15 @@ Stream a running terminal's screen. After the response the server writes screen 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"screen.watch","params":{"since":41,"terminal":"build"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `script`
+
+Run a program in shed's JavaScript subset (the body of an async function, at most 256 KiB) beside the terminals: `shed.<method>(params)` calls a method by its wire name through the same path a request takes, and what the program returns is `result`. A read (`ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs`) is called as it is; any other method that acts is first shown to the guard of `[script]` in the server's config file (one process for the run, one JSON line each way per call, or with `guard_per = "call"` a process per call), and with none configured it is refused; streams, a person's input and the connection's own methods are refused (`NOT_IN_SCRIPT`). `caller` goes to the guard unchanged. Steps, live memory, calls, logs and the deadline (`timeout`, 60 s, at most 600) bound a run. The reply is `{result, logs, calls, acting, ms}` or, when the program failed, `{error, …}`; `acting` lists every guarded call with its params and its result or error. With `check` it is parsed and compiled only. Closing the connection cancels the calls in flight; `machine` runs it there, over the held link.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"script","params":{"caller":{"role":"orchestrator","terminal":"orchestrator-7"},"code":"await shed.kill({ name: \"impl-190\" });\nreturn \"killed\";","timeout":120.0}}
+{"jsonrpc":"2.0","id":1,"result":{"acting":[{"error":{"code":"GUARD_REFUSED","message":"kill refused by the guard: lanes are stopped with drover kill"},"method":"kill","params":{"name":"impl-190"}}],"calls":1,"error":{"code":"GUARD_REFUSED","column":12,"line":1,"message":"kill refused by the guard: lanes are stopped with drover kill","method":"kill","name":"GuardError"},"logs":[],"ms":21}}
 ```
 
 ### `send`
@@ -308,6 +400,15 @@ Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.keys","params":{"keys":["esc","ctrl-c","up","enter"],"terminal":"build"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `terminal.procs`
+
+The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"terminal.procs","params":{"name":"lane-1"}}
+{"jsonrpc":"2.0","id":1,"result":[{"command":"node agent.js","cpu_pct":3,"depth":0,"elapsed_s":600,"own":true,"pid":4200,"ppid":1,"rss_mb":180},{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200}]}
 ```
 
 ### `terminal.readonly`
@@ -414,6 +515,11 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32009 | `DRAFT_HELD` |
 | -32010 | `HANDOVER_REFUSED` |
 | -32011 | `LIMIT` |
+| -32012 | `NO_ACCOUNT` |
+| -32013 | `ACCOUNT_SETUP` |
+| -32014 | `ACCOUNT_SIGNED_OUT` |
+| -32015 | `ACCOUNT_LIMITED` |
+| -32016 | `NOT_DELIVERED` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |
@@ -421,5 +527,5 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32700 | `PARSE` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 5-6 / server 56de739 protocol 3-4; update the server and restart shed serve"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 6-7 / server 56de739 protocol 4-5; update the server and restart shed serve"}}
 ```
