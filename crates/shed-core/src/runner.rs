@@ -62,7 +62,8 @@ pub fn over<A: AsRef<OsStr>>(
         .spawn()
 }
 
-/// Starts `program` with `args` in `cwd` without the `unset` variables, stdin, stdout and stderr piped.
+/// Starts `program` with `args` in `cwd` without the `unset` variables and with `set`, stdin, stdout and stderr
+/// piped.
 ///
 /// # Errors
 /// When `program` cannot start.
@@ -70,13 +71,14 @@ pub fn piped<A: AsRef<OsStr>>(
     program: &str,
     args: impl IntoIterator<Item = A>,
     cwd: &Path,
-    unset: &[&str],
+    (unset, set): (&[&str], &BTreeMap<String, String>),
 ) -> io::Result<tokio::process::Child> {
     let mut command = tokio::process::Command::new(program);
     for name in unset {
         command.env_remove(name);
     }
     command
+        .envs(set)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::piped())

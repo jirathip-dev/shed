@@ -39,7 +39,7 @@ Make an account: an empty config folder of mode 0700 under `accounts/<provider>/
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"account.add","params":{"name":"work","provider":"claude","token_file":"/home/user/claude-work.token"}}
-{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
 ```
 
 ### `account.login`
@@ -53,11 +53,11 @@ The record's `login` in a redacted terminal `login-<provider>-<name>` with the a
 
 ### `account.ls`
 
-The accounts, per provider `default` first: what shed last read of each, its token's dates (never the token) and the setup files its folder holds.
+The accounts, per provider `default` first, then in the order `auto` picks: what shed last read of each, its token's dates (never the token), the setup files its folder holds and the terminals on it. A reading older than the record's `usage.fresh` is read again in the background.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"account.ls","params":{"provider":"claude"}}
-{"jsonrpc":"2.0","id":1,"result":[{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}]}
 ```
 
 ### `account.rm`
@@ -75,7 +75,7 @@ Run the record's status command and usage probe for the account now, and keep wh
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"account.status","params":{"name":"work","provider":"claude"}}
-{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
 ```
 
 ### `acp.model`
@@ -499,7 +499,9 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32011 | `LIMIT` |
 | -32012 | `NO_ACCOUNT` |
 | -32013 | `ACCOUNT_SETUP` |
-| -32014 | `NOT_DELIVERED` |
+| -32014 | `ACCOUNT_SIGNED_OUT` |
+| -32015 | `ACCOUNT_LIMITED` |
+| -32016 | `NOT_DELIVERED` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

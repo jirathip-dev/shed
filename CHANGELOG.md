@@ -257,6 +257,13 @@ All notable changes to this project are documented here. The format follows
   variables inherited from shed; a caller `env` that sets one of them is refused. `get` shows the `account`, an
   `account` event says which one it started on, and the token is in no log, event, state file or hibernated
   session. This reverses "shed never handles provider credentials" (docs/accounts/accounts.md). Protocol 5.
+- `shed run --acp <id> --account auto` runs on the provider's signed-in named account with the most headroom
+  (never `default`), and when the lane hits a usage limit shed marks that account limited, copies the session's
+  files to the next account, starts the agent there on the same session and sends one prompt to go on (an
+  `account` event with `was` and `why: limit`). `account.ls` lists each provider's accounts in the order `auto`
+  picks, with `runs` and `limited_until`, and reads a stale usage again in the background; accounts with a run
+  are read every `usage.fresh` seconds. A run on a limited account is refused `ACCOUNT_LIMITED`; `auto` with
+  every account signed out is `ACCOUNT_SIGNED_OUT`.
 - The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
   `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
   `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and

@@ -1,15 +1,22 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use shed_accounts::{Store, check, store};
+use shed_accounts::{Store, check, choice, store};
 use shed_core::{Wake, clock};
 
 use crate::call::{Call, blocking};
-use crate::proto::{Account, AccountName, ErrorCode, Login, Provider, RpcError, RunParams, State};
+use crate::proto::{
+    Account, AccountName, ErrorCode, Login, Provider, RpcError, RunParams, State, TerminalInfo,
+};
 use crate::registry::Registry;
 use crate::{Shared, lock, providers};
 
-const LOGIN: std::time::Duration = std::time::Duration::from_mins(10);
+const LOGIN: Duration = Duration::from_mins(10);
+const BEAT: Duration = Duration::from_mins(1);
+
+static PROBING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 pub(crate) async fn open(cx: &Call<'_>, provider: &str) -> Result<(Store, Provider), RpcError> {
     let all = records(cx).await?;
@@ -25,12 +32,80 @@ pub(crate) fn store(cx: &Call<'_>) -> Store {
 
 pub(crate) async fn records(cx: &Call<'_>) -> Result<Vec<Provider>, RpcError> {
     let dir = lock(cx.registry).providers.clone();
-    let catalog = blocking(move || providers::Catalog::load(&dir).0).await?;
+    blocking(move || records_in(&dir)).await
+}
+
+fn records_in(dir: &Path) -> Vec<Provider> {
+    let catalog = providers::Catalog::load(dir).0;
     let held = catalog.iter().map(|e| &e.provider);
-    Ok(held
+    let held = held.filter(|p| p.config_dir_var.is_some());
+    held.cloned().collect()
+}
+
+pub(crate) fn listed(reg: &Registry, provider: &Provider, accounts: Vec<Account>) -> Vec<Account> {
+    let mut shown: Vec<_> = (accounts.into_iter())
+        .map(|a| self::shown(reg, &provider.id, a))
+        .collect();
+    let now = clock::unix_now();
+    choice::rank(&mut shown, now);
+    for a in shown.iter().filter(|a| check::stale(provider, a, now)) {
+        let key = format!("{}/{}", a.provider, a.name);
+        if !lock(&PROBING).insert(key.clone()) {
+            continue;
+        }
+        let (store, provider, name) = (Store::beside(&reg.path), provider.clone(), a.name.clone());
+        tokio::spawn(async move {
+            check::status(&store, &provider, &name).await.ok();
+            lock(&PROBING).remove(&key);
+        });
+    }
+    shown
+}
+
+pub(crate) async fn beat(registry: Shared) {
+    loop {
+        tokio::time::sleep(BEAT).await;
+        let (dir, path) = {
+            let reg = lock(&registry);
+            (reg.providers.clone(), reg.path.clone())
+        };
+        let read = move || {
+            let store = Store::beside(&path);
+            let all = records_in(&dir).into_iter().map(|r| (store.ls(&r), r));
+            all.collect::<Vec<_>>()
+        };
+        let Ok(all) = blocking(read).await else {
+            continue;
+        };
+        let reg = lock(&registry);
+        for (accounts, record) in all {
+            let run = |a: &Account| reg.runs(&record.id, &a.name) > 0;
+            listed(&reg, &record, accounts.into_iter().filter(run).collect());
+        }
+    }
+}
+
+pub(crate) fn limited(reg: &Registry, info: &TerminalInfo, was: Option<&str>) {
+    let report = info.reported.as_ref();
+    let Some(report) = report.filter(|r| r.state == "rate-limited" && was != Some("rate-limited"))
+    else {
+        return;
+    };
+    let (Some(name), Some(id)) = (info.account.clone(), info.acp.as_deref()) else {
+        return;
+    };
+    let catalog = providers::Catalog::load(&reg.providers).0;
+    let Some(provider) = catalog
+        .by_id(id)
         .filter(|p| p.config_dir_var.is_some())
         .cloned()
-        .collect())
+    else {
+        return;
+    };
+    let now = clock::unix_now();
+    let resets = (report.note.as_deref()).and_then(|n| crate::proto::when(n, now));
+    let store = Store::beside(&reg.path);
+    tokio::spawn(async move { check::limit(&store, &provider, &name, resets).await.ok() });
 }
 
 pub(crate) fn login_running(reg: &Registry, provider: &str, name: &str) -> Option<String> {
@@ -39,9 +114,10 @@ pub(crate) fn login_running(reg: &Registry, provider: &str, name: &str) -> Optio
     running.then_some(terminal)
 }
 
-pub(crate) fn shown(reg: &Registry, account: Account) -> Account {
+pub(crate) fn shown(reg: &Registry, id: &str, account: Account) -> Account {
     Account {
         login: login_running(reg, &account.provider, &account.name),
+        runs: reg.runs(id, &account.name),
         ..account
     }
 }

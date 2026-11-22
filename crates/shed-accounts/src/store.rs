@@ -31,6 +31,9 @@ pub struct Reading {
     pub checked_at: Option<u64>,
     /// The last usage reading.
     pub usage: Option<Usage>,
+    /// When its last limit ends.
+    #[serde(default)]
+    pub limited_until: Option<u64>,
 }
 
 /// The accounts folder beside the state file.
@@ -178,7 +181,9 @@ impl Store {
         let reading = self.readings().remove(&key).unwrap_or_default();
         let days = provider.token.as_ref().map(|t| t.days);
         let token = token::info(&self.token_file(provider, name), days);
+        let limited_until = (reading.limited_until).filter(|t| *t > shed_core::clock::unix_now());
         let state = match reading.state {
+            _ if limited_until.is_some() => AccountState::Limited,
             AccountState::SignedOut if token.is_some_and(|t| !t.rejected) => AccountState::Ready,
             state => state,
         };
@@ -195,8 +200,10 @@ impl Store {
             who: reading.who,
             line: reading.line,
             checked_at: reading.checked_at,
+            limited_until,
             usage: reading.usage,
             token,
+            runs: 0,
             login: None,
         })
     }
