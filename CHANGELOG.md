@@ -238,6 +238,33 @@ All notable changes to this project are documented here. The format follows
   the repository's top) and `info/exclude` (also through a worktree's `.git` file), skips `.git`, dot names
   without `--hidden`, symlinks and binary files. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`; a
   matched line over 4,096 bytes comes back `clipped` with its full `length`.
+- `shed code find [--top N] [--hidden] [-g GLOB]… 'WORDS' [PATH]` (`code.find`, with `machine` over a held
+  link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
+  total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
+  and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
+- `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
+  on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
+  what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
+  account, a folder holding a setup, and a token file's age and mode.
+- `shed run --acp <id> --account <name>` (`run`'s `account`) runs the agent on one of shed's accounts: its
+  folder set, its setup token too while its own login is signed out, and none of the record's `scrub` or API-key
+  variables inherited from shed; a caller `env` that sets one of them is refused. `get` shows the `account`, an
+  `account` event says which one it started on, and the token is in no log, event, state file or hibernated
+  session. This reverses "shed never handles provider credentials" (docs/accounts/accounts.md). Protocol 5.
+- `shed run --acp <id> --account auto` runs on the provider's signed-in named account with the most headroom
+  (never `default`), and when the lane hits a usage limit shed marks that account limited, copies the session's
+  files to the next account, starts the agent there on the same session and sends one prompt to go on (an
+  `account` event with `was` and `why: limit`). `account.ls` lists each provider's accounts in the order `auto`
+  picks, with `runs` and `limited_until`, and reads a stale usage again in the background; accounts with a run
+  are read every `usage.fresh` seconds. A run on a limited account is refused `ACCOUNT_LIMITED`; `auto` with
+  every account signed out is `ACCOUNT_SIGNED_OUT`.
+- The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
+  `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
+  `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and
+  `home`; `machine.stats` adds free and total memory, pages swapped out, the volume's size, `top` (the
+  processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
+  `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
+  `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
 
 ### Changed
 

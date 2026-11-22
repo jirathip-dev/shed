@@ -74,7 +74,10 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
             cx.print(&m, || format!("{} removed\n", m.name))
         }
         Action::Stats { since } => {
-            return stats(cx, StatsParams { since });
+            return stats(cx, StatsParams {
+                    since,
+                    ..StatsParams::default()
+                });
         }
     }?;
     Ok(ExitCode::SUCCESS)

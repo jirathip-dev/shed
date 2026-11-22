@@ -31,6 +31,7 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         data: write.then(stdin_bytes).transpose()?,
         lines: args.lines,
         machine: server.machine(),
+        ..FileParams::default()
     };
     let method = match params.data {
         Some(_) => Method::FileWrite,

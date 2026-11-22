@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use serde_json::{Value, to_value};
 use shed_proto::{
-    FileMatches, GrepLine, GrepParams, GrepResult, Group, Kind, Lang, Method, OutlineParams,
-    OutlineResult, Symbol,
+    FileMatches, FindParams, FindResult, Found, GrepLine, GrepParams, GrepResult, Group, Kind,
+    Lang, Method, OutlineParams, OutlineResult, Symbol,
 };
 
 fn symbol(kind: Kind, name: &str, start: usize, end: usize, depth: usize) -> Symbol {
@@ -55,9 +55,37 @@ fn grep_example() -> (Value, Value) {
     (to_value(params).unwrap(), to_value(result).unwrap())
 }
 
+fn find_example() -> (Value, Value) {
+    let params = FindParams {
+        root: PathBuf::from("/home/user/project"),
+        query: "job retries".into(),
+        top: Some(2),
+        ..FindParams::default()
+    };
+    let result = FindResult {
+        files: vec![Found {
+            path: "src/job.rs".into(),
+            lang: Lang::Rust,
+            lines: 49,
+            score: 136,
+            why: vec!["name is job".into(), "lines: job 9, retries 4".into()],
+            symbols: vec![
+                symbol(Kind::Struct, "Job", 9, 14, 0),
+                symbol(Kind::Impl, "Job", 37, 49, 0),
+            ],
+        }],
+        total: 1,
+        searched: 12,
+    };
+    (to_value(params).unwrap(), to_value(result).unwrap())
+}
+
 pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
     if method == Method::CodeGrep {
         return Some(grep_example());
+    }
+    if method == Method::CodeFind {
+        return Some(find_example());
     }
     let Method::CodeOutline = method else {
         return None;

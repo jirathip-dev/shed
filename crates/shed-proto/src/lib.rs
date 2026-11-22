@@ -6,6 +6,8 @@
 //! from these types (`SHED_BLESS=1 cargo test -p shed-proto --features schema`); CI fails when it drifts.
 #![forbid(unsafe_code)]
 
+pub mod accounts;
+pub use accounts::*;
 pub mod acp;
 pub use acp::*;
 pub mod agents;
@@ -39,7 +41,7 @@ pub const BUILD: &str = env!("SHED_BUILD");
 pub const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SHED_BUILD"), ")");
 
 /// The wire protocol version; raise it only to drop or retype a method, field or type (`just protocol`). From 3 a server refuses a request field the method does not document.
-pub const PROTOCOL: u32 = 4;
+pub const PROTOCOL: u32 = 5;
 
 /// The oldest protocol this build still speaks: a server answers a client on it in its shapes, a client accepts a server on it.
 pub const OLDEST_PROTOCOL: u32 = 1;

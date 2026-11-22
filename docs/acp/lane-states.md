@@ -17,7 +17,7 @@ A process counts as the agent's own when it was in the agent's process tree as a
 its MCP servers); any other live descendant once the turn ended makes the lane `running`, the one nearest the
 agent named in the note, checked every 5 s until it exits. A tool call left open when the next turn starts is
 forgotten. `rate-limited` lasts until the next turn starts: shed neither retries, wakes nor continues the
-lane, nor switches its account. An agent's limit pattern is data, in its [provider record](provider-records.md):
+lane. A lane on `account = "auto"` moves to the next account instead ([choice.md](../accounts/choice.md)). An agent's limit pattern is data, in its [provider record](provider-records.md):
 
 ```toml
 limit = ["hit your limit", "usage limit reached"] # a reply or error line holding one of these
