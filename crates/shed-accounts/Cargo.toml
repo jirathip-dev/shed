@@ -1,0 +1,24 @@
+[package]
+name = "shed-accounts"
+description = "shed's accounts: their folders and tokens, and what their status commands say."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+shed-core.workspace = true
+shed-proto.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[package.metadata.gate]
+test_secs = 20
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "process", "time"] }

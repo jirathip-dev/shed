@@ -48,6 +48,7 @@ The v0.1 commands:
 <!-- commands -->
 | Command | What it does |
 |---|---|
+| `shed account add\|ls\|login\|status\|rm` | The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `status` reads it now, `ls` lists them and `rm` signs one out and removes it (docs/accounts/store.md). |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |

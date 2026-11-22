@@ -7,6 +7,171 @@
   },
   "methods": [
     {
+      "name": "account.add",
+      "description": "Make an account: an empty config folder of mode 0700 under `accounts/<provider>/<name>`, or with `folder` a link to that existing folder, adopted in place; a folder holding one of the record's `setup_files` is refused (`ACCOUNT_SETUP`). `token_file`, a file of mode 0600 on this host, is copied in as the account's setup token. The same call twice is one account.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`[a-z0-9-]+`."
+          }
+        },
+        {
+          "name": "folder",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Adopt this existing folder in place, by link."
+          }
+        },
+        {
+          "name": "token_file",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A setup token file on this host (0600), copied in."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Account"
+        }
+      }
+    },
+    {
+      "name": "account.login",
+      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Login"
+        }
+      }
+    },
+    {
+      "name": "account.ls",
+      "description": "The accounts, per provider `default` first: what shed last read of each, its token's dates (never the token) and the setup files its folder holds.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this provider's."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Account"
+          }
+        }
+      }
+    },
+    {
+      "name": "account.rm",
+      "description": "The record's `logout`, then the account's folder (an adopted one: only its link), its token and its readings; refused for `default` and while its login runs.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "account.status",
+      "description": "Run the record's status command and usage probe for the account now, and keep what they say.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Account"
+        }
+      }
+    },
+    {
       "name": "acp.model",
       "description": "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.",
       "paramStructure": "by-name",
@@ -2241,6 +2406,213 @@
   },
   "components": {
     "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          },
+          "name": {
+            "type": "string",
+            "description": "`[a-z0-9-]+`, or `default`: the CLI's own default folder."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its config folder; none for `default`."
+          },
+          "adopted": {
+            "type": "boolean",
+            "description": "An adopted folder, linked in: `account.rm` removes the link, never the folder.",
+            "default": false
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccountState",
+            "description": "Signed out, ready or limited."
+          },
+          "who": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The email or organisation the status command reports."
+          },
+          "line": {
+            "type": "string",
+            "description": "The status on one line, redacted.",
+            "default": ""
+          },
+          "checked_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When the status command last ran."
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Usage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last usage reading."
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its setup token's dates, never the token."
+          },
+          "setup": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The record's `setup_files` found in its folder; not empty: no run.",
+            "default": []
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its login terminal, while one runs."
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "state"
+        ],
+        "description": "An account: a provider's login in a config folder shed keeps, and what shed last read of it."
+      },
+      "AccountState": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "signed-out",
+            "description": "Neither signed in nor holding a token."
+          },
+          {
+            "type": "string",
+            "const": "ready",
+            "description": "The status command says signed in, or it has a token."
+          },
+          {
+            "type": "string",
+            "const": "limited",
+            "description": "It hit a limit."
+          }
+        ],
+        "description": "An account's state."
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Window"
+            },
+            "description": "Its windows."
+          },
+          "read_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was read."
+          }
+        },
+        "required": [
+          "windows",
+          "read_at"
+        ],
+        "description": "A usage reading."
+      },
+      "Window": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "used_pct": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The percentage used."
+          },
+          "resets_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it resets."
+          }
+        },
+        "required": [
+          "id",
+          "used_pct"
+        ],
+        "description": "One usage window."
+      },
+      "TokenInfo": {
+        "type": "object",
+        "properties": {
+          "saved_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was saved."
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it lapses, by the record's `token.days`."
+          },
+          "rejected": {
+            "type": "boolean",
+            "description": "The upstream refused it.",
+            "default": false
+          }
+        },
+        "required": [
+          "saved_at"
+        ],
+        "description": "A setup token's dates."
+      },
+      "Login": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": "string",
+            "description": "The redacted terminal the login runs in."
+          }
+        },
+        "required": [
+          "terminal"
+        ],
+        "description": "`account.login`'s result."
+      },
       "Empty": {
         "type": "object",
         "additionalProperties": false
@@ -5652,6 +6024,14 @@
       "LIMIT": {
         "code": -32011,
         "message": "LIMIT"
+      },
+      "NO_ACCOUNT": {
+        "code": -32012,
+        "message": "NO_ACCOUNT"
+      },
+      "ACCOUNT_SETUP": {
+        "code": -32013,
+        "message": "ACCOUNT_SETUP"
       },
       "INVALID_REQUEST": {
         "code": -32600,

@@ -16,11 +16,11 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_json::{Map, Value};
 pub use shed_proto as proto;
 use shed_proto::{
-    AcpSession, AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
-    HandoverCheckParams, HandoverParams, Input, KeysParams, Link, LsParams, MachineParams,
-    MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ReadParams, ReadResult,
-    Reported, ResizeParams, RunParams, SendParams, StateParams, StatsParams, Target, TerminalInfo,
-    WaitParams, WaitResult, frame,
+    Account, AccountAdd, AccountName, AccountsParams, AcpSession, AgentInfo, EmitParams, ErrorCode,
+    ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Input,
+    KeysParams, Link, Login, LsParams, MachineParams, MachineStats, MatchParams, Matched, Method,
+    ModelParams, Proc, ReadParams, ReadResult, Reported, ResizeParams, RunParams, SendParams,
+    StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -50,6 +50,11 @@ fn unit<C: Calls + ?Sized>(
 fn target(name: &str) -> Target {
     let name = name.to_owned();
     Target { name }
+}
+
+fn account(provider: &str, name: &str) -> AccountName {
+    let (provider, name) = (provider.to_owned(), name.to_owned());
+    AccountName { provider, name }
 }
 
 fn names(list: &[&str]) -> Vec<String> {
@@ -256,6 +261,32 @@ pub trait Calls {
     /// Replaces a file with `params.data`.
     fn file_write(&self, params: &FileParams) -> Result<(), Error> {
         unit(self, Method::FileWrite, params)
+    }
+
+    /// The accounts, of one provider or all, per provider `default` first.
+    fn accounts(&self, provider: Option<&str>) -> Result<Vec<Account>, Error> {
+        let provider = provider.map(str::to_owned);
+        typed(self, Method::AccountLs, &AccountsParams { provider })
+    }
+
+    /// Makes an account, or adopts a folder for it.
+    fn account_add(&self, params: &AccountAdd) -> Result<Account, Error> {
+        typed(self, Method::AccountAdd, params)
+    }
+
+    /// Starts the account's login in a redacted terminal.
+    fn account_login(&self, provider: &str, name: &str) -> Result<Login, Error> {
+        typed(self, Method::AccountLogin, &account(provider, name))
+    }
+
+    /// Reads the account's status and usage now.
+    fn account_status(&self, provider: &str, name: &str) -> Result<Account, Error> {
+        typed(self, Method::AccountStatus, &account(provider, name))
+    }
+
+    /// Logs the account out and removes it.
+    fn account_rm(&self, provider: &str, name: &str) -> Result<(), Error> {
+        unit(self, Method::AccountRm, &account(provider, name))
     }
 
     /// Emits an ACP terminal's structured event.

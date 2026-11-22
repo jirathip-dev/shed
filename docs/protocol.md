@@ -32,6 +32,51 @@ tokens, and the `cost` when sent); `parent` names the terminal that started it (
 
 ## Methods
 
+### `account.add`
+
+Make an account: an empty config folder of mode 0700 under `accounts/<provider>/<name>`, or with `folder` a link to that existing folder, adopted in place; a folder holding one of the record's `setup_files` is refused (`ACCOUNT_SETUP`). `token_file`, a file of mode 0600 on this host, is copied in as the account's setup token. The same call twice is one account.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.add","params":{"name":"work","provider":"claude","token_file":"/home/user/claude-work.token"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+```
+
+### `account.login`
+
+The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.login","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{"terminal":"login-claude-work"}}
+```
+
+### `account.ls`
+
+The accounts, per provider `default` first: what shed last read of each, its token's dates (never the token) and the setup files its folder holds.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.ls","params":{"provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":[{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}]}
+```
+
+### `account.rm`
+
+The record's `logout`, then the account's folder (an adopted one: only its link), its token and its readings; refused for `default` and while its login runs.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.rm","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `account.status`
+
+Run the record's status command and usage probe for the account now, and keep what they say.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.status","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+```
+
 ### `acp.model`
 
 Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.
@@ -451,6 +496,8 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32009 | `DRAFT_HELD` |
 | -32010 | `HANDOVER_REFUSED` |
 | -32011 | `LIMIT` |
+| -32012 | `NO_ACCOUNT` |
+| -32013 | `ACCOUNT_SETUP` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

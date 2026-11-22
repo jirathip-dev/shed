@@ -242,6 +242,10 @@ All notable changes to this project are documented here. The format follows
   link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
   total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
   and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
+- `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
+  on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
+  what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
+  account, a folder holding a setup, and a token file's age and mode.
 - The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
   `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
   `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and

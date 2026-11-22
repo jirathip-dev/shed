@@ -2,6 +2,7 @@
 //! they drift. Regenerate with `just generate`. One golden example file per domain.
 #![cfg(test)]
 
+mod accounts;
 mod acp;
 mod code;
 mod machine;
@@ -42,6 +43,7 @@ fn example(method: Method) -> (Value, Value) {
             .or_else(|| screen::example(method))
             .or_else(|| machine::example(method))
             .or_else(|| code::example(method))
+            .or_else(|| accounts::example(method))
             .unwrap_or_else(|| panic!("no golden example for {method:?}")),
     }
 }
