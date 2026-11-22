@@ -39,7 +39,7 @@ Make an account: an empty config folder of mode 0700 under `accounts/<provider>/
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"account.add","params":{"name":"work","provider":"claude","token_file":"/home/user/claude-work.token"}}
-{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
 ```
 
 ### `account.login`
@@ -57,7 +57,7 @@ The accounts, per provider `default` first, then in the order `auto` picks: what
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"account.ls","params":{"provider":"claude"}}
-{"jsonrpc":"2.0","id":1,"result":[{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}]}
 ```
 
 ### `account.rm`
@@ -75,7 +75,16 @@ Run the record's status command and usage probe for the account now, and keep wh
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"account.status","params":{"name":"work","provider":"claude"}}
-{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+{"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
+```
+
+### `account.use`
+
+Make a named, ready account the provider's preferred one, which `auto` picks first while it is ready and not limited, and move every live ACP or stream lane of the provider on `auto` or `default` to it: the lane stops its agent (a busy one once its tool call ends), copies the session's `session_files` and loads the session on the account, now on `auto`; a lane that was mid-turn or rate-limited gets one prompt to go on. Refused for `default`, an unknown, signed-out, limited or set-up account. Without `name` it only drops the preference.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.use","params":{"name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{"moved":["lane-1"],"stayed":[{"terminal":"lane-2","why":"on named account home"}]}}
 ```
 
 ### `acp.model`
@@ -93,7 +102,7 @@ Each agent shed has a provider record for or has installed, by id, as `shed agen
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
-{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"terminal":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
 ```
 
 ### `agents.match`
@@ -152,7 +161,7 @@ Emit one of an ACP terminal's structured events (`turn`, `text`, `tool_call`, `p
 
 ### `events`
 
-Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events other than `text`, and each terminal's last 256 `text` chunks), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
+Stream events. After the response the server writes one event per line (see Events) for the terminals carrying every one of `labels`, first those after `since` still kept (the last 4,096 events, and each terminal's last 256 `text` chunks before them), and never closes the connection; closing it unsubscribes. When events after `since` are gone it first writes `{"jsonrpc":"2.0","method":"reset","params":{"seq":N}}`: those up to `N` are lost. A client more than 4,096 events behind gets `{"jsonrpc":"2.0","method":"lagged","params":{"seq":N}}` and the connection is closed; it resumes with `since`. A connection that sent `heartbeat` gets `{"jsonrpc":"2.0","method":"heartbeat"}` lines when idle.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"events","params":{"labels":{"issue":"7"},"since":120}}
@@ -348,6 +357,15 @@ Stream a running terminal's screen. After the response the server writes screen 
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
+### `script`
+
+Run a program in shed's JavaScript subset (the body of an async function, at most 256 KiB) beside the terminals: `shed.<method>(params)` calls a method by its wire name through the same path a request takes, and what the program returns is `result`. A read (`ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs`) is called as it is; any other method that acts is first shown to the guard of `[script]` in the server's config file (one process for the run, one JSON line each way per call, or with `guard_per = "call"` a process per call), and with none configured it is refused; streams, a person's input and the connection's own methods are refused (`NOT_IN_SCRIPT`). `caller` goes to the guard unchanged. Steps, live memory, calls, logs and the deadline (`timeout`, 60 s, at most 600) bound a run. The reply is `{result, logs, calls, acting, ms}` or, when the program failed, `{error, …}`; `acting` lists every guarded call with its params and its result or error. With `check` it is parsed and compiled only. Closing the connection cancels the calls in flight; `machine` runs it there, over the held link.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"script","params":{"caller":{"role":"orchestrator","terminal":"orchestrator-7"},"code":"await shed.kill({ name: \"impl-190\" });\nreturn \"killed\";","timeout":120.0}}
+{"jsonrpc":"2.0","id":1,"result":{"acting":[{"error":{"code":"GUARD_REFUSED","message":"kill refused by the guard: lanes are stopped with drover kill"},"method":"kill","params":{"name":"impl-190"}}],"calls":1,"error":{"code":"GUARD_REFUSED","column":12,"line":1,"message":"kill refused by the guard: lanes are stopped with drover kill","method":"kill","name":"GuardError"},"logs":[],"ms":21}}
+```
+
 ### `send`
 
 Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
@@ -501,6 +519,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32013 | `ACCOUNT_SETUP` |
 | -32014 | `ACCOUNT_SIGNED_OUT` |
 | -32015 | `ACCOUNT_LIMITED` |
+| -32016 | `NOT_DELIVERED` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

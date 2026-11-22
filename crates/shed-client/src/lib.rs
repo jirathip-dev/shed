@@ -16,11 +16,12 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_json::{Map, Value};
 pub use shed_proto as proto;
 use shed_proto::{
-    Account, AccountAdd, AccountName, AccountsParams, AcpSession, AgentInfo, EmitParams, ErrorCode,
-    ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Input,
-    KeysParams, Link, Login, LsParams, MachineParams, MachineStats, MatchParams, Matched, Method,
-    ModelParams, Proc, ReadParams, ReadResult, Reported, ResizeParams, RunParams, SendParams,
-    StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
+    Account, AccountAdd, AccountMoves, AccountName, AccountUse, AccountsParams, AcpSession,
+    AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
+    HandoverCheckParams, HandoverParams, Input, KeysParams, Link, Login, LsParams, MachineParams,
+    MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ReadParams, ReadResult,
+    Reported, ResizeParams, RunParams, SendParams, StateParams, StatsParams, Target, TerminalInfo,
+    WaitParams, WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -287,6 +288,12 @@ pub trait Calls {
     /// Logs the account out and removes it.
     fn account_rm(&self, provider: &str, name: &str) -> Result<(), Error> {
         unit(self, Method::AccountRm, &account(provider, name))
+    }
+
+    /// Prefers the named account and moves the provider's `auto` and `default` lanes to it; none drops the preference.
+    fn account_use(&self, provider: &str, name: Option<&str>) -> Result<AccountMoves, Error> {
+        let (provider, name) = (provider.to_owned(), name.map(str::to_owned));
+        typed(self, Method::AccountUse, &AccountUse { provider, name })
     }
 
     /// Emits an ACP terminal's structured event.

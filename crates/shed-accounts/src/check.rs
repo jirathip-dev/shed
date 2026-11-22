@@ -2,11 +2,14 @@
 //! account's folder set and none of the record's `scrub` or `api_vars` inherited.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::time::Duration;
 
+use sha2::{Digest as _, Sha256};
 use shed_core::{clock, redact, runner};
-use shed_proto::{Account, AccountState, Provider, RpcError, Usage};
+use shed_proto::{Account, AccountState, CredentialsRecord, Drift, Provider, RpcError, Usage};
 
 use crate::choice::fullest;
 use crate::store::{Reading, Store};
@@ -15,6 +18,7 @@ const HOLD: u64 = 3600;
 const TIMEOUT: Duration = Duration::from_mins(2);
 const LIMIT: u64 = 1 << 16;
 const LINE: usize = 80;
+const KEYCHAIN: Duration = Duration::from_secs(10);
 
 /// The argv that runs `line` for an account in `folder` (none: the CLI's default) with `env` set and `unset` unset.
 #[must_use]
@@ -62,13 +66,85 @@ async fn usage(provider: &Provider, folder: Option<&Path>, now: u64) -> Option<U
     provider.read_usage(&out, now)
 }
 
-/// Runs the record's status command and usage probe for the account now, and keeps what they say.
+fn service(record: &CredentialsRecord, folder: Option<&Path>) -> String {
+    let Some(folder) = folder else {
+        return record.service.clone();
+    };
+    let sum = Sha256::digest(folder.to_string_lossy().as_bytes());
+    let hex = sum.iter().fold(String::new(), |mut hex, b| {
+        write!(hex, "{b:02x}").ok();
+        hex
+    });
+    let short: String = hex.chars().take(record.folder_hash).collect();
+    format!("{}-{short}", record.service)
+}
+
+async fn compare(record: &CredentialsRecord, folder: Option<&Path>, home: &Path) -> Drift {
+    let dir = folder.map_or_else(|| home.join(&record.default_dir), Path::to_path_buf);
+    let Ok(file) =
+        std::fs::read(dir.join(&record.file)).map(|b| Sha256::digest(b.trim_ascii_end()))
+    else {
+        return Drift::Clear;
+    };
+    let service = service(record, folder);
+    let cmd: Vec<String> = (record.keychain.iter())
+        .map(|a| a.replace("{service}", &service))
+        .collect();
+    let env = BTreeMap::new();
+    match runner::exec(&cmd, Path::new("/"), &env, Vec::new(), KEYCHAIN, LIMIT).await {
+        Ok((status, out, _)) if status.success() => {
+            if Sha256::digest(out.trim_ascii_end()) == file {
+                Drift::Clear
+            } else {
+                Drift::Drifted
+            }
+        }
+        Ok((status, ..)) if status.code() == Some(record.missing) => Drift::Clear,
+        Err(e) if e.kind() == ErrorKind::NotFound => Drift::Clear,
+        _ => Drift::Unknown,
+    }
+}
+
+/// Compares the account's keychain item with its credentials file by their sha256, in memory, from this
+/// process's session, and keeps what it finds; none for a provider without `[credentials]`.
+///
+/// # Errors
+/// `NO_ACCOUNT`, or `IO` when the finding cannot be kept.
+pub async fn drift(
+    store: &Store,
+    provider: &Provider,
+    name: &str,
+    home: &Path,
+) -> Result<Option<Drift>, RpcError> {
+    let folder = store.folder(provider, name)?;
+    let Some(record) = &provider.credentials else {
+        return Ok(None);
+    };
+    let drift = compare(record, folder.as_deref(), home).await;
+    let reading = Reading {
+        drift: Some(drift),
+        ..store.reading(provider, name)
+    };
+    store.keep(provider, name, reading)?;
+    Ok(Some(drift))
+}
+
+/// Runs the record's status command, drift check and usage probe for the account now, and keeps what they say;
+/// `home` holds the default config folder.
 ///
 /// # Errors
 /// `NO_ACCOUNT`, or `IO` when the reading cannot be kept.
-pub async fn status(store: &Store, provider: &Provider, name: &str) -> Result<Account, RpcError> {
+pub async fn status(
+    store: &Store,
+    provider: &Provider,
+    name: &str,
+    home: &Path,
+) -> Result<Account, RpcError> {
     let folder = store.folder(provider, name)?;
     let mut reading = store.reading(provider, name);
+    if let Some(record) = &provider.credentials {
+        reading.drift = Some(compare(record, folder.as_deref(), home).await);
+    }
     let (none, now) = (BTreeMap::new(), clock::unix_now());
     if let Some(line) = &provider.status {
         let (ok, out, err) = run(&command(provider, folder.as_deref(), line, &none, &[])).await;
@@ -161,9 +237,9 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
-    use shed_proto::{AccountAdd, AccountState, Cache, UsageProbe, WindowRead};
+    use shed_proto::{AccountAdd, AccountState, Cache, CredentialsRecord, UsageProbe, WindowRead};
 
-    use super::{command, limit, logout, stale, status};
+    use super::{command, limit, logout, service, stale, status};
     use crate::store::Store;
     use crate::store::tests::{provider, temp};
 
@@ -185,6 +261,21 @@ mod tests {
         assert_eq!(default.join(" "), want);
     }
 
+    #[test]
+    fn a_named_folders_service_ends_in_its_paths_sha256() {
+        let record = CredentialsRecord {
+            file: ".credentials.json".into(),
+            default_dir: ".fake".into(),
+            service: "Fake-credentials".into(),
+            folder_hash: 8,
+            keychain: Vec::new(),
+            missing: 44,
+        };
+        assert_eq!(service(&record, None), "Fake-credentials");
+        let named = service(&record, Some("/a/work".as_ref()));
+        assert_eq!(named, "Fake-credentials-769c685e");
+    }
+
     #[tokio::test]
     async fn status_runs_in_the_folder_and_keeps_the_redacted_line() {
         let dir = temp("check-status");
@@ -199,10 +290,14 @@ mod tests {
             ..AccountAdd::default()
         };
         let folder = store.add(&p, &add).expect("added").folder.expect("folder");
-        let out = status(&store, &p, "work").await.expect("status");
+        let out = status(&store, &p, "work", "/".as_ref())
+            .await
+            .expect("status");
         assert_eq!(out.state, AccountState::SignedOut);
         fs::write(folder.join("in"), "").expect("write");
-        let read = status(&store, &p, "work").await.expect("status");
+        let read = status(&store, &p, "work", "/".as_ref())
+            .await
+            .expect("status");
         assert_eq!(read.state, AccountState::Ready);
         assert_eq!(read.line, "in as a@b.c [redacted]");
         assert!(read.checked_at.is_some());
@@ -248,12 +343,15 @@ mod tests {
             .expect("limit");
         assert_eq!(read.limited_until, Some(now + 60));
         fs::write(&usage, "Session: 40% used, resets in 2h").expect("write");
-        let read = status(&store, &p, "work").await.expect("status");
+        let read = status(&store, &p, "work", "/".as_ref())
+            .await
+            .expect("status");
         assert_eq!(
             (read.state, read.limited_until),
             (AccountState::Ready, None)
         );
-        assert!(!stale(&p, &read, now) && stale(&p, &read, now + 300));
+        let at = read.checked_at.expect("checked");
+        assert!(!stale(&p, &read, at) && stale(&p, &read, at + 300));
         fs::remove_file(&usage).expect("rm");
         let read = limit(&store, &p, "work", None).await.expect("limit");
         let until = read.limited_until.expect("held");

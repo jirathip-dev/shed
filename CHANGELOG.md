@@ -242,6 +242,15 @@ All notable changes to this project are documented here. The format follows
   link): the files under a folder that best answer the words, best first, the top 10 (at most 50) of a stated
   total. Each names its score, short reasons (`name is pattern`, `path has lane`, `lines: wait 89`, `a test`)
   and at most 5 symbols whose name holds a word. The walk and its limits are `code grep`'s.
+- The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
+  called as they are, and every call that acts is first asked of the guard named in `[script]` of the
+  config file (refused when none is named); the reply lists every acting call with its result.
+- Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
+  process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
+  prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys
+  when it shows; `send` waits for a ready state, types the text, retypes it until its start shows, presses
+  enter and waits for an accepted state, else fails `NOT_DELIVERED`. dsh-TUI is the first:
+  `providers/dsh.toml`.
 - `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
   on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
   what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
@@ -265,6 +274,19 @@ All notable changes to this project are documented here. The format follows
   processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
   `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
   `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
+- Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
+  `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
+  crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
+- Keychain and credentials-file drift: `account.status`, the status beat (every account, `default` too) and the
+  end of `shed account login` compare the sha256 of an account's keychain item (read from shed serve's own
+  session) with its `.credentials.json`, in memory. When both exist and differ the account is `drifted`: its
+  line names the `shed account login` to run, `shed account ls` and `shed doctor` show it, and `auto` skips it.
+  A keychain that cannot be read leaves drift `unknown`. A provider record's new `[credentials]` table holds the
+  file, the keychain service and its per-folder suffix.
+- `shed account use <provider> <name>` (`account.use`): the owner's switch. It makes a ready named account the
+  one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
+  session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
+  preference, and `account ls` shows it.
 
 ### Changed
 
@@ -340,3 +362,6 @@ All notable changes to this project are documented here. The format follows
 - An ACP or stream agent no longer inherits its lane's own variables (`SHED_ACP_HIBERNATE_AFTER`,
   `SHED_ACP_RESUME`, `SHED_ACP_MCP`, `SHED_ACP_META`), so a `shed serve` the agent starts, such as one in its
   tests, no longer picks up the lane's `--no-hibernate`.
+- `shed events` no longer drops agent text chunks for a reader that falls more than 256 chunks behind
+  but stays within the 4,096-event window: every chunk in the last 4,096 events is kept until it is read,
+  and only a reader past that window is dropped, with a `lagged` line.

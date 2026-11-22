@@ -26,6 +26,12 @@ pub(crate) async fn open(cx: &Call<'_>, provider: &str) -> Result<(Store, Provid
     Ok((store(cx), provider))
 }
 
+pub(crate) fn home() -> PathBuf {
+    crate::config::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
 pub(crate) fn store(cx: &Call<'_>) -> Store {
     Store::beside(&lock(cx.registry).path)
 }
@@ -55,7 +61,7 @@ pub(crate) fn listed(reg: &Registry, provider: &Provider, accounts: Vec<Account>
         }
         let (store, provider, name) = (Store::beside(&reg.path), provider.clone(), a.name.clone());
         tokio::spawn(async move {
-            check::status(&store, &provider, &name).await.ok();
+            check::status(&store, &provider, &name, &home()).await.ok();
             lock(&PROBING).remove(&key);
         });
     }
@@ -69,6 +75,7 @@ pub(crate) async fn beat(registry: Shared) {
             let reg = lock(&registry);
             (reg.providers.clone(), reg.path.clone())
         };
+        let store = Store::beside(&path);
         let read = move || {
             let store = Store::beside(&path);
             let all = records_in(&dir).into_iter().map(|r| (store.ls(&r), r));
@@ -77,6 +84,12 @@ pub(crate) async fn beat(registry: Shared) {
         let Ok(all) = blocking(read).await else {
             continue;
         };
+        let home = home();
+        for (accounts, record) in &all {
+            for a in accounts {
+                check::drift(&store, record, &a.name, &home).await.ok();
+            }
+        }
         let reg = lock(&registry);
         for (accounts, record) in all {
             let run = |a: &Account| reg.runs(&record.id, &a.name) > 0;
@@ -171,5 +184,5 @@ async fn checked(
     if !matches!(ended, Ok(Wake::Exited)) {
         crate::serve::kill(&registry, &terminal).await.ok();
     }
-    check::status(&store, &provider, &name).await.ok();
+    check::status(&store, &provider, &name, &home()).await.ok();
 }

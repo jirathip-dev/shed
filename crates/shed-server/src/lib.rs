@@ -23,6 +23,7 @@ pub mod machines;
 pub mod providers;
 mod registry;
 mod screen;
+mod script;
 pub mod serve;
 mod stats;
 

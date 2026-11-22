@@ -1,3 +1,3 @@
-`shed account add|ls|login|status|rm`
+`shed account add|ls|login|status|rm|use`
 
-The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `status` reads it now, `ls` lists them and `rm` signs one out and removes it (docs/accounts/store.md).
+The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `status` reads it now, `ls` lists them (the preferred one marked) and `rm` signs one out and removes it (docs/accounts/store.md). `use <provider> <name>` makes a ready named account the one `auto` picks first and moves every live `auto` and `default` lane to it; `use <provider> --clear` drops the preference (docs/accounts/accounts.md).
