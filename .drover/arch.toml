@@ -10,6 +10,7 @@ generated = [
     "crates/shed-script/tests/perf/counts.json",
     "Cargo.lock",
     "crates/shed/tests/golden/**",
+    "README.md",
 ]
 generate = "just generate"
 shared = [
@@ -33,6 +34,11 @@ shared = [
     "crates/shed/tests/fake_acp.py",
     "crates/shed-core/src/terminal/mod.rs",
     "crates/shed-proto/src/lib.rs",
+    "crates/shed-server/src/lib.rs",
+    "crates/shed-server/src/registry/mod.rs",
+    "crates/shed-server/src/config/mod.rs",
+    "crates/shed/src/main.rs",
+    "crates/shed/src/service.rs",
 ]
 
 [[layer]]
@@ -91,8 +97,13 @@ may_use = ["server", "client"]
 [[ban]]
 pattern = "Hello::ours"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-proto/src/**", "crates/shed-client/src/**", "crates/shed-server/src/lib.rs"]
-reason = "shake hands through shed_client; only the server's dispatch answers a hello"
+except = [
+    "crates/shed-proto/src/**",
+    "crates/shed-client/src/**",
+    "crates/shed-server/src/methods/hello.rs",
+    "crates/shed-server/src/dispatch.rs",
+]
+reason = "shake hands through shed_client; only the server's hello handler answers one, and dispatch's own tests send one"
 
 [[ban]]
 pattern = "Command::new"
@@ -115,7 +126,7 @@ reason = "sleep through shed_core::clock"
 [[ban]]
 pattern = "env::var"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-server/src/config.rs"]
+except = ["crates/shed-server/src/config/mod.rs"]
 reason = "read the environment through shed_server::config"
 
 [[ban]]
@@ -289,7 +300,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 400
+max_file_lines = 410
 
 [[collect]]
 dir = "crates/shed/tests"
@@ -318,3 +329,77 @@ glob = "*.md"
 [[size]]
 paths = ["crates/shed-proto/src/lib.rs"]
 max_file_lines = 80
+
+[[collect]]
+dir = "crates/shed-server/src/methods"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-server/src/registry"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-server/src/config"
+glob = "*.rs"
+
+[[size]]
+paths = ["crates/shed-server/src/config/mod.rs"]
+max_file_lines = 40
+
+[[size]]
+paths = ["crates/shed-server/src/lib.rs"]
+max_file_lines = 220
+
+[[size]]
+paths = ["crates/shed-server/src/registry/mod.rs"]
+max_file_lines = 350
+
+[[ban]]
+pattern = "super::"
+paths = ["crates/shed-server/src/methods/**"]
+except = []
+reason = "a handler shares code through a module outside methods/, never through another handler"
+
+[[ban]]
+pattern = "dispatch::"
+paths = ["crates/shed-server/src/methods/**"]
+except = []
+reason = "a handler shares code through a module outside methods/, never through another handler"
+
+[[collect]]
+dir = "crates/shed/src/cmd"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed/src/doctor"
+glob = "*.rs"
+
+[[collect]]
+dir = "docs/commands"
+glob = "*.md"
+
+[[size]]
+paths = ["crates/shed/src/main.rs"]
+max_file_lines = 80
+
+[[size]]
+paths = ["crates/shed/src/service.rs"]
+max_file_lines = 180
+
+[[ban]]
+pattern = "super::"
+paths = ["crates/shed/src/cmd/**", "crates/shed/src/doctor/**"]
+except = []
+reason = "a command or a doctor row shares code through a module outside its folder, never through another row"
+
+[[ban]]
+pattern = "cmd::"
+paths = ["crates/shed/src/cmd/**"]
+except = []
+reason = "a command shares code through a module outside cmd/, never through another command"
+
+[[ban]]
+pattern = "out::"
+paths = ["crates/shed/src/doctor/**"]
+except = []
+reason = "a doctor row returns its rows; cmd/doctor.rs prints them"
