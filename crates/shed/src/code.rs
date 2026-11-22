@@ -1,18 +1,44 @@
 use std::path::PathBuf;
 
-use clap::Subcommand;
-use shed_server::proto::{Method, OutlineParams, OutlineResult, Span};
+use clap::{Args, Subcommand};
+use shed_server::proto::{GrepParams, GrepResult, Method, OutlineParams, OutlineResult, Span};
 use shed_server::search;
 
 use crate::{Server, print};
 
 #[derive(Subcommand)]
 pub enum CodeCommand {
+    Grep(GrepArgs),
     Outline { file: PathBuf },
 }
 
+#[derive(Args)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one flag per grep option, as on the wire"
+)]
+pub struct GrepArgs {
+    #[arg(short = 'F', long)]
+    fixed: bool,
+    #[arg(short, long)]
+    ignore_case: bool,
+    #[arg(short, long)]
+    word: bool,
+    #[arg(long)]
+    count: bool,
+    #[arg(long)]
+    hidden: bool,
+    #[arg(short, long, value_name = "G")]
+    glob: Vec<String>,
+    pattern: String,
+    path: Option<PathBuf>,
+}
+
 pub fn code(server: &Server, json: bool, command: CodeCommand) -> anyhow::Result<()> {
-    let CodeCommand::Outline { file } = command;
+    let file = match command {
+        CodeCommand::Grep(args) => return grep(server, json, args),
+        CodeCommand::Outline { file } => file,
+    };
     let params = OutlineParams {
         path: server.resolve(file.clone())?,
         machine: server.machine(),
@@ -25,6 +51,22 @@ pub fn code(server: &Server, json: bool, command: CodeCommand) -> anyhow::Result
             ..found.clone()
         })
     })
+}
+
+fn grep(server: &Server, json: bool, a: GrepArgs) -> anyhow::Result<()> {
+    let params = GrepParams {
+        root: server.resolve(a.path.unwrap_or_else(|| PathBuf::from(".")))?,
+        pattern: a.pattern,
+        fixed: a.fixed,
+        ignore_case: a.ignore_case,
+        word: a.word,
+        count: a.count,
+        hidden: a.hidden,
+        glob: a.glob,
+        machine: server.machine(),
+    };
+    let found: GrepResult = server.connect(None)?.call(Method::CodeGrep, &params)?;
+    print(json, &found, || search::text::grep(&found))
 }
 
 pub fn span(s: &str) -> Result<Span, String> {

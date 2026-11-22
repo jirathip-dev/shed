@@ -232,6 +232,12 @@ All notable changes to this project are documented here. The format follows
   TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or
   256 MiB it is the new error `LIMIT`, naming the limit, its value and the file.
 - `shed file read --lines N-M` (`file.read` with `lines`) returns just that span of lines.
+- `shed code grep [-F] [-i] [-w] [--count] [--hidden] [-g GLOB]… PATTERN [PATH]` (`code.grep`, with `machine`
+  over a held link): the matching lines under a folder, grouped by the function or type that holds each one,
+  files in name order. The walk keeps to `.gitignore` (the root's, every folder's, the folders' above it up to
+  the repository's top) and `info/exclude` (also through a worktree's `.git` file), skips `.git`, dot names
+  without `--hidden`, symlinks and binary files. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`; a
+  matched line over 4,096 bytes comes back `clipped` with its full `length`.
 
 ### Changed
 

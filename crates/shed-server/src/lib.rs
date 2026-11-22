@@ -592,7 +592,8 @@ async fn linked(
     | Method::Exec
     | Method::FileRead
     | Method::FileWrite
-    | Method::CodeOutline = method
+    | Method::CodeOutline
+    | Method::CodeGrep = method
     {
         return Some(here(registry, method, request).await);
     }
@@ -843,6 +844,7 @@ async fn here(registry: &Shared, method: Method, request: &Request) -> Result<Va
         Method::MachineStats => machine_stats(registry, params(request)?).await,
         Method::Exec => exec(params(request)?).await,
         Method::CodeOutline => code::outline(params(request)?).await,
+        Method::CodeGrep => code::grep(params(request)?).await,
         _ => {
             let p: FileParams = params(request)?;
             let path = p.path.display().to_string();

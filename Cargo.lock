@@ -1079,6 +1079,8 @@ dependencies = [
 name = "shed-search"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
+ "shed-pattern",
  "shed-proto",
 ]
 

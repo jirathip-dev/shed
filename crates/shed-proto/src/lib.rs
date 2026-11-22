@@ -24,7 +24,10 @@ pub use agents::{
     Quota, Rule, Stream,
 };
 pub mod code;
-pub use code::{Kind, Lang, OutlineParams, OutlineResult, Span, Symbol};
+pub use code::{
+    FileMatches, GrepLine, GrepParams, GrepResult, Group, Kind, Lang, OutlineParams, OutlineResult,
+    Span, Symbol,
+};
 pub mod input;
 pub use input::{Input, frame};
 
@@ -331,6 +334,8 @@ pub enum Method {
     FileWrite,
     /// A file's symbols: [`OutlineParams`] → [`OutlineResult`].
     CodeOutline,
+    /// Lines that match, by the symbol that holds them: [`GrepParams`] → [`GrepResult`].
+    CodeGrep,
     /// Keep the connection alive: `{}` → `{}`, usually as a notification.
     Heartbeat,
     /// The agents shed knows: `{}` → `[AgentInfo]`.
@@ -347,7 +352,7 @@ pub enum Method {
 
 impl Method {
     /// Every method, in documentation order.
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::Hello,
         Self::Run,
         Self::Ls,
@@ -375,6 +380,7 @@ impl Method {
         Self::FileRead,
         Self::FileWrite,
         Self::CodeOutline,
+        Self::CodeGrep,
         Self::Heartbeat,
         Self::Agents,
         Self::AgentsMatch,
@@ -414,6 +420,7 @@ impl Method {
             Self::FileRead => "file.read",
             Self::FileWrite => "file.write",
             Self::CodeOutline => "code.outline",
+            Self::CodeGrep => "code.grep",
             Self::Heartbeat => "heartbeat",
             Self::Agents => "agents",
             Self::AgentsMatch => "agents.match",
@@ -507,6 +514,9 @@ impl Method {
             }
             Self::CodeOutline => {
                 "A file's functions, types, sections and blocks in file order, each with its kind, name, lines and depth, by line rules for Rust, TypeScript/JavaScript, Python, Markdown and TOML and by indentation for other files. Over 2,000 symbols or 256 MiB is `LIMIT`. `machine` reads it there."
+            }
+            Self::CodeGrep => {
+                "The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there."
             }
             Self::Heartbeat => {
                 "Keep the connection alive. Once a connection sends one, the server closes it when nothing comes from it for 30 s (two missed beats of 15 s), and writes a `heartbeat` line every 15 s into its idle `events` stream. A write the client does not take within 30 s also closes any connection."
@@ -1628,6 +1638,7 @@ impl Method {
             Self::FileRead => pair::<FileParams, Vec<u8>>(g),
             Self::FileWrite => pair::<FileParams, Empty>(g),
             Self::CodeOutline => pair::<OutlineParams, OutlineResult>(g),
+            Self::CodeGrep => pair::<GrepParams, GrepResult>(g),
             Self::Heartbeat => pair::<Empty, Empty>(g),
             Self::Agents => pair::<Empty, Vec<AgentInfo>>(g),
             Self::AgentsMatch => pair::<MatchParams, Matched>(g),
