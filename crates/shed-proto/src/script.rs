@@ -171,7 +171,9 @@ impl Method {
             | Self::AccountRm
             | Self::AccountLs
             | Self::AccountStatus
-            | Self::AccountUse => Access::Guarded,
+            | Self::AccountUse
+            | Self::ProxyKeys
+            | Self::ProxyRevoke => Access::Guarded,
             Self::Hello
             | Self::Events
             | Self::Attach
@@ -185,6 +187,7 @@ impl Method {
             | Self::Emit
             | Self::HandoverCheck
             | Self::Handover
+            | Self::ProxyRelay
             | Self::Script => Access::Refused,
         }
     }

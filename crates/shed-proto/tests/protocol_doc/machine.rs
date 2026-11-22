@@ -17,6 +17,7 @@ fn links_example() -> (Value, Value) {
         os: None,
         arch: None,
         home: None,
+        proxy: None,
     };
     let up = Link {
         hello: Some(Hello {
@@ -26,6 +27,7 @@ fn links_example() -> (Value, Value) {
         os: Some("linux".into()),
         arch: Some("x86_64".into()),
         home: Some(PathBuf::from("/home/user")),
+        proxy: Some(41_234),
         ..link(LinkState::Up, None)
     };
     let refused = "SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both";

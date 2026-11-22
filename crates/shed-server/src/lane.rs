@@ -45,7 +45,7 @@ use shed_client::Conn;
 /// The states only an ACP lane reports, beside `working`, `done` and `error`.
 pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited", "hibernated"];
 
-const GO_ON: &str = "Your account hit its usage limit, so shed moved this session to another account. \
+pub(crate) const GO_ON: &str = "Your account hit its usage limit, so shed moved this session to another account. \
                      Go on where you left off.";
 
 const MOVED: &str = "The owner moved this session to another account, so shed stopped your turn. \

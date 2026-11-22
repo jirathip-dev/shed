@@ -14,6 +14,7 @@ shed-proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+tokio = { workspace = true, features = ["io-util", "net", "rt", "time"] }
 
 [package.metadata.gate]
 test_secs = 20
@@ -22,4 +23,4 @@ test_secs = 20
 workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt", "process", "time"] }
+tokio = { workspace = true, features = ["macros", "rt", "process", "time", "net", "io-util"] }

@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use shed_accounts::{Store, check, choice, store};
+use shed_accounts::{Store, Token, check, choice, store};
 use shed_core::{Wake, clock};
 
 use crate::call::{Call, blocking};
 use crate::proto::{
-    Account, AccountName, ErrorCode, Login, Provider, RpcError, RunParams, State, TerminalInfo,
+    Account, AccountLogin, ErrorCode, Login, Provider, RpcError, RunParams, State, TerminalInfo,
 };
 use crate::registry::Registry;
 use crate::{Shared, lock, providers};
@@ -41,7 +41,7 @@ pub(crate) async fn records(cx: &Call<'_>) -> Result<Vec<Provider>, RpcError> {
     blocking(move || records_in(&dir)).await
 }
 
-fn records_in(dir: &Path) -> Vec<Provider> {
+pub(crate) fn records_in(dir: &Path) -> Vec<Provider> {
     let catalog = providers::Catalog::load(dir).0;
     let held = catalog.iter().map(|e| &e.provider);
     let held = held.filter(|p| p.config_dir_var.is_some());
@@ -135,13 +135,16 @@ pub(crate) fn shown(reg: &Registry, id: &str, account: Account) -> Account {
     }
 }
 
-pub(crate) async fn login(cx: &Call<'_>, p: AccountName) -> Result<Login, RpcError> {
+pub(crate) async fn login(cx: &Call<'_>, p: AccountLogin) -> Result<Login, RpcError> {
     let (store, provider) = open(cx, &p.provider).await?;
     let folder = store.folder(&provider, &p.name)?;
-    let Some(line) = &provider.login else {
-        let why = format!("{} has no login command", provider.agent);
+    let token = provider.token.as_ref().filter(|_| p.token);
+    let line = token.map(|t| &t.command).or(provider.login.as_ref());
+    let Some(line) = line.filter(|_| token.is_some() || !p.token) else {
+        let why = format!("{} has no login command for that", provider.agent);
         return Err(RpcError::new(ErrorCode::InvalidParams, why));
     };
+    let prefix = token.map(|t| t.prefix.clone());
     let mut reg = cx.reg()?;
     if let Some(terminal) = login_running(&reg, &p.provider, &p.name) {
         return Ok(Login { terminal });
@@ -158,6 +161,7 @@ pub(crate) async fn login(cx: &Call<'_>, p: AccountName) -> Result<Login, RpcErr
         name: Some(terminal.clone()),
         cmd,
         cwd,
+        cols: prefix.is_some().then_some(1000),
         ..RunParams::default()
     };
     reg.run(run)?;
@@ -167,7 +171,8 @@ pub(crate) async fn login(cx: &Call<'_>, p: AccountName) -> Result<Login, RpcErr
     if let Some(term) = term {
         crate::serve::watch(cx.registry, terminal.clone(), Arc::clone(&term));
         let (registry, name) = (Arc::clone(cx.registry), terminal.clone());
-        tokio::spawn(checked(registry, name, term, store, provider, p.name));
+        let account = (store, provider, p.name);
+        tokio::spawn(checked(registry, name, term, account, prefix));
     }
     Ok(Login { terminal })
 }
@@ -176,13 +181,16 @@ async fn checked(
     registry: Shared,
     terminal: String,
     term: Arc<shed_core::Terminal>,
-    store: Store,
-    provider: Provider,
-    name: String,
+    (store, provider, name): (Store, Provider, String),
+    prefix: Option<String>,
 ) {
     let ended = term.wait_until(|_| false, Some(clock::now() + LOGIN)).await;
     if !matches!(ended, Ok(Wake::Exited)) {
         crate::serve::kill(&registry, &terminal).await.ok();
+    }
+    let token = prefix.and_then(|p| Token::on_screen(&term.screen(), &p));
+    if let Some(token) = token {
+        store.save_token(&provider, &name, &token).ok();
     }
     check::status(&store, &provider, &name, &home()).await.ok();
 }
