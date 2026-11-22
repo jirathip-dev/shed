@@ -121,7 +121,8 @@ What this reverses, said plainly:
 - **`docs/acp/accounts.md`: "shed … never handles provider credentials."** Reversed. shed now holds account
   folders and setup token files, sets a run's login, and its proxy signs calls with a token. What stays true:
   shed stores no OAuth credential of its own, refreshes nothing, and never reads inside an account folder
-  except the record's `setup_files` and `session_files`. The file is rewritten in slice 3.
+  except the record's `setup_files` and `session_files`, and its `credentials.file`, read only to hash it for
+  the drift check against the keychain item. The file is rewritten in slice 3.
 - **drover #923: "drover has no account layer. Lanes run on the host's own login."** Reversed. A role or a
   fleet sets `account = "<name>"` or `"auto"`, and a limit or a sign-out is an account's state, read from shed,
   not a hold on the host. The role key `account` comes back; `accounts`, `fallback` and `[accounts]` stay

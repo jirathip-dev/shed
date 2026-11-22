@@ -2571,7 +2571,7 @@
           },
           "state": {
             "$ref": "#/components/schemas/AccountState",
-            "description": "Signed out, ready or limited."
+            "description": "Signed out, ready, limited or drifted."
           },
           "who": {
             "type": [
@@ -2584,6 +2584,17 @@
             "type": "string",
             "description": "The status on one line, redacted.",
             "default": ""
+          },
+          "drift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Drift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether its keychain item and credentials file agree; none without a check."
           },
           "checked_at": {
             "type": [
@@ -2675,9 +2686,34 @@
             "type": "string",
             "const": "limited",
             "description": "It hit a limit."
+          },
+          {
+            "type": "string",
+            "const": "drifted",
+            "description": "Its keychain item and credentials file hold different logins."
           }
         ],
         "description": "An account's state."
+      },
+      "Drift": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "clear",
+            "description": "They agree, or one of them is missing."
+          },
+          {
+            "type": "string",
+            "const": "drifted",
+            "description": "Both are there and differ."
+          },
+          {
+            "type": "string",
+            "const": "unknown",
+            "description": "The keychain could not be read."
+          }
+        ],
+        "description": "What the drift check found."
       },
       "Usage": {
         "type": "object",
@@ -3150,6 +3186,18 @@
               }
             ],
             "description": "The token proxy.",
+            "default": null
+          },
+          "credentials": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CredentialsRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the login lives, for the drift check.",
             "default": null
           },
           "terminal": {
@@ -3647,6 +3695,51 @@
           "auth"
         ],
         "description": "The token proxy: where a run on another machine's calls go, and how they are signed."
+      },
+      "CredentialsRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "The file under the config folder."
+          },
+          "default_dir": {
+            "type": "string",
+            "description": "The default config folder, under the home folder."
+          },
+          "service": {
+            "type": "string",
+            "description": "The keychain item's service for the default folder."
+          },
+          "folder_hash": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "A named folder's service: `service`, `-`, then this many hex digits of the folder path's sha256."
+          },
+          "keychain": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command that prints an item's secret, `{service}` standing for its service."
+          },
+          "missing": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The command's exit status when the item is missing."
+          }
+        },
+        "required": [
+          "file",
+          "default_dir",
+          "service",
+          "folder_hash",
+          "keychain",
+          "missing"
+        ],
+        "description": "Where a login lives besides its status command: a file in the config folder and a keychain item, whose\nsha256 are compared for drift."
       },
       "TerminalRecord": {
         "type": "object",

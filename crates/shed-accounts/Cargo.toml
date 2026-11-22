@@ -13,6 +13,7 @@ shed-core.workspace = true
 shed-proto.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 [package.metadata.gate]
 test_secs = 20
