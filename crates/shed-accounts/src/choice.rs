@@ -71,6 +71,7 @@ pub fn usable(a: &Account) -> Result<(), RpcError> {
         _ if a.name == DEFAULT => (ErrorCode::InvalidParams, "default: auto never picks it"),
         AccountState::Limited => (ErrorCode::AccountLimited, "is limited"),
         AccountState::SignedOut => (ErrorCode::AccountSignedOut, "is signed out"),
+        AccountState::Drifted => (ErrorCode::AccountSignedOut, "has drifted"),
         AccountState::Ready if !a.setup.is_empty() => (ErrorCode::AccountSetup, "holds a setup"),
         AccountState::Ready => return Ok(()),
     };
@@ -137,6 +138,7 @@ mod tests {
             state,
             who: None,
             line: String::new(),
+            drift: None,
             checked_at: None,
             limited_until: (state == AccountState::Limited).then_some(1_500),
             usage,
@@ -151,6 +153,19 @@ mod tests {
     fn preferred(mut a: Account) -> Account {
         a.preferred = true;
         a
+    }
+
+    #[test]
+    fn auto_skips_a_drifted_account_like_a_signed_out_one() {
+        let drifted = account("a", AccountState::Drifted, Some(0), 0);
+        let accounts = [
+            drifted.clone(),
+            account("b", AccountState::Ready, Some(90), 5),
+        ];
+        assert_eq!(pick(&accounts, None, 1_000).ok().as_deref(), Some("b"));
+        let alone = pick(std::slice::from_ref(&drifted), None, 1_000).map_err(|e| e.code);
+        assert_eq!(alone, Err(ErrorCode::AccountSignedOut.code()));
+        assert!(usable(&drifted).is_err());
     }
 
     #[test]

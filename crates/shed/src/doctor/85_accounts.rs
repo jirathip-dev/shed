@@ -35,9 +35,13 @@ pub(super) fn rows(cx: &Checks<'_>) -> Vec<Row> {
     };
     let now = shed_server::clock::unix_now();
     let mut rows = Vec::new();
-    for a in accounts.iter().filter(|a| a.folder.is_some()) {
+    for a in &accounts {
         let (p, n) = (&a.provider, &a.name);
-        if let Some(file) = a.setup.first() {
+        if a.state == AccountState::Drifted {
+            rows.push(Row::of("account", Err(format!("{p}/{n} drifted: {}", a.line))));
+        } else if a.folder.is_none() {
+            continue;
+        } else if let Some(file) = a.setup.first() {
             let why = format!("{p}/{n} holds {file}, a setup: no run on it; move it out");
             rows.push(Row::of("account", Err(why)));
         } else if a.state == AccountState::SignedOut {

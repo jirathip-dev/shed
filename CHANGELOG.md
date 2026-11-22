@@ -277,6 +277,16 @@ All notable changes to this project are documented here. The format follows
 - Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
   `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
   crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
+- Keychain and credentials-file drift: `account.status`, the status beat (every account, `default` too) and the
+  end of `shed account login` compare the sha256 of an account's keychain item (read from shed serve's own
+  session) with its `.credentials.json`, in memory. When both exist and differ the account is `drifted`: its
+  line names the `shed account login` to run, `shed account ls` and `shed doctor` show it, and `auto` skips it.
+  A keychain that cannot be read leaves drift `unknown`. A provider record's new `[credentials]` table holds the
+  file, the keychain service and its per-folder suffix.
+- `shed account use <provider> <name>` (`account.use`): the owner's switch. It makes a ready named account the
+  one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
+  session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
+  preference, and `account ls` shows it.
 
 ### Changed
 

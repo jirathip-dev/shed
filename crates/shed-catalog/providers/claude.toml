@@ -68,6 +68,15 @@ command = "claude setup-token"
 prefix = "sk-ant-oat"
 days = 365
 
+# Where the login lives: the keychain item, which Claude Code reads first, and the file beside it (drift check).
+[credentials]
+file = ".credentials.json"
+default_dir = ".claude"
+service = "Claude Code-credentials"
+folder_hash = 8
+keychain = ["security", "find-generic-password", "-s", "{service}", "-w"]
+missing = 44
+
 [proxy]
 upstream = "https://api.anthropic.com"
 paths = ["/v1/"]
