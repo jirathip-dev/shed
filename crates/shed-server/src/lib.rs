@@ -22,7 +22,7 @@ mod links;
 pub mod machines;
 pub mod providers;
 mod registry;
-mod relay;
+pub mod relay;
 mod screen;
 mod script;
 pub mod serve;
@@ -35,7 +35,6 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use registry::Registry;
-pub use relay::relay;
 pub use serve::serve;
 pub use shed_core::{clock, proctree, runner};
 pub use shed_proto as proto;

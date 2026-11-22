@@ -35,7 +35,7 @@ pub fn relay(socket: &Path) -> Result<(), Error> {
 
 fn reader_gone(socket: &UnixStream) {
     let out = io::stdout();
-    let mut fds = [PollFd::new(&out, PollFlags::empty())];
+    let mut fds = [PollFd::new(&out, PollFlags::IN)];
     while poll(&mut fds, None) == Err(rustix::io::Errno::INTR) {}
     let hung = PollFlags::ERR | PollFlags::HUP;
     if fds.iter().any(|fd| fd.revents().intersects(hung)) {
