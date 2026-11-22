@@ -19,7 +19,7 @@ listed = json.loads(subprocess.run([shed, "machine", "ls", "--json"], check=True
 target = next((m["target"] for m in listed if m["name"] == machine), None)
 if target is None:
     sys.exit(f"{machine}: not in `shed machine ls`")
-work = tempfile.mkdtemp(prefix="shed-script-remote-")
+work = tempfile.mkdtemp(prefix="ssr-", dir="/tmp")
 os.makedirs(f"{work}/bin")
 with open(f"{work}/config.toml", "w") as f:
     f.write(f'[machines]\n{machine} = "{target}"\n')
