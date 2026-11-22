@@ -8,6 +8,7 @@ generated = [
     "docs/protocol.md",
     "docs/shed.openrpc.json",
     "crates/shed-script/tests/perf/counts.json",
+    "skill/script/methods.md",
     "Cargo.lock",
     "crates/shed/tests/golden/**",
     "README.md",

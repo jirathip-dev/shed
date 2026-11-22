@@ -20,15 +20,18 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::Error;
 use crate::proto::{
     BUILD, ErrorCode, ExecParams, ExecResult, MachineStats, Method, RpcError, StatsParams,
 };
 use shed_client::Conn;
+use shed_core::runner::Child;
 
 const CONNECT_TIMEOUT: u32 = 10;
 static WRITES: AtomicU64 = AtomicU64::new(0);
@@ -209,6 +212,64 @@ pub fn find(path: &Path, name: &str) -> Result<Machine, Error> {
 /// [`Error::MachineVersion`] when the shed there is another version; [`Error::Unreachable`] when
 /// `ssh` or the shed there gives no answer; [`Error::Io`] when `ssh` cannot start.
 pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Conn, Error> {
+    let (conn, ssh) = dial(machine, control_dir, autostart)?;
+    ssh.keep();
+    Ok(conn)
+}
+
+struct Ssh(Option<Child>);
+
+impl Ssh {
+    fn keep(mut self) {
+        if let Some(mut child) = self.0.take() {
+            std::thread::spawn(move || child.wait());
+        }
+    }
+}
+
+impl Drop for Ssh {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.0.take() {
+            child.kill().ok();
+            std::thread::spawn(move || child.wait());
+        }
+    }
+}
+
+pub(crate) struct Ends(Arc<Mutex<(bool, Option<Ssh>)>>);
+
+impl Drop for Ends {
+    fn drop(&mut self) {
+        let mut slot = crate::lock(&self.0);
+        slot.0 = true;
+        slot.1.take();
+    }
+}
+
+pub(crate) fn alone(
+    machine: &Machine,
+    control_dir: &Path,
+) -> (
+    impl FnOnce(Method, &Value) -> Result<Value, Error> + Send + 'static,
+    Ends,
+) {
+    let (machine, control_dir) = (machine.clone(), control_dir.to_owned());
+    let ending = Arc::new(Mutex::new((false, None)));
+    let ends = Ends(Arc::clone(&ending));
+    let call = move |method, params: &Value| {
+        let (mut conn, ssh) = dial(&machine, &control_dir, false)?;
+        let mut slot = crate::lock(&ending);
+        if slot.0 {
+            return Err(io::Error::from(io::ErrorKind::Interrupted).into());
+        }
+        slot.1 = Some(ssh);
+        drop(slot);
+        Ok(conn.call(method, params)?)
+    };
+    (call, ends)
+}
+
+fn dial(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<(Conn, Ssh), Error> {
     let (ours, theirs) = UnixStream::pair()?;
     fs::DirBuilder::new()
         .recursive(true)
@@ -229,8 +290,11 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
     if autostart {
         args.push("--autostart".to_owned());
     }
-    let mut child = shed_core::runner::over("ssh", args, OwnedFd::from(theirs))?;
-    std::thread::spawn(move || child.wait());
+    let ssh = Ssh(Some(shed_core::runner::over(
+        "ssh",
+        args,
+        OwnedFd::from(theirs),
+    )?));
     match Conn::over(ours) {
         Err(shed_client::Error::Version {
             theirs, refusal, ..
@@ -256,7 +320,7 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
                 target: machine.target.clone(),
             })
         }
-        conn => Ok(conn?),
+        conn => Ok((conn?, ssh)),
     }
 }
 

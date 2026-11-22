@@ -150,11 +150,11 @@ impl Links {
         let Some(held) = held else {
             return Err(no_link("no such machine; see `shed machine ls`"));
         };
-        let control = self.control.clone();
+        let (own, _ends) = machines::alone(&held.machine, &self.control);
+        let alone = matches!(method, Method::Wait | Method::Script);
         let mut value = blocking(move || {
-            if method == Method::Wait && lock(&held.link).state == LinkState::Up {
-                let waiting = machines::connect(&held.machine, &control, false);
-                return match waiting.and_then(|mut c| Ok(c.call(method, &params)?)) {
+            if alone && lock(&held.link).state == LinkState::Up {
+                return match own(method, &params) {
                     Err(Error::Client(shed_client::Error::Rpc(e))) => Err(e),
                     Err(e) => Err(no_link(&e.to_string())),
                     Ok(value) => Ok(value),

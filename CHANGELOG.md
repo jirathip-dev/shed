@@ -245,6 +245,11 @@ All notable changes to this project are documented here. The format follows
 - The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
   called as they are, and every call that acts is first asked of the guard named in `[script]` of the
   config file (refused when none is named); the reply lists every acting call with its result.
+- `shed script -f <file>` and `shed script -` send a program to the server and print its logs and result;
+  `--check` only parses and compiles it, and `shed --on <machine> script` runs it there over a connection
+  of its own that ends with the run. `shed connect` now ends when whoever reads its output is gone, so a
+  script whose caller dropped the SSH session stops. `skill/script/` is the skill doc, with the methods list
+  generated from the protocol.
 - Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
   process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
   prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys

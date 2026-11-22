@@ -12,6 +12,7 @@ mod connect;
 mod exec;
 mod golden;
 mod link;
+mod script;
 mod split;
 mod stats;
 
