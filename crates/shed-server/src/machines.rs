@@ -25,7 +25,9 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::Error;
-use crate::proto::{BUILD, MachineStats, Method, StatsParams};
+use crate::proto::{
+    BUILD, ErrorCode, ExecParams, ExecResult, MachineStats, Method, RpcError, StatsParams,
+};
 use shed_client::Conn;
 
 const CONNECT_TIMEOUT: u32 = 10;
@@ -122,10 +124,10 @@ pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Adds machine `name` for `target` to the config file at `path`.
+/// Adds machine `name` for `target` to the config file at `path`; the same pair again changes nothing.
 ///
 /// # Errors
-/// [`Error::Config`] for a bad name or target, or a name already taken; [`load`]'s and [`save`]'s.
+/// [`Error::Config`] for a bad name or target, or a name taken by another target; [`load`]'s and [`save`]'s.
 pub fn add(path: &Path, name: &str, target: &str) -> Result<Machine, Error> {
     if bad_name(name) {
         return Err(Error::Config(format!(
@@ -138,15 +140,19 @@ pub fn add(path: &Path, name: &str, target: &str) -> Result<Machine, Error> {
         )));
     }
     let mut machines = load(path)?;
-    if machines.iter().any(|m| m.name == name) {
-        return Err(Error::Config(format!(
-            "machine {name} exists; `shed machine rm {name}` first"
-        )));
-    }
     let machine = Machine {
         name: name.to_owned(),
         target: target.to_owned(),
     };
+    match machines.iter().find(|m| m.name == name) {
+        Some(m) if *m == machine => return Ok(machine),
+        Some(_) => {
+            return Err(Error::Config(format!(
+                "machine {name} exists; `shed machine rm {name}` first"
+            )));
+        }
+        None => {}
+    }
     machines.push(machine.clone());
     save(path, &machines)?;
     Ok(machine)
@@ -237,6 +243,28 @@ pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result
     }
 }
 
+pub(crate) fn facts(calls: &mut Conn) -> [Option<String>; 3] {
+    let script = "uname -s; uname -m; printf '%s\\n' \"$HOME\"";
+    let params = ExecParams {
+        cmd: ["sh", "-c", script].map(str::to_owned).into(),
+        timeout: Some(10.0),
+        ..ExecParams::default()
+    };
+    let ran = calls.call::<_, ExecResult>(Method::Exec, &params);
+    let out = ran.map(|r| String::from_utf8_lossy(&r.stdout).into_owned());
+    let out = out.unwrap_or_default();
+    let mut lines = out.lines().map(str::to_owned);
+    let mut next = || lines.next().filter(|l| !l.is_empty());
+    [next().map(|os| os.to_lowercase()), next(), next()]
+}
+
+pub(crate) fn refusal(e: Error) -> RpcError {
+    match e {
+        Error::Io(e) => RpcError::new(ErrorCode::Io, e),
+        e => RpcError::new(ErrorCode::InvalidParams, e),
+    }
+}
+
 /// How long a machine has to answer `machine.stats` before it counts as offline.
 pub const STATS_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -318,6 +346,12 @@ mod tests {
         assert!(text.contains("[machines]\nbox = \"user@box.example\"\nb2 = \"b2.example\"\n"));
         assert_eq!(find(&path, "b2").unwrap().target, "b2.example");
         assert!(matches!(add(&path, "box", "x"), Err(Error::Config(_))));
+        add(&path, "box", "user@box.example").unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            text,
+            "the same pair twice is one"
+        );
         assert_eq!(remove(&path, "box").unwrap().target, "user@box.example");
         assert!(matches!(remove(&path, "box"), Err(Error::NoMachine(_))));
         assert_eq!(load(&path).unwrap().len(), 1);

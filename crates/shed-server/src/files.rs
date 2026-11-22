@@ -1,5 +1,6 @@
 use std::fs;
-use std::io::{self, BufRead as _, BufReader, Read as _};
+use std::io::{self, BufRead as _, BufReader, Read as _, Write as _};
+use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 
 use serde_json::Value;
 
@@ -29,9 +30,24 @@ fn file(p: FileParams) -> io::Result<Value> {
     };
     let mut temp = p.path.clone().into_os_string();
     temp.push(format!(".shed-{}", runner::pid()));
-    let mode = fs::metadata(&p.path).map(|m| m.permissions());
-    fs::write(&temp, data)
-        .and_then(|()| mode.map_or(Ok(()), |mode| fs::set_permissions(&temp, mode)))
+    if p.mode.is_some_and(|m| m > 0o7777) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "mode over 0o7777",
+        ));
+    }
+    let old = fs::metadata(&p.path).ok().map(|m| m.permissions().mode());
+    let mode = p.mode.or(old);
+    let write = || {
+        let mut file = fs::OpenOptions::new();
+        file.write(true).create(true).truncate(true);
+        let mut file = file.mode(mode.unwrap_or(0o666)).open(&temp)?;
+        if let Some(mode) = mode {
+            file.set_permissions(fs::Permissions::from_mode(mode))?;
+        }
+        file.write_all(&data)
+    };
+    write()
         .and_then(|()| fs::rename(&temp, &p.path))
         .inspect_err(|_| _ = fs::remove_file(&temp))?;
     Ok(empty())
