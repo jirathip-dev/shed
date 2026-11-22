@@ -6,7 +6,10 @@ Decision: shed does the host-side work and takes no decision about it. It instal
 Slices: in shed, after #256's slices: (1) the secrets crate and shed's own secrets; (2) installs; (3) slots; (4) VMs, shed on a new machine and machine setup; (5) the sandbox option and the inside socket; (6) balance probes. Each is followed by one cooee or drover issue that moves its callers and deletes the old code. About 2,250 lines added in shed, about 2,400 removed from drover and cooee.
 Open questions: (1) apps read their own secrets through the crate and shed returns none (recommended), or shed's server holds every secret and returns values to cooee and drover over its socket? (2) the Keychain needs the `security-framework` crate, which cooee already uses: add it (recommended)? (3) a sandboxed run reaches a second shed socket that only takes state reports, events and slots, so a sandboxed agent cannot start terminals: accept (recommended)? (4) one cap raise of about 2,300 lines in its own cap issue, sized by `drover cap shed` when filed.
 
-**Status:** proposed by the architect lane, 2026-11-22, read on shed `f5ca20d`, drover staging `5b2e0f796` and
+**Status:** accepted by the owner (#259); the four open questions take the recommendations above (the issue's
+amendment of 2026-11-22: each app reads its own secrets through `shed-secrets` and shed returns none,
+`security-framework` on macOS only, a sandboxed run gets the limited inside socket, one cap raise of about 2,300
+lines in its own cap issue). Proposed by the architect lane, 2026-11-22, read on shed `f5ca20d`, drover staging `5b2e0f796` and
 cooee staging `c46881513`. It follows the owner's decision of the same day (shed owns machines, VMs, installs,
 secrets and process limits; drover and cooee keep spend, when and which) and builds on the accepted accounts
 ADR ([../accounts/adr.md](../accounts/adr.md), #256) without reopening it. The split, how the callers read, the
