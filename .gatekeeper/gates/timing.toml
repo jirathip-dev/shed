@@ -1,0 +1,10 @@
+about = "the CLI timing report (soft target: a non-waiting call under 20 ms) and the history throughput report, reported only"
+fix = "fix the report test the log names"
+budget_secs = 300
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
+run = """
+set -eu
+RUSTUP_TOOLCHAIN=stable cargo test -p shed --locked --test cli timing_report -- --nocapture
+RUSTUP_TOOLCHAIN=stable cargo test -p shed-core --locked --test history throughput_report -- --nocapture
+"""

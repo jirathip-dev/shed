@@ -1,0 +1,18 @@
+growth = 10
+
+[cargo]
+agent-client-protocol = "the ACP wire types and SDK the server's agent bridge speaks: a protocol is never re-typed in-house"
+anyhow = "the CLI's error type with context, at the binary's edge only"
+clap = "the CLI's argument parsing: a parser of input from outside"
+farrier-service = "#238: writes, loads and restarts the launchd and systemd job of `shed serve`"
+futures = "stream and select helpers the ACP SDK's futures need in the server"
+pty-process = "spawns a child on a pseudo-terminal: OS process and tty setup is never written in-house"
+rustix = "safe OS calls (termios, poll, process, params) without unsafe in shed"
+schemars = "the JSON schema of the protocol types behind shed-proto's schema feature, for docs/shed.openrpc.json"
+serde = "derive the parsing and writing of the protocol, state and config files"
+serde_json = "the JSON-RPC wire format and the state file: a parser of input from outside"
+thiserror = "typed library errors with their messages"
+tokio = "the async runtime, sockets, timers and child processes of serve and the client"
+toml = "parse the providers catalog and the config: a parser of files from outside"
+unicode-width = "the column width of each character in the screen model"
+vte = "the terminal escape-sequence parser: a parser of hostile output, never written in-house"

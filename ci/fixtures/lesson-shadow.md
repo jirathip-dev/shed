@@ -1,1 +1,0 @@
-- don't X (enforced by: always-fails `false`, shadow since 2026-11-11)

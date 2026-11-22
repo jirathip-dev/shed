@@ -4,83 +4,22 @@ on:
     branches: [main, staging]
   pull_request:
     branches: [main, staging]
+    types: [opened, synchronize, reopened, edited]
 
-# A new push to a PR cancels its older run; pushes to staging and main group by sha, so none is cancelled.
 concurrency:
   group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
   cancel-in-progress: true
 
-env:
-  CARGO_TERM_COLOR: always
+permissions:
+  contents: read
 
 jobs:
-  # Every gate in one step, `just check`, as it runs locally: on the MSRV toolchain (rust-toolchain.toml),
-  # on Linux, with drover (arch-check and the lesson checks) built on 1.99.1. macOS runs the stable tests.
-  gate:
-    runs-on: ubuntu-latest
-    steps:
-      # Two commits: on a pull request the merge commit and its base, for arch-check's --base.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-      - uses: dtolnay/rust-toolchain@1.99.1
-      - uses: dtolnay/rust-toolchain@1.97.1
-        with:
-          components: clippy, rustfmt
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: just,cargo-deny
-      - name: install actionlint 1.7.12
-        run: |
-          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz |
-            tar -xz -C "$RUNNER_TEMP" actionlint
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
-      - name: install drover (herdsman's renamed CLI)
-        env:
-          RUSTUP_TOOLCHAIN: 1.99.1
-        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging drover
-      - name: a live shed's folder in the system temp dir, which temp-left must not see (#220)
-        run: mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"
-      - name: just check
-        env:
-          ARCH_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
-        run: just check
-
-  # macOS runs on the self-hosted runner in vars.CI_RUNNER (a JSON label list, docs/ci.md) for same-repo
-  # code only; fork PRs, or an unset variable, get macos-latest.
-  stable:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu, macos]
-    runs-on: >-
-      ${{ matrix.os == 'ubuntu' && 'ubuntu-latest'
-        || vars.CI_RUNNER && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNNER)
-        || 'macos-latest' }}
-    env:
-      RUSTUP_TOOLCHAIN: stable
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: test
-        run: cargo test --workspace --locked
-      - uses: taiki-e/install-action@v2
-        if: matrix.os == 'ubuntu'
-        with:
-          tool: just
-      - name: timing report (soft, < 20 ms per non-waiting call)
-        if: matrix.os == 'ubuntu'
-        run: just bench
-
-  # 200 idle terminals start and are listed under a login's default open-file limit, with serve's threads and RSS.
-  idle-terminals:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.97.1
-      - run: cargo build --release --locked -p shed
-      - name: 200 idle terminals
-        run: ulimit -Sn 256 && scripts/bench-idle.sh target/release/shed 200
+  gates:
+    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@c76c64fa790a1a5e5e608c25139960e74db8b44d # v1.1.0
+    with:
+      runners: >-
+        ${{ vars.CI_RUNNER && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+          && format('{{"linux": "ubuntu-latest", "macos": {0}}}', vars.CI_RUNNER)
+          || '{"linux": "ubuntu-latest", "macos": "macos-latest"}' }}
+    secrets:
+      private-names: ${{ secrets.PRIVATE_NAMES }}

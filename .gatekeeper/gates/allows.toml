@@ -1,0 +1,5 @@
+about = "at most 10 allow attributes in crates/ (clippy checks that each gives a reason)"
+fix = "fix the code instead of allowing the lint"
+budget_secs = 5
+paths = ["crates/**"]
+run = 'n=$(grep -rE "allow\(" crates | wc -l); echo "$n allows"; test "$n" -le 10'

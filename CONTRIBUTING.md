@@ -2,15 +2,14 @@
 
 ## Run the gates locally
 
-Install [just](https://github.com/casey/just) and [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), then:
-
 ```sh
-just check
+./.gatekeeper/run check
 ```
 
-It runs every CI gate: `fmt`, `clippy` (pedantic, at most 10 allows, each with a reason), `test`, `doc`,
-`deny`, `cap` (≤ 6,200 non-test lines across `crates/*/src`), `deps` (`shed-core` has no workspace deps)
-and `hygiene` (no setup-specific names, see `ci/denylist.txt`). Each one also runs alone, e.g. `just clippy`.
+It runs every CI gate through the pinned [gatekeeper](https://github.com/jirathip-dev/gatekeeper), which fetches
+itself and its tools: its core and rust packs (fmt, clippy, the banned APIs, cargo-deny, the line cap, arch-check,
+hygiene, actionlint) and shed's own gates in `.gatekeeper/gates/` (tests, docs, generated files, benches). One gate
+runs alone with `--gate`, e.g. `./.gatekeeper/run check --gate rust/clippy`; `./.gatekeeper/run list` lists them.
 The toolchain is the MSRV pinned in `rust-toolchain.toml`; CI also tests stable.
 
 ## Pull requests

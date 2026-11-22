@@ -911,14 +911,16 @@ mod tests {
     async fn a_user_file_changes_the_limit_line_a_lane_reads_without_a_rebuild() {
         let dir = crate::temp_dir("acp-provider");
         let line = "Out of tokens, back at 6pm.";
+        let built_in = crate::providers::Catalog::built_in();
+        let provider = &built_in.iter().next().unwrap().provider;
         let rules = || {
             let catalog = crate::providers::Catalog::load(&dir).0;
-            catalog.by_id("claude-acp").cloned().unwrap_or_default()
+            catalog.by_id(&provider.id).cloned().unwrap_or_default()
         };
         let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
         assert_eq!(states, [st("working", None), st("done", Some("end_turn"))]);
         let file = "limit = [\"Out of tokens\"]\nresets = [\"back at \"]\n";
-        std::fs::write(dir.join("claude.toml"), file).unwrap();
+        std::fs::write(dir.join(format!("{}.toml", provider.agent)), file).unwrap();
         let (states, _) = lane(vec![Step::EndTurn(line)], None, rules()).await;
         assert_eq!(
             states,

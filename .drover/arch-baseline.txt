@@ -1,0 +1,1 @@
+crates/shed/tests/server/golden.rs:run_ls_read_kill_over_the_socket_match_the_goldens 108
