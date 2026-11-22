@@ -1,7 +1,8 @@
-//! shed's code search: grep and outlines by line rules, on shed-proto's types. Reads files in `walk` alone,
+//! shed's code search: grep, find and outlines by line rules, on shed-proto's types. Reads files in `walk` alone,
 //! starts no process, reads no clock and no environment, writes nothing.
 #![forbid(unsafe_code)]
 
+mod find;
 mod grep;
 mod ignore;
 pub mod lang;
@@ -13,7 +14,9 @@ mod walk;
 use std::fmt;
 use std::time::Duration;
 
-use shed_proto::{FileMatches, GrepParams, GrepResult, OutlineParams, OutlineResult};
+use shed_proto::{
+    FileMatches, FindParams, FindResult, GrepParams, GrepResult, OutlineParams, OutlineResult,
+};
 
 use crate::matcher::Matcher;
 use crate::walk::{Tree, walk};
@@ -193,6 +196,42 @@ pub fn grep(
     Ok(GrepResult {
         matches: files.iter().map(|f| f.count).sum(),
         files,
+        searched,
+    })
+}
+
+/// The files under `p.root` that best answer its words, best first, ties by path: the first `top` of `total`.
+///
+/// # Errors
+/// [`Error::Query`] for a query with no word, [`Error::Io`] for a missing root,
+/// [`Error::Limit`] over `limits` or once `expired` is true; nothing is returned then.
+pub fn find(
+    p: &FindParams,
+    limits: &Limits,
+    expired: &dyn Fn() -> bool,
+) -> Result<FindResult, Error> {
+    let words = find::words(&p.query);
+    if words.is_empty() {
+        return Err(Error::Query("a find needs at least one word".into()));
+    }
+    let mut files = Vec::new();
+    let tree = Tree {
+        root: &p.root,
+        hidden: p.hidden,
+        globs: &p.glob,
+        limits,
+        expired,
+    };
+    let searched = walk(&tree, &mut |rel, hay| {
+        files.extend(find::rank(&words, rel, hay));
+        Ok(())
+    })?;
+    files.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.path.cmp(&b.path)));
+    let total = files.len();
+    files.truncate(p.top.unwrap_or(10).min(50));
+    Ok(FindResult {
+        files,
+        total,
         searched,
     })
 }
