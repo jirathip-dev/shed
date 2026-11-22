@@ -101,6 +101,79 @@
       }
     },
     {
+      "name": "code.find",
+      "description": "The files under `root` that best answer `query`'s words, best first: the top 10 (`top`, at most 50) of a stated `total`. A word earns points in a file's name, its folders, its symbols' names and its lines; the sum is multiplied by the words that earned any and halved for a test. Each file names its score, short `why` reasons and the symbols that earned them. The walk and its limits are `code.grep`'s. `machine` searches there.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "root",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "A folder or one file."
+          }
+        },
+        {
+          "name": "query",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Words; a file is ranked by how many of them it answers, and where."
+          }
+        },
+        {
+          "name": "top",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint",
+            "minimum": 0,
+            "description": "How many files to return: default 10, at most 50."
+          }
+        },
+        {
+          "name": "hidden",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Also dot files and dot folders, never `.git`.",
+            "default": false
+          }
+        },
+        {
+          "name": "glob",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`*.rs` keeps, `!tests/` drops, in `.gitignore` syntax."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The machine it is on, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/FindResult"
+        }
+      }
+    },
+    {
       "name": "code.grep",
       "description": "The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there.",
       "paramStructure": "by-name",
@@ -3281,21 +3354,21 @@
         ],
         "description": "A child's link to the terminal that started it."
       },
-      "GrepResult": {
+      "FindResult": {
         "type": "object",
         "properties": {
           "files": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/FileMatches"
+              "$ref": "#/components/schemas/Found"
             },
-            "description": "The files with a match, in name order, paths relative to `root` with `/`."
+            "description": "The best files, best first, ties by path."
           },
-          "matches": {
+          "total": {
             "type": "integer",
             "format": "uint",
             "minimum": 0,
-            "description": "Matched lines in all."
+            "description": "Files that earned anything; `files` is the first `top` of them."
           },
           "searched": {
             "type": "integer",
@@ -3306,12 +3379,12 @@
         },
         "required": [
           "files",
-          "matches",
+          "total",
           "searched"
         ],
-        "description": "`code.grep` result."
+        "description": "`code.find` result."
       },
-      "FileMatches": {
+      "Found": {
         "type": "object",
         "properties": {
           "path": {
@@ -3322,27 +3395,42 @@
             "$ref": "#/components/schemas/Lang",
             "description": "Its language."
           },
-          "count": {
+          "lines": {
             "type": "integer",
             "format": "uint",
             "minimum": 0,
-            "description": "Its matched lines."
+            "description": "Its lines."
           },
-          "groups": {
+          "score": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "Its rank's score."
+          },
+          "why": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Group"
+              "type": "string"
             },
-            "description": "The lines by the symbol that holds them; empty with `count`."
+            "description": "What earned it: `name is pattern`, `path has lane`, `lines: wait 89, output 6`, `a test`."
+          },
+          "symbols": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Symbol"
+            },
+            "description": "At most 5 symbols whose name holds a word, exact names first."
           }
         },
         "required": [
           "path",
           "lang",
-          "count",
-          "groups"
+          "lines",
+          "score",
+          "why",
+          "symbols"
         ],
-        "description": "One file's matches."
+        "description": "One ranked file."
       },
       "Lang": {
         "oneOf": [
@@ -3383,30 +3471,6 @@
           }
         ],
         "description": "A file's language, by its extension."
-      },
-      "Group": {
-        "type": "object",
-        "properties": {
-          "scope": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Symbol"
-            },
-            "description": "The symbols around the lines, outermost first; empty at top level."
-          },
-          "lines": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GrepLine"
-            },
-            "description": "The lines, in file order."
-          }
-        },
-        "required": [
-          "scope",
-          "lines"
-        ],
-        "description": "Matched lines under one symbol."
       },
       "Symbol": {
         "type": "object",
@@ -3516,6 +3580,93 @@
           }
         ],
         "description": "A symbol's kind."
+      },
+      "GrepResult": {
+        "type": "object",
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileMatches"
+            },
+            "description": "The files with a match, in name order, paths relative to `root` with `/`."
+          },
+          "matches": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Matched lines in all."
+          },
+          "searched": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Files read."
+          }
+        },
+        "required": [
+          "files",
+          "matches",
+          "searched"
+        ],
+        "description": "`code.grep` result."
+      },
+      "FileMatches": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Relative to `root`, with `/`."
+          },
+          "lang": {
+            "$ref": "#/components/schemas/Lang",
+            "description": "Its language."
+          },
+          "count": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "Its matched lines."
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "description": "The lines by the symbol that holds them; empty with `count`."
+          }
+        },
+        "required": [
+          "path",
+          "lang",
+          "count",
+          "groups"
+        ],
+        "description": "One file's matches."
+      },
+      "Group": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Symbol"
+            },
+            "description": "The symbols around the lines, outermost first; empty at top level."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GrepLine"
+            },
+            "description": "The lines, in file order."
+          }
+        },
+        "required": [
+          "scope",
+          "lines"
+        ],
+        "description": "Matched lines under one symbol."
       },
       "GrepLine": {
         "type": "object",

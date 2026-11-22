@@ -1,12 +1,12 @@
-//! The perf gate: the ADR's queries over `tests/golden`, each one's files read, bytes read, rows and
+//! The perf gate: the ADR's grep and find queries over `tests/golden`, each one's files read, bytes read, rows and
 //! output bytes, against `tests/perf-baseline.txt`. `SHED_BLESS=1` rewrites the baseline.
 
 #![cfg(test)]
 
 use std::path::Path;
 
-use shed_proto::GrepParams;
-use shed_search::{Error, LIMITS, Limit, Limits, grep, text};
+use shed_proto::{FindParams, GrepParams};
+use shed_search::{Error, LIMITS, Limit, Limits, find, grep, text};
 
 const QUERIES: &[(&str, &[&str])] = &[
     ("Pattern::new", &["-F"]),
@@ -23,6 +23,13 @@ const QUERIES: &[(&str, &[&str])] = &[
     ("retries", &["-w"]),
     ("self", &["-F", "--count"]),
     ("fn|def|class", &["-i"]),
+];
+
+const FINDS: &[(&str, Option<usize>)] = &[
+    ("handover", None),
+    ("line cap", None),
+    ("wait output pattern", None),
+    ("queue retries", Some(3)),
 ];
 
 fn params(root: &Path, query: &str, flags: &[&str]) -> GrepParams {
@@ -45,10 +52,10 @@ fn params(root: &Path, query: &str, flags: &[&str]) -> GrepParams {
     p
 }
 
-fn bytes_read(p: &GrepParams) -> u64 {
+fn bytes_read<T>(run: &dyn Fn(&Limits) -> Result<T, Error>) -> u64 {
     let fits = |bytes| {
         let limits = Limits { bytes, ..LIMITS };
-        !matches!(grep(p, &limits, &|| false), Err(Error::Limit(o)) if o.limit == Limit::Bytes)
+        !matches!(run(&limits), Err(Error::Limit(o)) if o.limit == Limit::Bytes)
     };
     let (mut lo, mut hi) = (0, LIMITS.bytes);
     while lo < hi {
@@ -69,11 +76,29 @@ fn counts_match_the_committed_baseline() {
         let rows = if p.count { r.files.len() } else { r.matches };
         let text = text::grep(&r).len();
         let json = serde_json::to_string(&r).unwrap().len();
-        let bytes = bytes_read(&p);
+        let bytes = bytes_read(&|l| grep(&p, l, &|| false));
         let flags = flags.join(" ");
         let line = format!(
             "{query} | {flags} | {} | {bytes} | {rows} | {text} | {json}\n",
             r.searched
+        );
+        table.push_str(&line);
+    }
+    for (query, top) in FINDS {
+        let p = FindParams {
+            root: root.clone(),
+            query: (*query).into(),
+            top: *top,
+            ..FindParams::default()
+        };
+        let r = find(&p, &LIMITS, &|| false).unwrap();
+        let text = text::find(&r).len();
+        let json = serde_json::to_string(&r).unwrap().len();
+        let bytes = bytes_read(&|l| find(&p, l, &|| false));
+        let top = top.map_or("find".into(), |n| format!("find --top {n}"));
+        let line = format!(
+            "{query} | {top} | {} | {bytes} | {} | {text} | {json}\n",
+            r.searched, r.total
         );
         table.push_str(&line);
     }

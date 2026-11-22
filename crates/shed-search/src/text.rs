@@ -2,7 +2,7 @@
 
 use std::fmt::Write as _;
 
-use shed_proto::{GrepResult, OutlineResult, Symbol};
+use shed_proto::{FindResult, GrepResult, OutlineResult, Symbol};
 
 /// Grep: each file, its groups under their symbols, its lines; with `count` a file and its count a line.
 #[must_use]
@@ -38,6 +38,24 @@ pub fn grep(r: &GrepResult) -> String {
     let files = plural(r.files.len(), "file", "files");
     let searched = plural(r.searched, "file", "files");
     writeln!(out, "{found} in {files}, {searched} searched").ok();
+    out
+}
+
+/// Find: each file ranked, its reasons and its symbols, then how many of how many.
+#[must_use]
+pub fn find(r: &FindResult) -> String {
+    let mut out = String::new();
+    for (n, f) in r.files.iter().enumerate() {
+        let (path, lang, lines) = (&f.path, f.lang.name(), f.lines);
+        writeln!(out, "{}. {path} ({lang}, {lines} lines)", n + 1).ok();
+        writeln!(out, "     why: {}", f.why.join("; ")).ok();
+        for s in &f.symbols {
+            writeln!(out, "     {}", label(s)).ok();
+        }
+    }
+    let files = plural(r.total, "file", "files");
+    let searched = r.searched;
+    writeln!(out, "{} of {files}, {searched} searched", r.files.len()).ok();
     out
 }
 

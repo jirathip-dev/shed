@@ -67,6 +67,15 @@ Take over the terminal. After the response the server writes a redraw (clear, th
 {"jsonrpc":"2.0","id":1,"result":{"cmd":["make","test"],"cwd":"/home/user/project","exit":null,"keep":true,"labels":{"issue":"7","role":"impl"},"name":"build","parent":{"name":"lead","notify":true},"pid":4242,"resources":{"cpu_pct":3,"rss_mb":52},"state":"running"}}
 ```
 
+### `code.find`
+
+The files under `root` that best answer `query`'s words, best first: the top 10 (`top`, at most 50) of a stated `total`. A word earns points in a file's name, its folders, its symbols' names and its lines; the sum is multiplied by the words that earned any and halved for a test. Each file names its score, short `why` reasons and the symbols that earned them. The walk and its limits are `code.grep`'s. `machine` searches there.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"code.find","params":{"hidden":false,"query":"job retries","root":"/home/user/project","top":2}}
+{"jsonrpc":"2.0","id":1,"result":{"files":[{"lang":"rust","lines":49,"path":"src/job.rs","score":136,"symbols":[{"depth":0,"end":14,"kind":"struct","name":"Job","start":9},{"depth":0,"end":49,"kind":"impl","name":"Job","start":37}],"why":["name is job","lines: job 9, retries 4"]}],"searched":12,"total":1}}
+```
+
 ### `code.grep`
 
 The lines under `root` that match, grouped by the symbols around them, in name order. The walk keeps to `.gitignore` and `info/exclude`, skips `.git`, dot names without `hidden`, symlinks and binary files. A line over 4,096 bytes comes back `clipped` with its `length`. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`. `machine` searches there.
