@@ -480,22 +480,11 @@ struct Session {
 }
 
 fn readonly<'a>(method: Method, request: &'a Request, session: &'a Session) -> Option<&'a str> {
-    let input = matches!(
-        method,
-        Method::Send
-            | Method::Model
-            | Method::Keys
-            | Method::Resize
-            | Method::Input
-            | Method::TerminalKeys
-            | Method::TerminalResize
-            | Method::Attach
-    );
     let mut named = ["terminal", "name"].map(|k| request.params.get(k).and_then(Value::as_str));
     if named == [None, None] {
         named[0] = session.watching.as_deref();
     }
-    (named.into_iter().flatten()).find(|n| input && session.readonly.contains(*n))
+    (named.into_iter().flatten()).find(|n| method.input() && session.readonly.contains(*n))
 }
 
 async fn connection(registry: Shared, held: Arc<links::Links>, stream: tokio::net::UnixStream) {
@@ -687,7 +676,7 @@ async fn dispatch(
     if method == Method::Hello {
         return hello(session, request);
     }
-    if session.protocol.is_none() && method != Method::Discover {
+    if session.protocol.is_none() && method.needs_hello() {
         return Err(RpcError::new(
             ErrorCode::NoHello,
             "send hello with your version first",
