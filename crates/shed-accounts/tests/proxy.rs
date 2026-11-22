@@ -167,6 +167,10 @@ async fn a_live_key_is_signed_with_the_token_and_a_bad_path_or_dead_key_never_re
         "/v1/#@x",
         "v1/messages",
         "/v1\\@x",
+        "/v1/../admin",
+        "/v1/./../admin",
+        "/v1/%2e%2E/admin",
+        "/v1/.%2e?x=1",
     ] {
         let (status, body) = call(&socket, &live, path).await;
         assert!(

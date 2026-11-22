@@ -63,7 +63,10 @@ fn quoted(v: &str) -> String {
 
 fn safe(path: &str, proxy: &ProxyRecord) -> bool {
     let hostile = path.chars().any(|c| "@\\#\"".contains(c) || c.is_control());
-    !hostile && proxy.paths.iter().any(|p| path.starts_with(p.as_str()))
+    let dots = (path.split(['?', '/']))
+        .map(|seg| seg.to_ascii_lowercase().replace("%2e", "."))
+        .any(|seg| seg == "." || seg == "..");
+    !hostile && !dots && proxy.paths.iter().any(|p| path.starts_with(p.as_str()))
 }
 
 async fn read(stream: &mut BufReader<UnixStream>) -> io::Result<Request> {
