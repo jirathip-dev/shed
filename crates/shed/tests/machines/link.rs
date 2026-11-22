@@ -133,6 +133,9 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     common::eventually("reconnecting", || {
         link(&root, "box")["state"] == "reconnecting"
     });
+    let down = link(&root, "box");
+    assert!(down["down_since"].is_u64(), "{down}");
+    assert_eq!(down["down_since"], down["since"], "left up at the drop");
     let dropped = Instant::now();
     on_remote(&["run", "--name", "r2", "--", "sleep", "100"]);
     on_remote(&["state", "r1", "working"]);
@@ -140,7 +143,12 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     until("box/r2", "killed", &mut seen);
     let waited = dropped.elapsed();
     assert!(waited < Duration::from_secs(10), "{waited:?}");
-    assert_eq!(link(&root, "box")["state"], "up");
+    let up = link(&root, "box");
+    assert_eq!(
+        (&up["state"], up.get("down_since")),
+        (&json!("up"), None),
+        "{up}"
+    );
 
     let seqs: Vec<u64> = seen.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
     assert_eq!(

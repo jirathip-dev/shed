@@ -733,7 +733,7 @@
     },
     {
       "name": "exec",
-      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it, and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
+      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -782,6 +782,17 @@
               "maximum": 255
             },
             "description": "Bytes fed to its stdin, then closed."
+          }
+        },
+        {
+          "name": "env",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Variables for it, over the server's own. Kept in memory only."
           }
         },
         {
@@ -849,6 +860,19 @@
           }
         },
         {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "`file.write`: the file's mode (e.g. `0o600`), set before any byte is written; default the old file's."
+          }
+        },
+        {
           "name": "machine",
           "required": false,
           "schema": {
@@ -875,7 +899,7 @@
     },
     {
       "name": "file.write",
-      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept. `machine` writes it there.",
+      "description": "Replace a file with `data`: written to a temp file beside it, then renamed over it, its mode kept, or `mode` when given (the temp file has it before any byte is written). `machine` writes it there.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -916,6 +940,19 @@
               }
             ],
             "description": "`file.read`: only these lines."
+          }
+        },
+        {
+          "name": "mode",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "`file.write`: the file's mode (e.g. `0o600`), set before any byte is written; default the old file's."
           }
         },
         {
@@ -1176,8 +1213,37 @@
       }
     },
     {
+      "name": "machine.add",
+      "description": "Add a machine to the config file, as `shed machine add` does, and start holding its link; the same name and target again is the same machine, another target under a taken name `INVALID_PARAMS`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The machine's name."
+          }
+        },
+        {
+          "name": "target",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "Its `ssh` target, `[user@]host`."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "machine.links",
-      "description": "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, and why it is down. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.",
+      "description": "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, why it is down, and `down_since`, when it last left `up` (or was first tried; a retry does not move it); once up, the shed there (`hello`) and the machine's `os`, `arch` and `home`. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `terminal.procs`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.",
       "paramStructure": "by-name",
       "params": [],
       "result": {
@@ -1191,8 +1257,29 @@
       }
     },
     {
+      "name": "machine.rm",
+      "description": "Remove a machine from the config file, as `shed machine rm` does, and drop its held link; removing one that is not there is a no-op.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "machine.stats",
-      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), swap used, free space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`.",
+      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1206,6 +1293,30 @@
             "format": "uint64",
             "minimum": 0,
             "description": "Add the kept samples taken after this time (unix seconds) as `history`."
+          }
+        },
+        {
+          "name": "top",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint32",
+            "minimum": 0,
+            "description": "Add the processes using the most CPU and the most memory, this many of each."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ask this machine, over its held link."
           }
         }
       ],
@@ -1946,6 +2057,30 @@
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "terminal.procs",
+      "description": "The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The terminal's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Proc"
+          }
         }
       }
     },
@@ -4625,6 +4760,47 @@
               "null"
             ],
             "description": "Why it is down: the last connect's error."
+          },
+          "down_since": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it last left `up` (or was first tried), unix seconds; a retry does not move it, `up` clears it."
+          },
+          "hello": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Hello"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The shed there, as its `hello` answered: version, build and protocol."
+          },
+          "os": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its `uname -s`, lowercase: `darwin`, `linux`."
+          },
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its `uname -m`: `arm64`, `x86_64`."
+          },
+          "home": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its `HOME`."
           }
         },
         "required": [
@@ -4673,17 +4849,45 @@
             "minimum": 0,
             "description": "Percent of memory not available."
           },
+          "mem_free_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Memory available without swapping, MiB.",
+            "default": 0
+          },
+          "mem_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Physical memory, MiB.",
+            "default": 0
+          },
           "swap_used_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Swap in use, MiB."
           },
+          "swap_out_pages": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Pages swapped out since boot; the rate is the difference of two samples.",
+            "default": 0
+          },
           "disk_free_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Free space on the volume of the state file, MiB."
+          },
+          "disk_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The size of that volume, MiB.",
+            "default": 0
           },
           "cpus": {
             "type": "integer",
@@ -4712,6 +4916,20 @@
               "$ref": "#/components/schemas/Sample"
             },
             "description": "The kept samples (one a minute, 24 h) after `since`, oldest first."
+          },
+          "top_cpu": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proc"
+            },
+            "description": "With `top`: the processes using the most CPU, most first."
+          },
+          "top_mem": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proc"
+            },
+            "description": "With `top`: the processes using the most memory, most first."
           }
         },
         "required": [
@@ -4746,17 +4964,45 @@
             "minimum": 0,
             "description": "Percent of memory not available."
           },
+          "mem_free_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Memory available without swapping, MiB.",
+            "default": 0
+          },
+          "mem_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Physical memory, MiB.",
+            "default": 0
+          },
           "swap_used_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Swap in use, MiB."
           },
+          "swap_out_pages": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Pages swapped out since boot; the rate is the difference of two samples.",
+            "default": 0
+          },
           "disk_free_mb": {
             "type": "integer",
             "format": "uint64",
             "minimum": 0,
             "description": "Free space on the volume of the state file, MiB."
+          },
+          "disk_total_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The size of that volume, MiB.",
+            "default": 0
           },
           "cpus": {
             "type": "integer",
@@ -4791,6 +5037,71 @@
           "terminals"
         ],
         "description": "One sample of a machine's health."
+      },
+      "Proc": {
+        "type": "object",
+        "properties": {
+          "pid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its id."
+          },
+          "ppid": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Its parent's id."
+          },
+          "depth": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "`terminal.procs`: how far below the terminal's own process it is."
+          },
+          "cpu_pct": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "CPU used over its life, percent of one core."
+          },
+          "rss_mb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Resident memory, MiB."
+          },
+          "elapsed_s": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds since it started."
+          },
+          "command": {
+            "type": "string",
+            "description": "Its command line."
+          },
+          "terminal": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`machine.stats`: the terminal whose process tree holds it."
+          },
+          "own": {
+            "type": "boolean",
+            "description": "`terminal.procs`: the agent's own process, not work it started.",
+            "default": false
+          }
+        },
+        "required": [
+          "pid",
+          "ppid",
+          "depth",
+          "cpu_pct",
+          "rss_mb",
+          "elapsed_s",
+          "command"
+        ],
+        "description": "One process, as `terminal.procs` and `machine.stats`'s `top` report it."
       },
       "Cursor": {
         "type": "object",

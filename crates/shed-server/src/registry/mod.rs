@@ -15,6 +15,7 @@ mod guard;
 mod handover;
 mod io;
 mod load;
+pub(crate) mod procs;
 mod run;
 mod save;
 mod stream;
