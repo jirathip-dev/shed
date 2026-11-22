@@ -1,5 +1,5 @@
 # Every CI gate, locally.
-check: generate fmt clippy banned budget doc deny cap deps hygiene neutral comments actionlint self-hosted arch protocol lessons temp-left
+check: generate fmt clippy banned budget doc deny cap deps hygiene neutral boundary comments actionlint self-hosted arch protocol lessons temp-left
 
 # The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
@@ -64,6 +64,11 @@ hygiene:
 neutral:
     scripts/neutral-core.sh
     ! scripts/neutral-core.sh ci/fixtures/leaky-core
+
+# No workflow or chat code in shed (#257); the fixture proves the check bites.
+boundary:
+    scripts/boundary.sh
+    ! scripts/boundary.sh ci/fixtures/boundary
 
 # The comment rule (#65); the two breaking fixtures prove the check bites, the allowed one that it passes.
 comments:
