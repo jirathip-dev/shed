@@ -3065,6 +3065,18 @@
             ],
             "description": "The token proxy.",
             "default": null
+          },
+          "terminal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TerminalRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp/provider-records.md`)."
@@ -3549,6 +3561,201 @@
           "auth"
         ],
         "description": "The token proxy: where a run on another machine's calls go, and how they are signed."
+      },
+      "TerminalRecord": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command line that starts it, `{file}` standing for its settings patch.",
+            "default": []
+          },
+          "processes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names of its processes.",
+            "default": []
+          },
+          "version": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VersionPin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The version it is pinned at.",
+            "default": null
+          },
+          "idle_after": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds of silence after which it reads `idle`, for a `run` that sets no `idle_after`.",
+            "default": null
+          },
+          "wizard": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Wizard"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first-run screen `run` dismisses.",
+            "default": null
+          },
+          "ready": {
+            "$ref": "#/components/schemas/StateWait",
+            "description": "The states a `send` waits for before it types.",
+            "default": {
+              "states": [],
+              "secs": 0
+            }
+          },
+          "echo": {
+            "$ref": "#/components/schemas/EchoCheck",
+            "description": "How a `send` checks that its text reached the screen.",
+            "default": {
+              "chars": 0,
+              "attempts": 0,
+              "secs": 0
+            }
+          },
+          "accepted": {
+            "$ref": "#/components/schemas/StateWait",
+            "description": "The states that, after enter, show the prompt was taken.",
+            "default": {
+              "states": [],
+              "secs": 0
+            }
+          }
+        },
+        "description": "A terminal agent: its start, its setup wizard and how a `send` delivers a prompt to its screen."
+      },
+      "VersionPin": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The command that prints the version."
+          },
+          "line": {
+            "type": "string",
+            "description": "The text that starts the output line the version follows."
+          },
+          "pin": {
+            "type": "string",
+            "description": "The pinned version."
+          }
+        },
+        "required": [
+          "command",
+          "line",
+          "pin"
+        ],
+        "description": "The version a terminal agent is pinned at, and how to read the installed one."
+      },
+      "Wizard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "any": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The texts that show it, any one of them."
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The keys pressed when it shows."
+          },
+          "settle": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds to wait after the keys before a `send` may type."
+          }
+        },
+        "required": [
+          "any",
+          "keys",
+          "settle"
+        ],
+        "description": "A first-run screen and the keys that dismiss it."
+      },
+      "StateWait": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "states": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The states, any one of them."
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds before the `send` fails."
+          }
+        },
+        "required": [
+          "states",
+          "secs"
+        ],
+        "description": "States to wait for, and for how long."
+      },
+      "EchoCheck": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "chars": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0,
+            "description": "How many characters of the prompt's first line it looks for; 0 skips the check."
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "How many times the text is typed before the `send` fails."
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds each attempt waits for the echo."
+          }
+        },
+        "required": [
+          "chars",
+          "attempts",
+          "secs"
+        ],
+        "description": "The prompt's echo: its first `chars` characters must show on the screen before enter."
       },
       "Agent": {
         "type": "object",
@@ -6404,6 +6611,10 @@
       "ACCOUNT_LIMITED": {
         "code": -32015,
         "message": "ACCOUNT_LIMITED"
+      },
+      "NOT_DELIVERED": {
+        "code": -32016,
+        "message": "NOT_DELIVERED"
       },
       "INVALID_REQUEST": {
         "code": -32600,

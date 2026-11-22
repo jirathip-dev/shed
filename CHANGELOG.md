@@ -245,6 +245,12 @@ All notable changes to this project are documented here. The format follows
 - The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
   called as they are, and every call that acts is first asked of the guard named in `[script]` of the
   config file (refused when none is named); the reply lists every acting call with its result.
+- Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
+  process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
+  prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys
+  when it shows; `send` waits for a ready state, types the text, retypes it until its start shows, presses
+  enter and waits for an accepted state, else fails `NOT_DELIVERED`. dsh-TUI is the first:
+  `providers/dsh.toml`.
 - `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
   on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
   what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out

@@ -1,5 +1,5 @@
 use super::{Registry, internal, load::history, run::size};
-use crate::input::{DRAFT_WAIT, Input};
+use crate::input::{DRAFT_WAIT, Input, Prompt};
 use crate::lane::sessions;
 use shed_core::{Report, STATES, Screen, Size};
 use shed_proto::{
@@ -94,14 +94,23 @@ impl Registry {
     pub(crate) fn send(&self, p: SendParams) -> Result<Input, RpcError> {
         let term = Arc::clone(self.live(&p.name)?);
         let entry = self.entry(&p.name)?;
-        let mut bytes = p.text.into_bytes();
         if entry.info.acp.is_some() {
-            return Ok(Input::Now(term, bytes));
+            return Ok(Input::Now(term, p.text.into_bytes()));
         }
+        let prompt = (self.terminal_record(entry.info.labels.get("agent"))).map(|record| {
+            Box::new(Prompt {
+                echo: (p.text.lines().next().unwrap_or_default().chars())
+                    .take(record.echo.chars)
+                    .collect(),
+                record,
+                enter: !p.no_enter,
+            })
+        });
+        let mut bytes = p.text.into_bytes();
         if !p.no_paste && term.bracketed_paste() {
             bytes = [b"\x1b[200~".as_slice(), &bytes, b"\x1b[201~"].concat();
         }
-        if !p.no_enter {
+        if !p.no_enter && prompt.is_none() {
             bytes.push(b'\r');
         }
         Ok(Input::Sent {
@@ -110,6 +119,7 @@ impl Registry {
             bytes,
             draft: Arc::clone(&entry.draft),
             wait: p.draft_wait.unwrap_or(DRAFT_WAIT),
+            prompt,
         })
     }
 

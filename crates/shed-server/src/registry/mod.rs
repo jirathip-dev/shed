@@ -178,6 +178,24 @@ impl Registry {
         rules.into_iter().map(rule).collect()
     }
 
+    fn terminal_record(&self, agent: Option<&String>) -> Option<shed_proto::TerminalRecord> {
+        let catalog = crate::providers::Catalog::load(&self.providers).0;
+        catalog.by_agent(agent?)?.terminal.as_deref().cloned()
+    }
+
+    pub(crate) fn wizard(&self, name: &str) -> Option<impl Future<Output = ()> + Send + use<>> {
+        let entry = self.entries.get(name).filter(|e| e.info.acp.is_none())?;
+        let term = Arc::clone(entry.term.as_ref()?);
+        let record = self.terminal_record(entry.info.labels.get("agent"))?;
+        let held = entry.draft.hold()?;
+        Some(crate::input::dismiss(
+            term,
+            record.wizard?,
+            record.ready,
+            held,
+        ))
+    }
+
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
         self.entries
             .values()
