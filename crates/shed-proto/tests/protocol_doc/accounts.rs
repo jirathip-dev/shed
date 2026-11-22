@@ -1,7 +1,7 @@
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    Account, AccountAdd, AccountName, AccountState, AccountsParams, Login, Method, TokenInfo,
-    Usage, Window,
+    Account, AccountAdd, AccountMoves, AccountName, AccountState, AccountUse, AccountsParams,
+    Login, Method, Stayed, TokenInfo, Usage, Window,
 };
 
 fn work() -> Account {
@@ -13,6 +13,7 @@ fn work() -> Account {
         state: AccountState::Ready,
         who: Some("dev@example.com".into()),
         line: "signed in · claude.ai (dev@example.com)".into(),
+        drift: None,
         checked_at: Some(1_762_416_000),
         limited_until: None,
         usage: Some(Usage {
@@ -31,6 +32,7 @@ fn work() -> Account {
         setup: Vec::new(),
         runs: 1,
         login: None,
+        preferred: true,
     }
 }
 
@@ -70,6 +72,21 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
         ),
         Method::AccountStatus => (named(), to_value(work()).unwrap()),
         Method::AccountRm => (named(), json!({})),
+        Method::AccountUse => (
+            to_value(AccountUse {
+                provider: "claude".into(),
+                name: Some("work".into()),
+            })
+            .unwrap(),
+            to_value(AccountMoves {
+                moved: vec!["lane-1".into()],
+                stayed: vec![Stayed {
+                    terminal: "lane-2".into(),
+                    why: "on named account home".into(),
+                }],
+            })
+            .unwrap(),
+        ),
         _ => return None,
     })
 }

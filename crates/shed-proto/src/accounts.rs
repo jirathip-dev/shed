@@ -111,6 +111,26 @@ pub struct ProxyRecord {
     pub append: BTreeMap<String, String>,
 }
 
+/// Where a login lives besides its status command: a file in the config folder and a keychain item, whose
+/// sha256 are compared for drift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct CredentialsRecord {
+    /// The file under the config folder.
+    pub file: String,
+    /// The default config folder, under the home folder.
+    pub default_dir: String,
+    /// The keychain item's service for the default folder.
+    pub service: String,
+    /// A named folder's service: `service`, `-`, then this many hex digits of the folder path's sha256.
+    pub folder_hash: usize,
+    /// The command that prints an item's secret, `{service}` standing for its service.
+    pub keychain: Vec<String>,
+    /// The command's exit status when the item is missing.
+    pub missing: i32,
+}
+
 /// What a status command says of an account.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -158,7 +178,7 @@ pub struct Account {
     /// An adopted folder, linked in: `account.rm` removes the link, never the folder.
     #[serde(default)]
     pub adopted: bool,
-    /// Signed out, ready or limited.
+    /// Signed out, ready, limited or drifted.
     pub state: AccountState,
     /// The email or organisation the status command reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -166,6 +186,9 @@ pub struct Account {
     /// The status on one line, redacted.
     #[serde(default)]
     pub line: String,
+    /// Whether its keychain item and credentials file agree; none without a check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drift: Option<Drift>,
     /// When the status command last ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checked_at: Option<u64>,
@@ -187,6 +210,9 @@ pub struct Account {
     /// Its login terminal, while one runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login: Option<String>,
+    /// `auto` picks it first while it is ready (`account.use`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preferred: bool,
 }
 
 /// An account's state.
@@ -201,6 +227,21 @@ pub enum AccountState {
     Ready,
     /// It hit a limit.
     Limited,
+    /// Its keychain item and credentials file hold different logins.
+    Drifted,
+}
+
+/// What the drift check found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum Drift {
+    /// They agree, or one of them is missing.
+    Clear,
+    /// Both are there and differ.
+    Drifted,
+    /// The keychain could not be read.
+    Unknown,
 }
 
 /// A setup token's dates.
@@ -241,6 +282,37 @@ pub struct AccountName {
     pub provider: String,
     /// The account.
     pub name: String,
+}
+
+/// `account.use` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountUse {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// The named account to prefer and move the lanes to; none drops the preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// `account.use`'s result.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountMoves {
+    /// The lanes told to move.
+    pub moved: Vec<String>,
+    /// The provider's terminals that stay, and why.
+    pub stayed: Vec<Stayed>,
+}
+
+/// A terminal `account.use` leaves where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Stayed {
+    /// The terminal.
+    pub terminal: String,
+    /// Why it stays.
+    pub why: String,
 }
 
 /// `account.ls` params.

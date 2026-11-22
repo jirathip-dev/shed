@@ -15,6 +15,7 @@ Three properties, each with what holds it. "Test" means a test the slice ships; 
 | An account without a token, or of a provider without `[proxy]`, does not run on a machine. | `ACCOUNT_LOCAL_ONLY`; test |
 | The token reaches `curl` in its config on stdin, never in an argument. | test: the runner's recorded arguments |
 | The token is in no log, event, `get`, state file, or hibernated session. | the tests #191 wrote for `run`'s `env`, run again with an account |
+| The keychain item and the credentials file are read only to hash them for the drift check: the bytes are dropped at once and appear in no log, event, line, state file or method result. | test: a fake `security` and a fake folder; every method result, the doctor's output and every file under shed's folder searched for both fake values |
 | The login terminal is `redacted`: `read`, `screen.watch`, `wait --output` and the events pass through `redact`; `attach` is refused. | test per read path, with a token on the screen |
 | With `token`, shed takes the setup token from the unredacted screen itself and writes the 0600 file. | test: a fake CLI prints a token; readers see `[redacted]`, the file holds it |
 

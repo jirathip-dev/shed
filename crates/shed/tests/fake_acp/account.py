@@ -1,13 +1,13 @@
 """"account": the reply "on NAME, session file: yes|no", NAME the base name of $FAKE_HOME, and whether the
 session's file is in it. "account limit" first keeps that file in $FAKE_HOME, as Claude Code keeps its
-sessions, then hits the usage limit."""
+sessions, then hits the usage limit; "account keep" keeps the file without the limit."""
 import os
 
 
 def run(agent, text):
     home = os.environ["FAKE_HOME"]
     file = os.path.join(home, "projects", "p", f"{agent.SESSION}.jsonl")
-    if text == "account limit":
+    if text in ("account limit", "account keep"):
         os.makedirs(os.path.dirname(file), exist_ok=True)
         open(file, "w").write("{}\n")
     said = f"on {os.path.basename(home)}, session file: {'yes' if os.path.isfile(file) else 'no'}"
