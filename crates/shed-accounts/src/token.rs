@@ -58,6 +58,10 @@ impl Token {
         Ok(Self(token.to_owned()))
     }
 
+    pub(crate) fn expose(&self) -> &str {
+        &self.0
+    }
+
     pub(crate) fn save(&self, path: &Path) -> std::io::Result<()> {
         write_private(path, self.0.as_bytes())
     }

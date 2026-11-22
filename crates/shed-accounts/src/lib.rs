@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 pub mod check;
+pub mod env;
 pub mod store;
 pub mod token;
 

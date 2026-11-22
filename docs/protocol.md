@@ -2,7 +2,7 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
-Version: `0.0.0`, protocol `4`, oldest served `1`.
+Version: `0.0.0`, protocol `5`, oldest served `1`.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
@@ -28,7 +28,8 @@ and the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header v
 slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
 tokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with
 `outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,
-`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused.
+`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused;
+`account` is the account it runs on.
 
 ## Methods
 
@@ -226,8 +227,8 @@ Keep the connection alive. Once a connection sends one, the server closes it whe
 The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":3,"product":"shed","protocol":4,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
 ```
 
 ### `keys`
@@ -272,7 +273,7 @@ Each configured machine's held link: `up`, `reconnecting` or `down`, since when,
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":4,"version":"0.0.0"},"home":"/home/user","os":"linux","since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":5,"version":"0.0.0"},"home":"/home/user","os":"linux","since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
 ```
 
 ### `machine.rm`
@@ -326,12 +327,12 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":4},"openrpc":"1.3.2"}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":5},"openrpc":"1.3.2"}}
 ```
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"mem_max_mb":4096,"name":"build","parent":{"name":"lead","notify":true}}}
@@ -505,5 +506,5 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32700 | `PARSE` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 5-6 / server 56de739 protocol 3-4; update the server and restart shed serve"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 6-7 / server 56de739 protocol 4-5; update the server and restart shed serve"}}
 ```

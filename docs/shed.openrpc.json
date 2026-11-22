@@ -3,7 +3,7 @@
   "info": {
     "title": "shed",
     "version": "0.0.0",
-    "x-protocol": 4
+    "x-protocol": 5
   },
   "methods": [
     {
@@ -850,6 +850,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start` or `limit`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
           }
         ],
         "description": "`emit` params."
@@ -1660,7 +1690,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1899,6 +1929,17 @@
             "minimum": 0,
             "maximum": 65535,
             "description": "Columns; default the server's `$SHED_SIZE`, else 200."
+          }
+        },
+        {
+          "name": "account",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing."
           }
         }
       ],
@@ -3642,6 +3683,13 @@
           "redacted": {
             "type": "boolean",
             "description": "Its screen passes through `redact` on every read, and `attach` is refused."
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account it runs on (`run`'s `account`)."
           }
         },
         "required": [
@@ -3652,7 +3700,7 @@
           "keep",
           "state"
         ],
-        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,\n`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused."
+        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,\n`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused;\n`account` is the account it runs on."
       },
       "State": {
         "oneOf": [
@@ -4780,6 +4828,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start` or `limit`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
           }
         ],
         "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
@@ -5682,6 +5760,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start` or `limit`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
           }
         ],
         "description": "One event of an ACP terminal's transcript."

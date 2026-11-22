@@ -87,7 +87,7 @@ impl Store {
         self.root.join(&provider.agent).join(name)
     }
 
-    fn token_file(&self, provider: &Provider, name: &str) -> PathBuf {
+    pub(crate) fn token_file(&self, provider: &Provider, name: &str) -> PathBuf {
         self.root
             .join(&provider.agent)
             .join(format!("{name}.token"))

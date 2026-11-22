@@ -92,6 +92,9 @@ pub struct RunParams {
     /// Columns; default the server's `$SHED_SIZE`, else 200.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cols: Option<u16>,
+    /// ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 /// A child's link to the terminal that started it.
@@ -380,7 +383,8 @@ pub enum State {
 /// slash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in
 /// tokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with
 /// `outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,
-/// `wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused.
+/// `wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused;
+/// `account` is the account it runs on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct TerminalInfo {
@@ -427,4 +431,7 @@ pub struct TerminalInfo {
     /// Its screen passes through `redact` on every read, and `attach` is refused.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub redacted: bool,
+    /// The account it runs on (`run`'s `account`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
