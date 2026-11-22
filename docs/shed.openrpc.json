@@ -88,7 +88,7 @@
     },
     {
       "name": "account.ls",
-      "description": "The accounts, per provider `default` first: what shed last read of each, its token's dates (never the token) and the setup files its folder holds.",
+      "description": "The accounts, per provider `default` first, then in the order `auto` picks: what shed last read of each, its token's dates (never the token), the setup files its folder holds and the terminals on it. A reading older than the record's `usage.fresh` is read again in the background.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2495,6 +2495,15 @@
             "minimum": 0,
             "description": "When the status command last ran."
           },
+          "limited_until": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "While `state` is `limited`: when the limit ends."
+          },
           "usage": {
             "anyOf": [
               {
@@ -2524,6 +2533,13 @@
             },
             "description": "The record's `setup_files` found in its folder; not empty: no run.",
             "default": []
+          },
+          "runs": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The terminals on it now.",
+            "default": 0
           },
           "login": {
             "type": [
@@ -6140,6 +6156,14 @@
       "ACCOUNT_SETUP": {
         "code": -32013,
         "message": "ACCOUNT_SETUP"
+      },
+      "ACCOUNT_SIGNED_OUT": {
+        "code": -32014,
+        "message": "ACCOUNT_SIGNED_OUT"
+      },
+      "ACCOUNT_LIMITED": {
+        "code": -32015,
+        "message": "ACCOUNT_LIMITED"
       },
       "INVALID_REQUEST": {
         "code": -32600,

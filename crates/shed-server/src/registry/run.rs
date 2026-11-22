@@ -1,5 +1,6 @@
 use super::{Entry, Registry, internal, load::history, warm::recipe};
 use shed_accounts::Store;
+use shed_accounts::choice::{self, Choice};
 use shed_accounts::env::Injected;
 use shed_core::{History, Size, Terminal};
 use shed_proto::{ErrorCode, EventKind, RpcError, RunParams, State, TerminalInfo};
@@ -58,8 +59,18 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Registry {
-    fn account(&self, p: &RunParams) -> Result<Option<Injected>, RpcError> {
-        let Some(name) = &p.account else {
+    pub(crate) fn runs(&self, id: &str, account: &str) -> u32 {
+        let on = |e: &&Entry| {
+            let info = &e.info;
+            info.state == State::Running
+                && info.acp.as_deref() == Some(id)
+                && info.account.as_deref() == Some(account)
+        };
+        u32::try_from(self.entries.values().filter(on).count()).unwrap_or(u32::MAX)
+    }
+
+    fn account(&self, p: &mut RunParams) -> Result<Option<Injected>, RpcError> {
+        let Some(asked) = p.account.clone() else {
             return Ok(None);
         };
         let id = p
@@ -71,7 +82,22 @@ impl Registry {
         let provider = catalog
             .by_id(id)
             .ok_or_else(|| RpcError::new(ErrorCode::NoAccount, why))?;
-        Injected::for_run(&Store::beside(&self.path), provider, name, &p.env).map(Some)
+        let store = Store::beside(&self.path);
+        let name = match Choice::from(asked.as_str()) {
+            Choice::Named(name) => name,
+            Choice::Auto => {
+                let mut all = store.ls(provider);
+                for a in &mut all {
+                    a.runs = self.runs(&provider.id, &a.name);
+                }
+                let name = choice::pick(&all, None, shed_core::clock::unix_now())?;
+                let auto = crate::drivers::launch::AUTO_ACCOUNT.to_owned();
+                p.env.insert(auto, name.clone());
+                p.account = Some(name.clone());
+                name
+            }
+        };
+        Injected::for_run(&store, provider, &name, &p.env).map(Some)
     }
 
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
@@ -82,7 +108,7 @@ impl Registry {
         if p.acp.is_none() && (p.model.is_some() || p.effort.is_some()) {
             return Err(bad("model and effort need acp"));
         }
-        let account = self.account(&p)?;
+        let account = self.account(&mut p)?;
         let recipe = p.warm.then(|| recipe(&p));
         if p.acp.is_some() {
             crate::drivers::launch::bridge(&mut p, &self.socket, &self.path, &self.providers)?;

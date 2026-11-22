@@ -14,6 +14,7 @@ fn work() -> Account {
         who: Some("dev@example.com".into()),
         line: "signed in · claude.ai (dev@example.com)".into(),
         checked_at: Some(1_762_416_000),
+        limited_until: None,
         usage: Some(Usage {
             windows: vec![Window {
                 id: "5h".into(),
@@ -28,6 +29,7 @@ fn work() -> Account {
             rejected: false,
         }),
         setup: Vec::new(),
+        runs: 1,
         login: None,
     }
 }

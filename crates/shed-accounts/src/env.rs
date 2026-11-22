@@ -34,7 +34,7 @@ impl Injected {
     ///
     /// # Errors
     /// `INVALID_PARAMS` when `env` sets one of the account's variables, `NO_ACCOUNT`, `ACCOUNT_SETUP` when the
-    /// folder holds a setup, and the token file's own errors.
+    /// folder holds a setup, `ACCOUNT_LIMITED`, and the token file's own errors.
     pub fn for_run(
         store: &Store,
         provider: &Provider,
@@ -56,6 +56,13 @@ impl Injected {
                 provider.agent
             );
             return Err(RpcError::new(ErrorCode::AccountSetup, why));
+        }
+        if let Some(at) = account.limited_until {
+            let why = format!(
+                "{}/{name} is limited until {at} (unix seconds)",
+                provider.agent
+            );
+            return Err(RpcError::new(ErrorCode::AccountLimited, why));
         }
         let mut run = Self {
             unset: dropped(provider).cloned().collect(),
@@ -157,6 +164,17 @@ mod tests {
             assert_eq!(refused.code, ErrorCode::InvalidParams.code(), "{var}");
             assert!(refused.message.contains(var), "{}", refused.message);
         }
+        let limited = Reading {
+            limited_until: Some(shed_core::clock::unix_now() + 60),
+            ..Reading::default()
+        };
+        store.keep(&provider, "work", limited).expect("kept");
+        let refused = Injected::for_run(&store, &provider, "work", &BTreeMap::new()).map(|_| ());
+        let refused = refused.expect_err("limited");
+        assert_eq!(refused.code, ErrorCode::AccountLimited.code());
+        store
+            .keep(&provider, "work", Reading::default())
+            .expect("kept");
         fs::write(folder.expect("a folder").join("settings.json"), "{}").expect("write");
         let refused = Injected::for_run(&store, &provider, "work", &BTreeMap::new()).map(|_| ());
         assert_eq!(
