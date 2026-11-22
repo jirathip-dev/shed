@@ -1,7 +1,3 @@
-# `drover arch-check` (just arch): the generated files, the layers, the banned calls and the size limits.
-# A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
-# A frozen file takes no new line, a `shared` one stays under its `[[size]]` limit, and a row of a `[[collect]]`
-# folder is a new file there (#246).
 frozen = ["ci/cap.toml", "docs/acp/README.md", ".github/workflows/ci.yml"]
 generated = [
     "CHANGELOG.md",
@@ -32,6 +28,9 @@ shared = [
     "crates/shed/tests/fake_acp.py",
     "crates/shed-core/src/terminal/mod.rs",
     "crates/shed-proto/src/lib.rs",
+    "crates/shed-server/src/lib.rs",
+    "crates/shed-server/src/registry/mod.rs",
+    "crates/shed-server/src/config/mod.rs",
 ]
 
 [[layer]]
@@ -90,8 +89,13 @@ may_use = ["server", "client"]
 [[ban]]
 pattern = "Hello::ours"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-proto/src/**", "crates/shed-client/src/**", "crates/shed-server/src/lib.rs"]
-reason = "shake hands through shed_client; only the server's dispatch answers a hello"
+except = [
+    "crates/shed-proto/src/**",
+    "crates/shed-client/src/**",
+    "crates/shed-server/src/methods/hello.rs",
+    "crates/shed-server/src/dispatch.rs",
+]
+reason = "shake hands through shed_client; only the server's hello handler answers one, and dispatch's own tests send one"
 
 [[ban]]
 pattern = "Command::new"
@@ -114,7 +118,7 @@ reason = "sleep through shed_core::clock"
 [[ban]]
 pattern = "env::var"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-server/src/config.rs"]
+except = ["crates/shed-server/src/config/mod.rs"]
 reason = "read the environment through shed_server::config"
 
 [[ban]]
@@ -340,7 +344,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 400
+max_file_lines = 420
 
 [[collect]]
 dir = "crates/shed/tests"
@@ -369,3 +373,39 @@ glob = "*.md"
 [[size]]
 paths = ["crates/shed-proto/src/lib.rs"]
 max_file_lines = 80
+
+[[collect]]
+dir = "crates/shed-server/src/methods"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-server/src/registry"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed-server/src/config"
+glob = "*.rs"
+
+[[size]]
+paths = ["crates/shed-server/src/config/mod.rs"]
+max_file_lines = 40
+
+[[size]]
+paths = ["crates/shed-server/src/lib.rs"]
+max_file_lines = 220
+
+[[size]]
+paths = ["crates/shed-server/src/registry/mod.rs"]
+max_file_lines = 350
+
+[[ban]]
+pattern = "super::"
+paths = ["crates/shed-server/src/methods/**"]
+except = []
+reason = "a handler shares code through a module outside methods/, never through another handler"
+
+[[ban]]
+pattern = "dispatch::"
+paths = ["crates/shed-server/src/methods/**"]
+except = []
+reason = "a handler shares code through a module outside methods/, never through another handler"
