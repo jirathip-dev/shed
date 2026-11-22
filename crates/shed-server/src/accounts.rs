@@ -1,5 +1,3 @@
-//! What the account methods share: the store beside the state file, the provider's record and the login terminal.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 
