@@ -1,3 +1,5 @@
+//! A process held in a group of its own, for a conversation of lines or a run to its end.
+
 use std::collections::BTreeMap;
 use std::io;
 use std::path::Path;

@@ -73,7 +73,7 @@ struct Held {
 struct Alive {
     stdin: ChildStdin,
     lines: Lines<BufReader<ChildStdout>>,
-    _process: runner::Held,
+    _process: runner::held::Held,
 }
 
 type Refusal = (&'static str, String);
@@ -164,7 +164,7 @@ impl Held {
 }
 
 fn start(guard: &[String]) -> Result<Alive, Refusal> {
-    let started = runner::held(guard, Path::new("."), &BTreeMap::new(), false);
+    let started = runner::held::held(guard, Path::new("."), &BTreeMap::new(), false);
     let mut process = started.map_err(|e| failed(&format!("could not start: {e}")))?;
     let pipes = process.child.stdin.take().zip(process.child.stdout.take());
     let (stdin, stdout) = pipes.ok_or_else(|| failed("could not start: no pipes"))?;

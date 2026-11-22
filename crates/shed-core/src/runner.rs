@@ -11,10 +11,9 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _};
 
-pub use held::{Held, held};
 pub use std::process::{Child, ExitCode, ExitStatus};
 
-mod held;
+pub mod held;
 
 /// Runs `program` with `args` and `envs` to its end, stdout and stderr captured, stdin empty.
 ///
@@ -103,7 +102,7 @@ pub async fn exec(
     timeout: Duration,
     limit: u64,
 ) -> io::Result<(ExitStatus, Vec<u8>, Vec<u8>)> {
-    let mut held = held(cmd, cwd, env, true)?;
+    let mut held = held::held(cmd, cwd, env, true)?;
     let child = &mut held.child;
     let (input, out, err) = (child.stdin.take(), child.stdout.take(), child.stderr.take());
     let feed = async move {
