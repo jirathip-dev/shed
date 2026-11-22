@@ -286,7 +286,7 @@ read -r line; printf '\033]7501;state=working\007got: %s\n' "$line"; exec sleep 
         call(&registry, Method::Run, run).await.unwrap();
         let term = Arc::clone(crate::lock(&registry).live("t").unwrap());
         shows(&term, ">").await;
-        let start = tokio::time::Instant::now();
+        let start = tokio_now();
         let sent = call(
             &registry,
             Method::Send,
