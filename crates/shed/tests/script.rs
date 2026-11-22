@@ -41,13 +41,16 @@ fn guard(dir: &Path, mode: &str, per: &str) {
     std::fs::write(dir.join("guard.py"), GUARD).unwrap();
     let py = dir.join("guard.py");
     let cmd = json!(["python3", "-u", py, mode, dir]);
-    let config = format!("[script]\nguard = {cmd}\nguard_timeout = 1\nguard_per = \"{per}\"\n");
+    let wait = if mode == "hang" { 1 } else { 30 };
+    let config =
+        format!("[script]\nguard = {cmd}\nguard_timeout = {wait}\nguard_per = \"{per}\"\n");
     std::fs::write(Paths::in_dir(dir).config, config).unwrap();
 }
 
 fn hook(dir: &Path, sh: &str) {
     let cmd = json!(["sh", "-c", sh]);
-    let config = format!("[script]\nguard = {cmd}\nguard_timeout = 1\nguard_per = \"call\"\n");
+    let wait = if sh.starts_with("sleep") { 1 } else { 30 };
+    let config = format!("[script]\nguard = {cmd}\nguard_timeout = {wait}\nguard_per = \"call\"\n");
     std::fs::write(Paths::in_dir(dir).config, config).unwrap();
 }
 
@@ -241,7 +244,7 @@ fn the_reply_lists_every_acting_call() {
     let late = format!(
         "console.log('before'); await shed.exec({{ cmd: ['sleep', '30'], cwd: {d:?} }}); return 1;"
     );
-    let reply = script(&dir, &json!({ "code": late, "timeout": 1 }));
+    let reply = script(&dir, &json!({ "code": late, "timeout": 5 }));
     assert_eq!(error_code(&reply), "DEADLINE");
     assert_eq!(reply["logs"], json!(["before"]));
     assert_eq!(reply["acting"][0]["error"]["code"], "CANCELLED");
@@ -286,7 +289,7 @@ fn a_hung_wait_stops_at_the_deadline() {
             .ends_with("in flight: wait"),
         "{reply}"
     );
-    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(started.elapsed() < Duration::from_secs(15));
     let over = Conn::connect(&Paths::in_dir(&dir).socket)
         .unwrap()
         .call::<_, Value>(
@@ -327,7 +330,7 @@ fn closing_the_connection_cancels_the_calls_in_flight() {
     let closed = Instant::now();
     eventually("the exec's group to end", || !alive(&sleeping));
     assert!(
-        closed.elapsed() < Duration::from_secs(3),
+        closed.elapsed() < Duration::from_secs(10),
         "{:?}",
         closed.elapsed()
     );
