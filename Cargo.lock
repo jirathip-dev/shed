@@ -1023,6 +1023,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "shed-accounts"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "shed-core",
+ "shed-proto",
+ "tokio",
+]
+
+[[package]]
 name = "shed-catalog"
 version = "0.0.0"
 dependencies = [
@@ -1093,6 +1104,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "shed-accounts",
  "shed-catalog",
  "shed-client",
  "shed-core",

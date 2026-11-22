@@ -1,4 +1,6 @@
 use super::{Entry, Registry, internal, load::history, warm::recipe};
+use shed_accounts::Store;
+use shed_accounts::env::Injected;
 use shed_core::{History, Size, Terminal};
 use shed_proto::{ErrorCode, EventKind, RpcError, RunParams, State, TerminalInfo};
 use std::fs;
@@ -36,6 +38,18 @@ pub(super) fn spawn(
     Ok(term)
 }
 
+fn command(cmd: &[String], unset: &[String], mem_max_mb: Option<u64>) -> Vec<String> {
+    let gone = unset.iter().flat_map(|v| ["-u".to_owned(), v.clone()]);
+    let env = (!unset.is_empty()).then(|| "env".to_owned());
+    let cmd: Vec<_> = env
+        .into_iter()
+        .chain(gone)
+        .chain(cmd.iter().cloned())
+        .collect();
+    let scoped = mem_max_mb.filter(|_| crate::limit::scoped());
+    scoped.map_or_else(|| cmd.clone(), |mb| crate::limit::in_scope(&cmd, mb))
+}
+
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -44,6 +58,22 @@ fn valid_name(name: &str) -> bool {
 }
 
 impl Registry {
+    fn account(&self, p: &RunParams) -> Result<Option<Injected>, RpcError> {
+        let Some(name) = &p.account else {
+            return Ok(None);
+        };
+        let id = p
+            .acp
+            .as_deref()
+            .ok_or_else(|| RpcError::new(ErrorCode::InvalidParams, "account needs acp"))?;
+        let catalog = crate::providers::Catalog::load(&self.providers).0;
+        let why = format!("{id} has no provider record");
+        let provider = catalog
+            .by_id(id)
+            .ok_or_else(|| RpcError::new(ErrorCode::NoAccount, why))?;
+        Injected::for_run(&Store::beside(&self.path), provider, name, &p.env).map(Some)
+    }
+
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
         if p.warm && (p.acp.is_none() || p.resume.is_some() || !p.env.is_empty()) {
@@ -52,6 +82,7 @@ impl Registry {
         if p.acp.is_none() && (p.model.is_some() || p.effort.is_some()) {
             return Err(bad("model and effort need acp"));
         }
+        let account = self.account(&p)?;
         let recipe = p.warm.then(|| recipe(&p));
         if p.acp.is_some() {
             crate::drivers::launch::bridge(&mut p, &self.socket, &self.path, &self.providers)?;
@@ -100,15 +131,16 @@ impl Registry {
         if let Some(log) = &history.log {
             fs::remove_file(log).ok();
         }
-        let vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
+        let mut vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
+        let Injected { set, unset } = account.unwrap_or_default();
+        vars.extend(set);
         let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
         p.idle_after = (p.idle_after).or_else(|| self.terminal_record(agent)?.idle_after);
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
-        let scoped = mem_max_mb.filter(|_| crate::limit::scoped());
-        let cmd = scoped.map(|mb| crate::limit::in_scope(&p.cmd, mb));
+        let cmd = command(&p.cmd, &unset, mem_max_mb);
         let term = spawn(
             size(p.rows, p.cols),
-            cmd.as_ref().unwrap_or(&p.cmd),
+            &cmd,
             &p.cwd,
             p.idle_after,
             &history,
@@ -137,13 +169,23 @@ impl Registry {
             parent: p.parent,
             mem_max_mb,
             redacted: false,
+            account: p.account,
         };
+        self.started(info.clone(), term);
+        Ok(self.saved(info))
+    }
+
+    fn started(&mut self, info: TerminalInfo, term: Terminal) {
         self.events.emit(&info, EventKind::Started);
+        if let Some(account) = info.account.clone() {
+            let (was, why) = (None, "start".to_owned());
+            self.events
+                .emit(&info, EventKind::Account { account, was, why });
+        }
         let entry = Entry {
             started: Some(shed_core::clock::now()),
-            ..Entry::new(info.clone(), Some(Arc::new(term)))
+            ..Entry::new(info, Some(Arc::new(term)))
         };
-        self.entries.insert(name, entry);
-        Ok(self.saved(info))
+        self.entries.insert(entry.info.name.clone(), entry);
     }
 }

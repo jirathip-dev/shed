@@ -248,6 +248,15 @@ All notable changes to this project are documented here. The format follows
   when it shows; `send` waits for a ready state, types the text, retypes it until its start shows, presses
   enter and waits for an accepted state, else fails `NOT_DELIVERED`. dsh-TUI is the first:
   `providers/dsh.toml`.
+- `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
+  on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
+  what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
+  account, a folder holding a setup, and a token file's age and mode.
+- `shed run --acp <id> --account <name>` (`run`'s `account`) runs the agent on one of shed's accounts: its
+  folder set, its setup token too while its own login is signed out, and none of the record's `scrub` or API-key
+  variables inherited from shed; a caller `env` that sets one of them is refused. `get` shows the `account`, an
+  `account` event says which one it started on, and the token is in no log, event, state file or hibernated
+  session. This reverses "shed never handles provider credentials" (docs/accounts/accounts.md). Protocol 5.
 - The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
   `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
   `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and

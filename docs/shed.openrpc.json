@@ -3,9 +3,174 @@
   "info": {
     "title": "shed",
     "version": "0.0.0",
-    "x-protocol": 4
+    "x-protocol": 5
   },
   "methods": [
+    {
+      "name": "account.add",
+      "description": "Make an account: an empty config folder of mode 0700 under `accounts/<provider>/<name>`, or with `folder` a link to that existing folder, adopted in place; a folder holding one of the record's `setup_files` is refused (`ACCOUNT_SETUP`). `token_file`, a file of mode 0600 on this host, is copied in as the account's setup token. The same call twice is one account.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`[a-z0-9-]+`."
+          }
+        },
+        {
+          "name": "folder",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Adopt this existing folder in place, by link."
+          }
+        },
+        {
+          "name": "token_file",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A setup token file on this host (0600), copied in."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Account"
+        }
+      }
+    },
+    {
+      "name": "account.login",
+      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Login"
+        }
+      }
+    },
+    {
+      "name": "account.ls",
+      "description": "The accounts, per provider `default` first: what shed last read of each, its token's dates (never the token) and the setup files its folder holds.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only this provider's."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Account"
+          }
+        }
+      }
+    },
+    {
+      "name": "account.rm",
+      "description": "The record's `logout`, then the account's folder (an adopted one: only its link), its token and its readings; refused for `default` and while its login runs.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "account.status",
+      "description": "Run the record's status command and usage probe for the account now, and keep what they say.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Account"
+        }
+      }
+    },
     {
       "name": "acp.model",
       "description": "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.",
@@ -685,6 +850,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start` or `limit`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
           }
         ],
         "description": "`emit` params."
@@ -1495,7 +1690,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1734,6 +1929,17 @@
             "minimum": 0,
             "maximum": 65535,
             "description": "Columns; default the server's `$SHED_SIZE`, else 200."
+          }
+        },
+        {
+          "name": "account",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing."
           }
         }
       ],
@@ -2241,6 +2447,213 @@
   },
   "components": {
     "schemas": {
+      "Account": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          },
+          "name": {
+            "type": "string",
+            "description": "`[a-z0-9-]+`, or `default`: the CLI's own default folder."
+          },
+          "folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its config folder; none for `default`."
+          },
+          "adopted": {
+            "type": "boolean",
+            "description": "An adopted folder, linked in: `account.rm` removes the link, never the folder.",
+            "default": false
+          },
+          "state": {
+            "$ref": "#/components/schemas/AccountState",
+            "description": "Signed out, ready or limited."
+          },
+          "who": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The email or organisation the status command reports."
+          },
+          "line": {
+            "type": "string",
+            "description": "The status on one line, redacted.",
+            "default": ""
+          },
+          "checked_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When the status command last ran."
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Usage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last usage reading."
+          },
+          "token": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its setup token's dates, never the token."
+          },
+          "setup": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The record's `setup_files` found in its folder; not empty: no run.",
+            "default": []
+          },
+          "login": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its login terminal, while one runs."
+          }
+        },
+        "required": [
+          "provider",
+          "name",
+          "state"
+        ],
+        "description": "An account: a provider's login in a config folder shed keeps, and what shed last read of it."
+      },
+      "AccountState": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "signed-out",
+            "description": "Neither signed in nor holding a token."
+          },
+          {
+            "type": "string",
+            "const": "ready",
+            "description": "The status command says signed in, or it has a token."
+          },
+          {
+            "type": "string",
+            "const": "limited",
+            "description": "It hit a limit."
+          }
+        ],
+        "description": "An account's state."
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "windows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Window"
+            },
+            "description": "Its windows."
+          },
+          "read_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was read."
+          }
+        },
+        "required": [
+          "windows",
+          "read_at"
+        ],
+        "description": "A usage reading."
+      },
+      "Window": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "used_pct": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0,
+            "description": "The percentage used."
+          },
+          "resets_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it resets."
+          }
+        },
+        "required": [
+          "id",
+          "used_pct"
+        ],
+        "description": "One usage window."
+      },
+      "TokenInfo": {
+        "type": "object",
+        "properties": {
+          "saved_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was saved."
+          },
+          "expires_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it lapses, by the record's `token.days`."
+          },
+          "rejected": {
+            "type": "boolean",
+            "description": "The upstream refused it.",
+            "default": false
+          }
+        },
+        "required": [
+          "saved_at"
+        ],
+        "description": "A setup token's dates."
+      },
+      "Login": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": "string",
+            "description": "The redacted terminal the login runs in."
+          }
+        },
+        "required": [
+          "terminal"
+        ],
+        "description": "`account.login`'s result."
+      },
       "Empty": {
         "type": "object",
         "additionalProperties": false
@@ -3477,6 +3890,13 @@
           "redacted": {
             "type": "boolean",
             "description": "Its screen passes through `redact` on every read, and `attach` is refused."
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The account it runs on (`run`'s `account`)."
           }
         },
         "required": [
@@ -3487,7 +3907,7 @@
           "keep",
           "state"
         ],
-        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,\n`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused."
+        "description": "A terminal, as `run`, `ls`, `get`, `kill` and `rm` return it: `state` is `running` or `exited`; `exit` is the\nexit status (128 + N for signal N), `null` while running or when the program was lost in a server restart;\n`pid` is set while running; `reported` is the state the program last reported (absent until then), with OSC\n7501's `kind`, `progress`, `app`, `title` and `msg` when it sent them, or `stuck` while the program has left\ninput unread for over a second (`send`, `keys` and `acp.model` then fail, their input queued); `records` are\nits OSC 7501 reports with an `id`, one per id; `idle_after` is set when the `idle` fallback is on;\n`resources` is the process tree's memory (MiB) and CPU (percent of one core) at the last sample, while\nrunning; an ACP terminal's `session` is its agent session (`id`, for `run`'s `resume`; the current `model`\nand the `models`, `[id, name]`; `run`'s `mcp_servers` with each env and header value as `***`; the agent's\nslash `commands`, `[name, description, hint]`; its last `usage`: `used` and `size` of the context window in\ntokens, and the `cost` when sent); `parent` names the terminal that started it (absent without one), with\n`outlive` and `notify` as `run` set them; `redacted` (a login's terminal) means `read`, `screen.watch`,\n`wait`'s `output` and its events show its text with anything like a token as `[redacted]`, and `attach` is refused;\n`account` is the account it runs on."
       },
       "State": {
         "oneOf": [
@@ -4615,6 +5035,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start` or `limit`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
           }
         ],
         "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
@@ -5517,6 +5967,36 @@
               "event"
             ],
             "description": "ACP: the agent's context window use and cost changed (`usage_update`)."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "account"
+              },
+              "account": {
+                "type": "string",
+                "description": "The account it runs on now."
+              },
+              "was": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The account it ran on before."
+              },
+              "why": {
+                "type": "string",
+                "description": "`start` or `limit`."
+              }
+            },
+            "required": [
+              "event",
+              "account",
+              "why"
+            ],
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
           }
         ],
         "description": "One event of an ACP terminal's transcript."
@@ -5860,8 +6340,16 @@
         "code": -32011,
         "message": "LIMIT"
       },
-      "NOT_DELIVERED": {
+      "NO_ACCOUNT": {
         "code": -32012,
+        "message": "NO_ACCOUNT"
+      },
+      "ACCOUNT_SETUP": {
+        "code": -32013,
+        "message": "ACCOUNT_SETUP"
+      },
+      "NOT_DELIVERED": {
+        "code": -32014,
         "message": "NOT_DELIVERED"
       },
       "INVALID_REQUEST": {

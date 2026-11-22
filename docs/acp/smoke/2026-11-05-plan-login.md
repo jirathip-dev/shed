@@ -26,4 +26,4 @@ Node 24.22.2, the `claude` CLI 2.1.311 logged in with `claude.ai` on a Max plan.
   text: `Failed to authenticate: OAuth session expired and could not be refreshed` (plain `claude -p` failed the
   same way). The turn never ended: no `reply` event, so `wait --until done blocked` timed out (exit 124) after
   300 s. Check `claude auth status` (`"loggedIn": true`) before a run. Since #25 this ends the turn as
-  `error` (`auth: …`) instead; see [Accounts](../accounts.md).
+  `error` (`auth: …`) instead; see [Accounts](../../accounts/accounts.md).

@@ -48,6 +48,8 @@ pub struct Args {
     model: Option<String>,
     #[arg(long, requires = "acp")]
     effort: Option<String>,
+    #[arg(long, value_name = "NAME", requires = "acp")]
+    account: Option<String>,
     #[arg(long = "env", value_name = "K=V", value_parser = label)]
     env: Vec<(String, String)>,
     #[command(flatten)]
@@ -118,6 +120,7 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         mem_max_mb: args.mem_max,
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
+        account: args.account,
     };
     let info = server.connect(Some(args.autostart))?.run(&params)?;
     cx.print(&info, || format!("{}\n", info.name))?;

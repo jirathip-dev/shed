@@ -33,7 +33,6 @@ async fn pump(out: &mut OwnedWriteHalf, mut bytes: Vec<u8>, mut rx: Receiver<Arc
 }
 
 impl Registry {
-    #[cfg(test)]
     pub(crate) fn mark_redacted(&mut self, name: &str) {
         if let Some(e) = self.entries.get_mut(name) {
             e.info.redacted = true;
