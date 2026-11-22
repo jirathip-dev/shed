@@ -172,6 +172,38 @@
       }
     },
     {
+      "name": "account.use",
+      "description": "Make a named, ready account the provider's preferred one, which `auto` picks first while it is ready and not limited, and move every live ACP or stream lane of the provider on `auto` or `default` to it: the lane stops its agent (a busy one once its tool call ends), copies the session's `session_files` and loads the session on the account, now on `auto`; a lane that was mid-turn or rate-limited gets one prompt to go on. Refused for `default`, an unknown, signed-out, limited or set-up account. Without `name` it only drops the preference.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The named account to prefer and move the lanes to; none drops the preference."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/AccountMoves"
+        }
+      }
+    },
+    {
       "name": "acp.model",
       "description": "Switch an ACP terminal's model to one of its `session.models`: its bridge asks the agent (`session/set_config_option`, the `model` option) and emits `session` with the new `model`.",
       "paramStructure": "by-name",
@@ -871,7 +903,7 @@
               },
               "why": {
                 "type": "string",
-                "description": "`start` or `limit`."
+                "description": "`start`, `limit` or `owner`."
               }
             },
             "required": [
@@ -879,7 +911,7 @@
               "account",
               "why"
             ],
-            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
           }
         ],
         "description": "`emit` params."
@@ -2625,6 +2657,10 @@
               "null"
             ],
             "description": "Its login terminal, while one runs."
+          },
+          "preferred": {
+            "type": "boolean",
+            "description": "`auto` picks it first while it is ready (`account.use`)."
           }
         },
         "required": [
@@ -2776,6 +2812,48 @@
       "Empty": {
         "type": "object",
         "additionalProperties": false
+      },
+      "AccountMoves": {
+        "type": "object",
+        "properties": {
+          "moved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The lanes told to move."
+          },
+          "stayed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Stayed"
+            },
+            "description": "The provider's terminals that stay, and why."
+          }
+        },
+        "required": [
+          "moved",
+          "stayed"
+        ],
+        "description": "`account.use`'s result."
+      },
+      "Stayed": {
+        "type": "object",
+        "properties": {
+          "terminal": {
+            "type": "string",
+            "description": "The terminal."
+          },
+          "why": {
+            "type": "string",
+            "description": "Why it stays."
+          }
+        },
+        "required": [
+          "terminal",
+          "why"
+        ],
+        "description": "A terminal `account.use` leaves where it is."
       },
       "AgentInfo": {
         "type": "object",
@@ -3045,6 +3123,14 @@
             },
             "description": "A session's files under the config folder, `{session}` standing for its id.",
             "default": []
+          },
+          "default_folder": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The CLI's own config folder, `~/` for home: where `default`'s sessions are copied from, never to.",
+            "default": null
           },
           "scrub": {
             "type": "array",
@@ -4073,6 +4159,10 @@
               "null"
             ],
             "description": "The account it runs on (`run`'s `account`)."
+          },
+          "auto": {
+            "type": "boolean",
+            "description": "Its account is `auto`'s pick: a limit or `account.use` moves it."
           }
         },
         "required": [
@@ -5232,7 +5322,7 @@
               },
               "why": {
                 "type": "string",
-                "description": "`start` or `limit`."
+                "description": "`start`, `limit` or `owner`."
               }
             },
             "required": [
@@ -5240,7 +5330,7 @@
               "account",
               "why"
             ],
-            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
           }
         ],
         "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
@@ -6164,7 +6254,7 @@
               },
               "why": {
                 "type": "string",
-                "description": "`start` or `limit`."
+                "description": "`start`, `limit` or `owner`."
               }
             },
             "required": [
@@ -6172,7 +6262,7 @@
               "account",
               "why"
             ],
-            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on."
+            "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
           }
         ],
         "description": "One event of an ACP terminal's transcript."

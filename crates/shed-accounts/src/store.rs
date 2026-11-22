@@ -37,6 +37,9 @@ pub struct Reading {
     /// What the last drift check found.
     #[serde(default)]
     pub drift: Option<Drift>,
+    /// `auto` picks it first while it is ready.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preferred: bool,
 }
 
 /// The accounts folder beside the state file.
@@ -223,6 +226,7 @@ impl Store {
             token,
             runs: 0,
             login: None,
+            preferred: reading.preferred,
         })
     }
 
@@ -249,6 +253,22 @@ impl Store {
         let key = format!("{}/{name}", provider.agent);
         self.update(|all| {
             all.insert(key, reading);
+        })
+    }
+
+    /// Makes `name` the provider's one preferred account; none drops the preference.
+    ///
+    /// # Errors
+    /// `IO` when `accounts.json` cannot be written.
+    pub fn prefer(&self, provider: &Provider, name: Option<&str>) -> Result<(), RpcError> {
+        let ours = format!("{}/", provider.agent);
+        self.update(|all| {
+            for (key, reading) in all.iter_mut() {
+                reading.preferred &= !key.starts_with(&ours);
+            }
+            if let Some(name) = name {
+                all.entry(format!("{ours}{name}")).or_default().preferred = true;
+            }
         })
     }
 
@@ -352,6 +372,25 @@ pub(crate) mod tests {
         assert_eq!(names, ["default", "work"]);
         assert!(store.add(&p, &add("Work", None)).is_err());
         assert!(store.add(&p, &add("default", None)).is_err());
+    }
+
+    #[test]
+    fn one_account_is_preferred_and_none_clears_it() {
+        let dir = temp("store-prefer");
+        let store = Store::beside(&dir.path().join("state.json"));
+        let p = provider();
+        for name in ["a", "b"] {
+            store.add(&p, &add(name, None)).expect("added");
+        }
+        let preferred = |store: &Store| -> Vec<_> {
+            let held = store.ls(&p).into_iter().filter(|a| a.preferred);
+            held.map(|a| a.name).collect()
+        };
+        store.prefer(&p, Some("a")).expect("a");
+        store.prefer(&p, Some("b")).expect("b");
+        assert_eq!(preferred(&store), ["b"]);
+        store.prefer(&p, None).expect("cleared");
+        assert!(preferred(&store).is_empty());
     }
 
     #[test]

@@ -14,6 +14,8 @@ pub enum Input {
     Model(String),
     /// Report under this terminal name from now on: a spare session taken by `run --warm`.
     Name(String),
+    /// Move to this named account now, then follow `auto`: the owner's `account.use`.
+    Account(String),
     /// Answer permission request `request` (else the oldest) with this option id or kind.
     #[serde(untagged)]
     Approve {

@@ -48,6 +48,9 @@ pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited
 const GO_ON: &str = "Your account hit its usage limit, so shed moved this session to another account. \
                      Go on where you left off.";
 
+const MOVED: &str = "The owner moved this session to another account, so shed stopped your turn. \
+                     Go on where you left off.";
+
 /// Where the bridge of terminal `name` lends its PTY's master to a server on `socket` that starts again.
 #[must_use]
 pub fn pty_socket(socket: &Path, name: &str) -> PathBuf {
@@ -104,6 +107,12 @@ pub(crate) enum Stop {
     Yes,
 }
 
+pub(crate) struct Switch {
+    to: String,
+    deliver: Option<Input>,
+    why: &'static str,
+}
+
 #[derive(Default)]
 pub(crate) struct Start {
     pub session: String,
@@ -157,7 +166,7 @@ pub(crate) struct Lane {
     sleep_after: Option<Duration>,
     hibernate_set: Option<String>,
     auto: Option<(String, PathBuf)>,
-    switch: Option<(String, Option<Input>)>,
+    switch: Option<Switch>,
 }
 
 impl Lane {
@@ -264,7 +273,14 @@ impl Lane {
     fn limited(&mut self, resets: Option<String>) {
         self.state("rate-limited", resets);
         match self.pick(true) {
-            Ok(to) => self.switch = Some((to, Some(Input::Prompt(GO_ON.to_owned())))),
+            Ok(to) => {
+                let deliver = Some(Input::Prompt(GO_ON.to_owned()));
+                self.switch = Some(Switch {
+                    to,
+                    deliver,
+                    why: "limit",
+                });
+            }
             Err(e) if e.code == ErrorCode::AccountLimited.code() => {
                 self.state("rate-limited", Some(e.message));
             }
@@ -272,22 +288,39 @@ impl Lane {
         }
     }
 
-    fn switched(&mut self, to: &str, state: &Path) -> Result<Injected, String> {
-        let (store, rules) = (Store::beside(state), &self.rules);
+    fn moving(&mut self, to: String) {
+        let deliver = if self.last.0 == "rate-limited" {
+            Some(GO_ON)
+        } else {
+            (self.turns > 0).then_some(MOVED)
+        };
+        let deliver = deliver.map(|text| Input::Prompt(text.to_owned()));
+        self.switch = Some(Switch {
+            to,
+            deliver,
+            why: "owner",
+        });
+    }
+
+    fn switched(
+        &mut self,
+        sw: &Switch,
+        (socket, state): (&Path, &Path),
+    ) -> Result<Injected, String> {
+        let (store, rules, to) = (Store::beside(state), &self.rules, sw.to.as_str());
         let injected = Injected::for_run(&store, rules, to, &BTreeMap::new());
         let injected = injected.map_err(|e| e.message)?;
-        let was = self.auto.as_ref().map(|a| a.0.clone()).unwrap_or_default();
-        if let (Ok(Some(from)), Ok(Some(into))) =
-            (store.folder(rules, &was), store.folder(rules, to))
-        {
+        let was = (self.auto.as_ref()).map_or(shed_accounts::store::DEFAULT, |a| a.0.as_str());
+        let was = was.to_owned();
+        let home = PathBuf::from(crate::config::var("HOME").unwrap_or_default());
+        let from = session::folder(&store, rules, &was, &home);
+        if let (Some(from), Ok(Some(into))) = (from, store.folder(rules, to)) {
             let copied = session::copy(rules, &self.shown.id, &from, &into);
             copied.map_err(|e| format!("moving the session to {to}: {e}"))?;
         }
-        if let Some((on, _)) = &mut self.auto {
-            to.clone_into(on);
-        }
+        self.auto = Some((to.to_owned(), socket.to_owned()));
         self.last = ("idle".to_owned(), None);
-        let (account, why) = (to.to_owned(), "limit".to_owned());
+        let (account, why) = (to.to_owned(), sw.why.to_owned());
         self.emit(EventKind::Account {
             account,
             was: Some(was),
@@ -339,7 +372,11 @@ impl Lane {
             && let Ok(to) = self.pick(false)
             && self.auto.as_ref().is_some_and(|(on, _)| *on != to)
         {
-            self.switch = Some((to, Some(input)));
+            self.switch = Some(Switch {
+                to,
+                deliver: Some(input),
+                why: "limit",
+            });
             return Ok(());
         }
         match input {
@@ -413,6 +450,7 @@ impl Lane {
                 self.asks.clear();
             }
             Input::Name(name) => return self.send(Out::Name(name)),
+            Input::Account(to) => self.moving(to),
             Input::Model(model) => {
                 if let Stop::Yes = driver.model(&model)? {
                     self.restart = true;
@@ -615,6 +653,13 @@ impl Lane {
         let gone = driver.gone();
         tokio::pin!(gone);
         loop {
+            let owner = self.switch.as_ref().is_some_and(|s| s.why == "owner");
+            if owner && self.turns > 0 && self.open.is_empty() {
+                self.turns = 0;
+                let text = std::mem::take(&mut self.reply);
+                let stop_reason = "cancelled".to_owned();
+                self.emit(EventKind::Reply { text, stop_reason });
+            }
             if (self.restart || self.switch.is_some()) && self.turns == 0 {
                 return Ok(true);
             }
@@ -824,22 +869,27 @@ fn run(
                 return Ok(child.wait().await?.code().unwrap_or(1));
             }
             stop(child);
-            let deliver = match lane.switch.take() {
-                Some((to, deliver)) => match lane.switched(&to, state) {
+            let mut deliver = None;
+            if lane.switch.is_none() {
+                match lane.asleep(&mut inputs).await {
+                    Some(Input::Account(to)) => lane.moving(to),
+                    Some(input) => deliver = Some(input),
+                    None => return Ok(0),
+                }
+            }
+            if let Some(sw) = lane.switch.take() {
+                deliver = match lane.switched(&sw, (socket, state)) {
                     Ok(account) => {
                         launch.set_account(account);
-                        deliver
+                        sw.deliver
                     }
                     Err(why) => {
-                        lane.state("rate-limited", Some(why));
+                        let was = lane.last.0.clone();
+                        lane.state(&was, Some(why));
                         None
                     }
-                },
-                None => match lane.asleep(&mut inputs).await {
-                    Some(input) => Some(input),
-                    None => return Ok(0),
-                },
-            };
+                };
+            }
             let session = lane.shown.id.clone();
             start = Start {
                 session,
