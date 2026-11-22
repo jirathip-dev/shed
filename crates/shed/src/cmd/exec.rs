@@ -34,6 +34,7 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
             .unwrap_or_default(),
         machine: server.machine(),
         cmd: args.cmd,
+        ..ExecParams::default()
     };
     let done = server.connect(None)?.exec(&params)?;
     out::raw(cx.json, &done, &done.stdout, &done.stderr)?;

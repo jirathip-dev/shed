@@ -14,6 +14,9 @@ models = [["opus", "Opus"], ["fable", "Fable"], ["sonnet", "Sonnet"], ["haiku", 
 model_env = "ANTHROPIC_MODEL"
 effort_args = ["--effort", "{effort}"]
 efforts = ["low", "medium", "high", "xhigh", "max"]
+setup_files = ["CLAUDE.md", "settings.json", "rules", "agents", "commands", "skills", "plugins"]
+session_files = ["projects/*/{session}.jsonl"]
+scrub = ["CLAUDE_CODE_OAUTH_TOKEN"]
 
 [quota]
 path = ["quota", "token_count"]
@@ -32,6 +35,45 @@ api_vars = [
   "CLAUDE_CODE_USE_VERTEX",
   "CLAUDE_CODE_USE_FOUNDRY"
 ]
+
+# The accounts (docs/accounts/login.md): how the status and the usage read, the setup token, the token proxy.
+[status_read]
+format = "json"
+signed_in = "loggedIn"
+who = ["email", "orgName"]
+how = "authMethod"
+
+[usage]
+command = "claude -p /usage"
+env = { TZ = "UTC" }
+unset = ["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]
+fresh = 300
+hold = 3600
+
+[[usage.windows]]
+id = "5h"
+line = "Current session:"
+used = "% used"
+resets = "resets "
+
+[[usage.windows]]
+id = "7d"
+line = "Current week (all models):"
+used = "% used"
+resets = "resets "
+
+[token]
+command = "claude setup-token"
+prefix = "sk-ant-oat"
+days = 365
+
+[proxy]
+upstream = "https://api.anthropic.com"
+paths = ["/v1/"]
+base_url_var = "ANTHROPIC_BASE_URL"
+key_var = "ANTHROPIC_AUTH_TOKEN"
+auth = "authorization: Bearer {token}"
+append = { "anthropic-beta" = "oauth-2025-04-20" }
 
 [hooks]
 file = ".claude/settings.json"

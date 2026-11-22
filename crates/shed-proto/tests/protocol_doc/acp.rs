@@ -245,6 +245,7 @@ fn agent_info() -> AgentInfo {
         }),
         driver: DriverKind::Acp,
         stream: None,
+        ..Provider::default()
     };
     AgentInfo {
         id: "fake-acp".into(),

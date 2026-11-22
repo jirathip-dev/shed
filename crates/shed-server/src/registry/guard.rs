@@ -35,11 +35,8 @@ impl Entry {
         tree: &[ProcessInfo],
         limit_mb: u64,
     ) -> Option<(String, EventKind, Option<i32>)> {
-        let (pid, agent, acp) = (self.info.pid, &self.agent, self.info.acp.is_some());
-        let own = |p: &&ProcessInfo| {
-            Some(p.pid) == pid || (acp && agent.as_ref().is_none_or(|a| a.contains(&p.pid)))
-        };
-        let (mine, started): (Vec<_>, Vec<_>) = tree.iter().partition(own);
+        let pid = self.info.pid;
+        let (mine, started): (Vec<_>, Vec<_>) = tree.iter().partition(|p| self.own(p.pid));
         let g = &mut self.guard;
         let (process, rss, by, end) = if crate::limit::scoped() {
             for p in &started {
@@ -175,7 +172,11 @@ impl Registry {
     pub(crate) fn machine_stats(&self, mut now: Sample, since: Option<u64>) -> MachineStats {
         now.terminals = self.counts();
         let history = since.map(|t| self.stats.since(t)).unwrap_or_default();
-        MachineStats { now, history }
+        MachineStats {
+            now,
+            history,
+            ..MachineStats::default()
+        }
     }
 }
 
@@ -219,6 +220,7 @@ mod tests {
             pgid: parent,
             rss_bytes: mb << 20,
             cpu: Duration::ZERO,
+            elapsed: Duration::ZERO,
             zombie: false,
         };
         let (child, free_child) = (1_999_999_001, 1_999_999_002);

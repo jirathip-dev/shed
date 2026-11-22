@@ -26,6 +26,8 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         session: None,
         parent: Some(lead()),
         mem_max_mb: None,
+        redacted: false,
+        account: None,
     }
 }
 
@@ -102,6 +104,7 @@ pub(crate) fn run_params() -> Value {
         parent: Some(lead()),
         rows: None,
         cols: None,
+        account: None,
     })
     .unwrap()
 }

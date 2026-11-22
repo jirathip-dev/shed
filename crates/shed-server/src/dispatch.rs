@@ -154,6 +154,10 @@ pub(crate) async fn dispatch(registry: &Shared, session: &mut Session, request: 
         undocumented(method, &request.params)?;
     }
     if let Some((machine, params)) = links::remote(method, request) {
+        if method == Method::Run && params.get("account").is_some() {
+            let why = "account: a run on another machine has no account until the token proxy";
+            return Err(RpcError::new(ErrorCode::InvalidParams, why));
+        }
         return session.links.call(&machine, method, params).await;
     }
     let mut cx = Call {
@@ -169,6 +173,7 @@ include!(concat!(env!("OUT_DIR"), "/methods.rs"));
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
     use std::sync::Mutex;
     use std::time::Duration;
 
@@ -181,10 +186,23 @@ mod tests {
     use crate::{HEARTBEAT, clock, temp_dir};
     use tokio::net::unix::OwnedWriteHalf;
 
-    async fn peer(name: &str, beat: bool) -> (tokio::task::JoinHandle<()>, OwnedWriteHalf) {
+    type Lines = tokio::io::Lines<tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>>;
+
+    fn registry(name: &str) -> Registry {
         let dir = temp_dir(name);
         let reg = Registry::load(&dir.join("state.json"), &dir.join("shed.sock"), Vec::new());
-        let registry = Arc::new(Mutex::new(reg.expect("a registry")));
+        reg.expect("a registry")
+    }
+
+    async fn peer(name: &str, beat: bool) -> (tokio::task::JoinHandle<()>, OwnedWriteHalf) {
+        let (conn, _, write) = served(Arc::new(Mutex::new(registry(name))), beat).await;
+        (conn, write)
+    }
+
+    async fn served(
+        registry: Shared,
+        beat: bool,
+    ) -> (tokio::task::JoinHandle<()>, Lines, OwnedWriteHalf) {
         let (server, client) = tokio::net::UnixStream::pair().expect("pair");
         let conn = tokio::spawn(connection(registry, Arc::default(), server));
         let (read, mut write) = client.into_split();
@@ -207,7 +225,151 @@ mod tests {
             let heartbeat = shed_client::notification(Method::Heartbeat, &empty()).expect("json");
             write.write_all(&heartbeat).await.expect("heartbeat sent");
         }
-        (conn, write)
+        (conn, lines, write)
+    }
+
+    async fn call(peer: &mut (Lines, OwnedWriteHalf), method: Method, params: Value) -> Value {
+        let mut line = serde_json::to_vec(&Request::new(2, method, params)).expect("json");
+        line.push(b'\n');
+        peer.1.write_all(&line).await.expect("sent");
+        next(&mut peer.0).await
+    }
+
+    async fn next(lines: &mut Lines) -> Value {
+        let line = lines.next_line().await.expect("read").expect("a line");
+        assert!(!line.contains(TOKEN), "{line}");
+        serde_json::from_str(&line).expect("json")
+    }
+
+    const TOKEN: &str = "sk-ant-oat01-abc123def456ghi789";
+
+    #[tokio::test]
+    async fn a_redacted_terminal_shows_no_token_on_any_read_path() {
+        let mut reg = registry("redacted");
+        let (head, tail) = TOKEN.split_at(12);
+        let cmd = [
+            "sh",
+            "-c",
+            "printf 'paste %s%s here\\n' \"$0\" \"$1\"; exec sleep 60",
+            head,
+            tail,
+        ];
+        let run = serde_json::json!({"name": "login", "cwd": "/", "cmd": cmd});
+        reg.run(serde_json::from_value(run).expect("run"))
+            .expect("run");
+        reg.mark_redacted("login");
+        let reg = Arc::new(Mutex::new(reg));
+        let open = || async {
+            let (_, lines, write) = served(Arc::clone(&reg), false).await;
+            (lines, write)
+        };
+        let mut peer = open().await;
+        let wait = |output: &str, timeout: u64| serde_json::json!({"name": "login", "output": output, "timeout": timeout});
+        let shown = call(&mut peer, Method::Wait, wait("paste .redacted. here", 10)).await;
+        assert_eq!(shown["result"]["outcome"], "matched", "{shown}");
+        let raw = call(&mut peer, Method::Wait, wait("abc123", 0)).await;
+        assert_eq!(raw["result"]["outcome"], "timeout", "{raw}");
+        let read = call(
+            &mut peer,
+            Method::Read,
+            serde_json::json!({"name": "login"}),
+        )
+        .await;
+        let text = read["result"]["text"].as_str().unwrap_or_default();
+        assert!(text.contains("paste [redacted] here"), "{read}");
+        let attach = call(
+            &mut peer,
+            Method::Attach,
+            serde_json::json!({"name": "login"}),
+        )
+        .await;
+        assert_eq!(attach["error"]["code"], -32006, "{attach}");
+        let mut watch = open().await;
+        let at = serde_json::json!({"terminal": "login"});
+        call(&mut watch, Method::ScreenWatch, at).await;
+        let screen = next(&mut watch.0).await.to_string();
+        assert!(screen.contains("paste [redacted] here"), "{screen}");
+        let mut events = open().await;
+        call(&mut events, Method::Events, serde_json::json!({})).await;
+        let note = serde_json::json!({"name": "login", "state": "blocked", "note": TOKEN});
+        call(&mut peer, Method::State, note).await;
+        let event = next(&mut events.0).await;
+        assert_eq!(event["note"], "[redacted]", "{event}");
+        lock(&reg)
+            .live("login")
+            .map(|t| t.kill(Duration::ZERO))
+            .ok();
+    }
+
+    const FAKE: &str = r#"id = "fake-acp"
+agent = "fake"
+login = "printf 'paste %s%s here\\n' sk-ant-oat01-abc123 def456ghi789; read x; touch \"$FAKE_HOME/in\""
+status = "test -f \"$FAKE_HOME/in\" && echo signed in"
+logout = "rm -f \"$FAKE_HOME/in\""
+config_dir_var = "FAKE_HOME"
+setup_files = ["settings.json"]
+"#;
+
+    #[tokio::test]
+    async fn the_account_lifecycle_never_shows_its_token() {
+        let reg = registry("accounts");
+        let dir = reg.path.parent().map(Path::to_path_buf).unwrap_or_default();
+        std::fs::create_dir_all(dir.join("providers")).expect("mkdir");
+        std::fs::write(dir.join("providers/fake.toml"), FAKE).expect("record");
+        let given = dir.join("given.token");
+        std::fs::write(&given, TOKEN).expect("token");
+        std::fs::set_permissions(&given, std::os::unix::fs::PermissionsExt::from_mode(0o600))
+            .expect("chmod");
+        let setup = dir.join("setup");
+        std::fs::create_dir_all(&setup).expect("mkdir");
+        std::fs::write(setup.join("settings.json"), "{}").expect("settings");
+        let reg = Arc::new(Mutex::new(reg));
+        tokio::spawn(registry::keep_saved(Arc::clone(&reg)));
+        let (_, lines, write) = served(reg, false).await;
+        let mut peer = (lines, write);
+        let work = serde_json::json!({"provider": "fake", "name": "work"});
+        let add = serde_json::json!({"provider": "fake", "name": "work", "token_file": given});
+        let added = call(&mut peer, Method::AccountAdd, add).await;
+        assert_eq!(added["result"]["state"], "ready", "{added}");
+        assert!(added["result"]["token"]["saved_at"].is_u64(), "{added}");
+        let adopt = serde_json::json!({"provider": "fake", "name": "mine", "folder": setup});
+        let refused = call(&mut peer, Method::AccountAdd, adopt).await;
+        assert_eq!(refused["error"]["code"], -32013, "{refused}");
+        let login = call(&mut peer, Method::AccountLogin, work.clone()).await;
+        assert_eq!(login["result"]["terminal"], "login-fake-work", "{login}");
+        let again = call(&mut peer, Method::AccountLogin, work.clone()).await;
+        assert_eq!(again, login);
+        let wait = serde_json::json!({"name": "login-fake-work", "output": "paste .redacted. here", "timeout": 10});
+        let shown = call(&mut peer, Method::Wait, wait).await;
+        assert_eq!(shown["result"]["outcome"], "matched", "{shown}");
+        let attach = serde_json::json!({"name": "login-fake-work"});
+        let attach = call(&mut peer, Method::Attach, attach).await;
+        assert_eq!(attach["error"]["code"], -32006, "{attach}");
+        let busy = call(&mut peer, Method::AccountRm, work.clone()).await;
+        assert_eq!(busy["error"]["code"], -32004, "{busy}");
+        let ls = serde_json::json!({"provider": "fake"});
+        let listed = call(&mut peer, Method::AccountLs, ls.clone()).await;
+        assert_eq!(listed["result"][1]["login"], "login-fake-work", "{listed}");
+        let enter = serde_json::json!({"name": "login-fake-work", "text": ""});
+        call(&mut peer, Method::Send, enter).await;
+        let mut checked = Value::Null;
+        for _ in 0..500 {
+            checked = call(&mut peer, Method::AccountLs, ls.clone()).await;
+            if checked["result"][1]["line"] == "signed in" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(checked["result"][0]["name"], "default", "{checked}");
+        assert_eq!(checked["result"][1]["line"], "signed in", "{checked}");
+        let status = call(&mut peer, Method::AccountStatus, work.clone()).await;
+        assert_eq!(status["result"]["state"], "ready", "{status}");
+        let gone = call(&mut peer, Method::AccountRm, work.clone()).await;
+        assert!(gone["result"].is_object(), "{gone}");
+        assert!(!dir.join("accounts/fake/work").exists());
+        assert!(!dir.join("accounts/fake/work.token").exists());
+        let none = call(&mut peer, Method::AccountStatus, work).await;
+        assert_eq!(none["error"]["code"], -32012, "{none}");
     }
 
     #[tokio::test(start_paused = true)]

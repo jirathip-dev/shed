@@ -59,7 +59,8 @@ impl Registry {
         let (state, term) = (self.path.clone(), entry.term.clone());
         let acp = entry.info.acp.is_some();
         let id = (entry.info.session.as_ref()).map_or_else(String::new, |s| s.id.clone());
-        Ok(move || {
+        let redacted = entry.info.redacted;
+        let read = move || {
             let dead = || history(&state, &p.name).restore(size(None, None), None);
             match &term {
                 Some(term) if !acp => return Ok(term.with_screen(|s| read_screen(s, &p))),
@@ -79,6 +80,13 @@ impl Registry {
             let parsed = lines.filter_map(|(l, seq)| Some((seq, serde_json::from_str(l).ok()?)));
             read.events = parsed.map(|(seq, kind)| Logged { seq, kind }).collect();
             (read.events).drain(..read.events.len().saturating_sub(p.n.unwrap_or(usize::MAX)));
+            Ok(read)
+        };
+        Ok(move || {
+            let mut read = read()?;
+            if redacted {
+                read.text = shed_core::redact(&read.text);
+            }
             Ok(read)
         })
     }

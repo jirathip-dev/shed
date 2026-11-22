@@ -89,7 +89,7 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
             .read_line(&mut hello)
             .expect("hello");
         let older = json!({"jsonrpc": "2.0", "id": 1, "result":
-            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": PROTOCOL - 2}});
+            {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": MIN_PROTOCOL - 1}});
         std::io::Write::write_all(&mut stream, format!("{older}\n").as_bytes()).expect("reply");
         held.recv_timeout(Duration::from_secs(10)).ok();
     });
@@ -103,7 +103,7 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
         String::from_utf8_lossy(&out.stderr),
         format!(
             "shed: SHED_VERSION: this client speaks shed protocol {MIN_PROTOCOL} to {PROTOCOL}; the server is 0.0.0 (56de739) protocol {0} to {0}; update shed there (shed updates itself from its own releases: `shed self-update`, docs/self-update.md)\n",
-            PROTOCOL - 2
+            MIN_PROTOCOL - 1
         )
     );
     assert!(took < Duration::from_secs(2), "took {took:?}");

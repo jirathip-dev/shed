@@ -1,15 +1,19 @@
 query | flags | files | bytes | rows | text | json
-Pattern::new | -F | 14 | 12327 | 0 | 40 | 38
-spawn_blocking | -F | 14 | 12327 | 0 | 40 | 38
+Pattern::new | -F | 15 | 12780 | 0 | 40 | 38
+spawn_blocking | -F | 15 | 12780 | 0 | 40 | 38
 wait | -F -w -g *.rs* -g !tests/ | 2 | 1637 | 0 | 39 | 37
-handover_refused | -F -i | 14 | 12327 | 0 | 40 | 38
-fn \w+_limit |  | 14 | 12327 | 0 | 40 | 38
-TODO|FIXME|HACK |  | 14 | 12327 | 0 | 40 | 38
-Method::(Exec|FileRead|FileWrite)\b |  | 14 | 12327 | 0 | 40 | 38
+handover_refused | -F -i | 15 | 12780 | 0 | 40 | 38
+fn \w+_limit |  | 15 | 12780 | 0 | 40 | 38
+TODO|FIXME|HACK |  | 15 | 12780 | 0 | 40 | 38
+Method::(Exec|FileRead|FileWrite)\b |  | 15 | 12780 | 0 | 40 | 38
 \d{2,}\.\d+\.\d+ | -g *.toml* | 2 | 281 | 0 | 39 | 37
-^\s*pub (async )?fn [a-z_]+\(&mut self |  | 14 | 12327 | 0 | 40 | 38
-[0-9a-f]{40} |  | 14 | 12327 | 0 | 40 | 38
-zzzz_not_here | -F | 14 | 12327 | 0 | 40 | 38
-retries | -w | 14 | 12327 | 50 | 3676 | 5748
-self | -F --count | 14 | 12327 | 4 | 118 | 291
-fn|def|class | -i | 14 | 12327 | 60 | 3132 | 5146
+^\s*pub (async )?fn [a-z_]+\(&mut self |  | 15 | 12780 | 0 | 40 | 38
+[0-9a-f]{40} |  | 15 | 12780 | 0 | 40 | 38
+zzzz_not_here | -F | 15 | 12780 | 0 | 40 | 38
+retries | -w | 15 | 12780 | 53 | 3974 | 6307
+self | -F --count | 15 | 12780 | 4 | 118 | 291
+fn|def|class | -i | 15 | 12780 | 64 | 3445 | 5731
+handover | find | 15 | 12780 | 0 | 26 | 36
+line cap | find | 15 | 12780 | 9 | 1176 | 1875
+wait output pattern | find | 15 | 12780 | 6 | 381 | 624
+queue retries | find --top 3 | 15 | 12780 | 14 | 319 | 452

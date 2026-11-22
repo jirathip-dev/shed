@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Tokens;
+use crate::{ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe};
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
 /// the same name in `<config>/providers/` (`docs/acp/provider-records.md`).
@@ -61,6 +61,20 @@ pub struct Provider {
     pub driver: DriverKind,
     /// The stream driver's data: the agent's own JSON-lines mode.
     pub stream: Option<Stream>,
+    /// The files and folders that make a config folder a setup: an account's folder holds none of them.
+    pub setup_files: Vec<String>,
+    /// A session's files under the config folder, `{session}` standing for its id.
+    pub session_files: Vec<String>,
+    /// Variables, besides `cache.api_vars`, a run on an account never inherits.
+    pub scrub: Vec<String>,
+    /// How the status command's output reads.
+    pub status_read: Option<StatusRead>,
+    /// The usage probe.
+    pub usage: Option<UsageProbe>,
+    /// The setup token.
+    pub token: Option<TokenSetup>,
+    /// The token proxy.
+    pub proxy: Option<ProxyRecord>,
 }
 
 /// The driver a provider's lanes run on.
