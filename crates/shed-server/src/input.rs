@@ -179,17 +179,17 @@ async fn deliver(
 pub(crate) async fn dismiss(
     term: Arc<Terminal>,
     wizard: Wizard,
-    secs: u64,
+    ready: StateWait,
     held: OwnedMutexGuard<()>,
 ) {
     let shows = |t: &Terminal| {
         let screen = t.screen();
         wizard.any.iter().any(|w| screen.contains(w.as_str()))
     };
-    if !matches!(
-        term.wait_until(shows, Some(within(secs))).await,
-        Ok(Wake::Matched)
-    ) {
+    let settled =
+        |t: &Terminal| shows(t) || t.report().is_some_and(|r| ready.states.contains(&r.state));
+    let woke = term.wait_until(settled, Some(within(ready.secs))).await;
+    if !matches!(woke, Ok(Wake::Matched)) || !shows(&term) {
         return;
     }
     for key in &wizard.keys {
@@ -268,6 +268,37 @@ read -r line; printf '\033]7501;state=working\007got: %s\n' "$line"; exec sleep 
         )
         .await;
         assert_eq!(term.report().map(|r| r.state).as_deref(), Some("working"));
+        term.kill(Duration::ZERO).unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_send_to_a_ready_terminal_agent_with_no_wizard_starts_at_once() {
+        let dir = crate::temp_dir("nowiz");
+        let built_in = include_str!("../../shed-catalog/providers/dsh.toml");
+        std::fs::create_dir_all(dir.join("providers")).unwrap();
+        std::fs::write(dir.join("providers/dsh.toml"), built_in).unwrap();
+        let registry =
+            Registry::load(&dir.join("state.json"), &dir.join("shed.sock"), Vec::new()).unwrap();
+        let registry = Arc::new(Mutex::new(registry));
+        let ready = r#"printf '\033]7501;state=done\007> '
+read -r line; printf '\033]7501;state=working\007got: %s\n' "$line"; exec sleep 60"#;
+        let run = json!({"name": "t", "cwd": dir, "cmd": ["sh", "-c", ready], "labels": {"agent": "dsh"}});
+        call(&registry, Method::Run, run).await.unwrap();
+        let term = Arc::clone(crate::lock(&registry).live("t").unwrap());
+        shows(&term, ">").await;
+        let start = tokio::time::Instant::now();
+        let sent = call(
+            &registry,
+            Method::Send,
+            json!({"name": "t", "text": "go now"}),
+        );
+        assert_eq!(sent.await.unwrap(), json!({}));
+        assert!(
+            start.elapsed() < Duration::from_secs(30),
+            "{:?}",
+            start.elapsed()
+        );
+        shows(&term, "got: go now").await;
         term.kill(Duration::ZERO).unwrap();
     }
 

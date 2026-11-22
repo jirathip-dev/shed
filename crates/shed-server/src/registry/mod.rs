@@ -188,8 +188,12 @@ impl Registry {
         let term = Arc::clone(entry.term.as_ref()?);
         let record = self.terminal_record(entry.info.labels.get("agent"))?;
         let held = entry.draft.hold()?;
-        let secs = record.ready.secs;
-        Some(crate::input::dismiss(term, record.wizard?, secs, held))
+        Some(crate::input::dismiss(
+            term,
+            record.wizard?,
+            record.ready,
+            held,
+        ))
     }
 
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
