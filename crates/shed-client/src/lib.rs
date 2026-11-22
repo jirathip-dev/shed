@@ -18,9 +18,9 @@ pub use shed_proto as proto;
 use shed_proto::{
     Account, AccountAdd, AccountName, AccountsParams, AcpSession, AgentInfo, EmitParams, ErrorCode,
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Input,
-    KeysParams, Link, Login, LsParams, MachineStats, MatchParams, Matched, Method, ModelParams,
-    ReadParams, ReadResult, Reported, ResizeParams, RunParams, SendParams, StateParams,
-    StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
+    KeysParams, Link, Login, LsParams, MachineParams, MachineStats, MatchParams, Matched, Method,
+    ModelParams, Proc, ReadParams, ReadResult, Reported, ResizeParams, RunParams, SendParams,
+    StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -225,6 +225,22 @@ pub trait Calls {
     /// Each configured machine's held link.
     fn links(&self) -> Result<BTreeMap<String, Link>, Error> {
         typed(self, Method::MachineLinks, &Map::new())
+    }
+
+    /// Adds a machine and holds its link; the same pair twice is one machine.
+    fn machine_add(&self, name: &str, target: &str) -> Result<(), Error> {
+        let (name, target) = (name.to_owned(), target.to_owned());
+        unit(self, Method::MachineAdd, &MachineParams { name, target })
+    }
+
+    /// Removes a machine and drops its link.
+    fn machine_rm(&self, name: &str) -> Result<(), Error> {
+        unit(self, Method::MachineRm, &target(name))
+    }
+
+    /// A terminal's process tree, parents first.
+    fn procs(&self, name: &str) -> Result<Vec<Proc>, Error> {
+        typed(self, Method::TerminalProcs, &target(name))
     }
 
     /// Runs a program without a terminal.

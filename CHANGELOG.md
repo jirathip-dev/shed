@@ -246,6 +246,13 @@ All notable changes to this project are documented here. The format follows
   on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
   what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
   account, a folder holding a setup, and a token file's age and mode.
+- The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
+  `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
+  `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and
+  `home`; `machine.stats` adds free and total memory, pages swapped out, the volume's size, `top` (the
+  processes using the most CPU and memory, each with its terminal) and `machine` (ask over the held link);
+  `terminal.procs` gives a terminal's process tree (`shed top <terminal>` now uses it, also with `--on`);
+  `machine.add` and `machine.rm` do what `shed machine add|rm` do, and adding the same pair twice is one machine.
 
 ### Changed
 
