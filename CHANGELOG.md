@@ -238,6 +238,9 @@ All notable changes to this project are documented here. The format follows
   the repository's top) and `info/exclude` (also through a worktree's `.git` file), skips `.git`, dot names
   without `--hidden`, symlinks and binary files. Over 20,000 files, 250 rows, 256 MiB or 10 s is `LIMIT`; a
   matched line over 4,096 bytes comes back `clipped` with its full `length`.
+- Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
+  `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
+  crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
 
 ### Changed
 
