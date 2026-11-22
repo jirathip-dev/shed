@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
-use shed_proto::{Account, AccountAdd, AccountState, ErrorCode, Provider, RpcError, Usage};
+use shed_proto::{Account, AccountAdd, AccountState, Drift, ErrorCode, Provider, RpcError, Usage};
 
 use crate::token::{self, Token};
 
@@ -34,6 +34,9 @@ pub struct Reading {
     /// When its last limit ends.
     #[serde(default)]
     pub limited_until: Option<u64>,
+    /// What the last drift check found.
+    #[serde(default)]
+    pub drift: Option<Drift>,
 }
 
 /// The accounts folder beside the state file.
@@ -69,6 +72,18 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 pub fn setup(provider: &Provider, folder: &Path) -> Vec<String> {
     let held = |f: &&String| fs::symlink_metadata(folder.join(f)).is_ok();
     provider.setup_files.iter().filter(held).cloned().collect()
+}
+
+fn line(provider: &Provider, name: &str, drift: Option<Drift>, status: String) -> String {
+    let file = (provider.credentials.as_ref()).map_or("", |c| c.file.as_str());
+    let p = &provider.agent;
+    match drift {
+        Some(Drift::Drifted) => {
+            format!("keychain and {file} disagree: run shed account login {p} {name}")
+        }
+        Some(Drift::Unknown) => "keychain not readable: drift unknown".to_owned(),
+        _ => status,
+    }
 }
 
 /// The login terminal's name.
@@ -182,7 +197,9 @@ impl Store {
         let days = provider.token.as_ref().map(|t| t.days);
         let token = token::info(&self.token_file(provider, name), days);
         let limited_until = (reading.limited_until).filter(|t| *t > shed_core::clock::unix_now());
+        let drifted = reading.drift == Some(Drift::Drifted);
         let state = match reading.state {
+            _ if drifted => AccountState::Drifted,
             _ if limited_until.is_some() => AccountState::Limited,
             AccountState::SignedOut if token.is_some_and(|t| !t.rejected) => AccountState::Ready,
             state => state,
@@ -198,7 +215,8 @@ impl Store {
             folder,
             state,
             who: reading.who,
-            line: reading.line,
+            line: line(provider, name, reading.drift, reading.line),
+            drift: reading.drift,
             checked_at: reading.checked_at,
             limited_until,
             usage: reading.usage,

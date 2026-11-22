@@ -13,6 +13,7 @@ fn work() -> Account {
         state: AccountState::Ready,
         who: Some("dev@example.com".into()),
         line: "signed in · claude.ai (dev@example.com)".into(),
+        drift: None,
         checked_at: Some(1_762_416_000),
         limited_until: None,
         usage: Some(Usage {

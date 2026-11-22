@@ -114,6 +114,7 @@ mod tests {
             state,
             who: None,
             line: String::new(),
+            drift: None,
             checked_at: None,
             limited_until: (state == AccountState::Limited).then_some(1_500),
             usage,
@@ -126,8 +127,15 @@ mod tests {
 
     #[test]
     fn auto_picks_the_most_headroom_then_fewer_runs_then_by_name_and_never_default() {
-        use AccountState::{Limited, Ready, SignedOut};
-        let table: [(&[Account], Result<&str, i64>); 7] = [
+        use AccountState::{Drifted, Limited, Ready, SignedOut};
+        let table: [(&[Account], Result<&str, i64>); 8] = [
+            (
+                &[
+                    account("a", Drifted, Some(0), 0),
+                    account("b", Ready, Some(90), 5),
+                ],
+                Ok("b"),
+            ),
             (
                 &[
                     account("default", Ready, None, 0),
