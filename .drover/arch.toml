@@ -2,7 +2,7 @@
 # A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
 # A frozen file takes no new line, a `shared` one stays under its `[[size]]` limit, and a row of a `[[collect]]`
 # folder is a new file there (#246).
-frozen = ["ci/cap.toml", "docs/acp/README.md"]
+frozen = ["docs/acp/README.md"]
 generated = [
     "CHANGELOG.md",
     "docs/protocol.md",
