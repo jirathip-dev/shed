@@ -37,7 +37,8 @@ pub fn command(
 }
 
 async fn run(cmd: &[String]) -> (bool, String, String) {
-    match runner::exec(cmd, Path::new("/"), Vec::new(), TIMEOUT, LIMIT).await {
+    let env = BTreeMap::new();
+    match runner::exec(cmd, Path::new("/"), &env, Vec::new(), TIMEOUT, LIMIT).await {
         Ok((status, out, err)) => (
             status.success(),
             String::from_utf8_lossy(&out).into_owned(),
