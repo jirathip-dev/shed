@@ -5,7 +5,7 @@ check: generate fmt clippy banned budget doc deny cap deps hygiene neutral bound
 # CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
 # then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json), then the
 # goldens the CLI, ACP, server and machines tests write (crates/shed/tests/golden/, their `golden.rs`), then
-# Cargo.lock from the manifests.
+# Cargo.lock from the manifests, then README.md's command table from docs/commands/.
 [no-cd]
 generate:
     python3 -I "{{justfile_directory()}}/scripts/changelog.py"
@@ -13,6 +13,7 @@ generate:
     SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
     SHED_BLESS=1 cargo test -p shed --locked --test cli --test acp --test server --test machines golden::
     cargo metadata --format-version 1 > /dev/null
+    python3 -I "{{justfile_directory()}}/scripts/commands.py"
 
 fmt:
     cargo fmt --all --check

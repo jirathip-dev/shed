@@ -10,6 +10,7 @@ generated = [
     "crates/shed-script/tests/perf/counts.json",
     "Cargo.lock",
     "crates/shed/tests/golden/**",
+    "README.md",
 ]
 generate = "just generate"
 shared = [
@@ -36,6 +37,8 @@ shared = [
     "crates/shed-server/src/lib.rs",
     "crates/shed-server/src/registry/mod.rs",
     "crates/shed-server/src/config/mod.rs",
+    "crates/shed/src/main.rs",
+    "crates/shed/src/service.rs",
 ]
 
 [[layer]]
@@ -297,7 +300,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 400
+max_file_lines = 410
 
 [[collect]]
 dir = "crates/shed/tests"
@@ -362,3 +365,41 @@ pattern = "dispatch::"
 paths = ["crates/shed-server/src/methods/**"]
 except = []
 reason = "a handler shares code through a module outside methods/, never through another handler"
+
+[[collect]]
+dir = "crates/shed/src/cmd"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed/src/doctor"
+glob = "*.rs"
+
+[[collect]]
+dir = "docs/commands"
+glob = "*.md"
+
+[[size]]
+paths = ["crates/shed/src/main.rs"]
+max_file_lines = 80
+
+[[size]]
+paths = ["crates/shed/src/service.rs"]
+max_file_lines = 180
+
+[[ban]]
+pattern = "super::"
+paths = ["crates/shed/src/cmd/**", "crates/shed/src/doctor/**"]
+except = []
+reason = "a command or a doctor row shares code through a module outside its folder, never through another row"
+
+[[ban]]
+pattern = "cmd::"
+paths = ["crates/shed/src/cmd/**"]
+except = []
+reason = "a command shares code through a module outside cmd/, never through another command"
+
+[[ban]]
+pattern = "out::"
+paths = ["crates/shed/src/doctor/**"]
+except = []
+reason = "a doctor row returns its rows; cmd/doctor.rs prints them"
