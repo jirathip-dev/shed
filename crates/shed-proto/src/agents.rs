@@ -75,6 +75,81 @@ pub struct Provider {
     pub token: Option<TokenSetup>,
     /// The token proxy.
     pub proxy: Option<ProxyRecord>,
+    /// A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.
+    pub terminal: Option<Box<TerminalRecord>>,
+}
+
+/// A terminal agent: its start, its setup wizard and how a `send` delivers a prompt to its screen.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(default, deny_unknown_fields)]
+pub struct TerminalRecord {
+    /// The command line that starts it, `{file}` standing for its settings patch.
+    pub command: Vec<String>,
+    /// The names of its processes.
+    pub processes: Vec<String>,
+    /// The version it is pinned at.
+    pub version: Option<VersionPin>,
+    /// Seconds of silence after which it reads `idle`, for a `run` that sets no `idle_after`.
+    pub idle_after: Option<u64>,
+    /// The first-run screen `run` dismisses.
+    pub wizard: Option<Wizard>,
+    /// The states a `send` waits for before it types.
+    pub ready: StateWait,
+    /// How a `send` checks that its text reached the screen.
+    pub echo: EchoCheck,
+    /// The states that, after enter, show the prompt was taken.
+    pub accepted: StateWait,
+}
+
+/// The version a terminal agent is pinned at, and how to read the installed one.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct VersionPin {
+    /// The command that prints the version.
+    pub command: Vec<String>,
+    /// The text that starts the output line the version follows.
+    pub line: String,
+    /// The pinned version.
+    pub pin: String,
+}
+
+/// A first-run screen and the keys that dismiss it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Wizard {
+    /// The texts that show it, any one of them.
+    pub any: Vec<String>,
+    /// The keys pressed when it shows.
+    pub keys: Vec<String>,
+    /// Seconds to wait after the keys before a `send` may type.
+    pub settle: u64,
+}
+
+/// States to wait for, and for how long.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct StateWait {
+    /// The states, any one of them.
+    pub states: Vec<String>,
+    /// Seconds before the `send` fails.
+    pub secs: u64,
+}
+
+/// The prompt's echo: its first `chars` characters must show on the screen before enter.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct EchoCheck {
+    /// How many characters of the prompt's first line it looks for; 0 skips the check.
+    pub chars: usize,
+    /// How many times the text is typed before the `send` fails.
+    pub attempts: u32,
+    /// Seconds each attempt waits for the echo.
+    pub secs: u64,
 }
 
 /// The driver a provider's lanes run on.

@@ -101,6 +101,8 @@ impl Registry {
             fs::remove_file(log).ok();
         }
         let vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
+        let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
+        p.idle_after = (p.idle_after).or_else(|| self.terminal_record(agent)?.idle_after);
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
         let scoped = mem_max_mb.filter(|_| crate::limit::scoped());
         let cmd = scoped.map(|mb| crate::limit::in_scope(&p.cmd, mb));
@@ -114,7 +116,7 @@ impl Registry {
             p.acp.is_some(),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
-        if let Some(agent) = p.labels.get("agent").filter(|_| p.acp.is_none()) {
+        if let Some(agent) = agent {
             term.set_rules(self.rules(agent));
         }
         let info = TerminalInfo {
