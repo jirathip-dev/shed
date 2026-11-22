@@ -187,6 +187,9 @@ pub struct Account {
     /// Its login terminal, while one runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub login: Option<String>,
+    /// `auto` picks it first while it is ready (`account.use`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preferred: bool,
 }
 
 /// An account's state.
@@ -241,6 +244,37 @@ pub struct AccountName {
     pub provider: String,
     /// The account.
     pub name: String,
+}
+
+/// `account.use` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountUse {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// The named account to prefer and move the lanes to; none drops the preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// `account.use`'s result.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountMoves {
+    /// The lanes told to move.
+    pub moved: Vec<String>,
+    /// The provider's terminals that stay, and why.
+    pub stayed: Vec<Stayed>,
+}
+
+/// A terminal `account.use` leaves where it is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Stayed {
+    /// The terminal.
+    pub terminal: String,
+    /// Why it stays.
+    pub why: String,
 }
 
 /// `account.ls` params.

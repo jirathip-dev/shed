@@ -434,4 +434,7 @@ pub struct TerminalInfo {
     /// The account it runs on (`run`'s `account`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// Its account is `auto`'s pick: a limit or `account.use` moves it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto: bool,
 }

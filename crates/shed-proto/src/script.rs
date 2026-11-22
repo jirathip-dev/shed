@@ -170,7 +170,8 @@ impl Method {
             | Self::AccountAdd
             | Self::AccountRm
             | Self::AccountLs
-            | Self::AccountStatus => Access::Guarded,
+            | Self::AccountStatus
+            | Self::AccountUse => Access::Guarded,
             Self::Hello
             | Self::Events
             | Self::Attach
