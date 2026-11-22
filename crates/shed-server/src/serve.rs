@@ -199,9 +199,15 @@ async fn listen(
         .recursive(true)
         .mode(0o700)
         .create(control)?;
-    let links = Arc::new(links::Links::new(paths.config.clone(), control.to_owned()));
+    let (links, watched) = links::Links::new(paths.config.clone(), control.to_owned());
+    let links = Arc::new(links);
     links.sync(&registry);
-    crate::proxy::start(&registry, &links, bind(&crate::proxy::socket(control))?);
+    crate::proxy::start(
+        &registry,
+        &links,
+        watched,
+        bind(&crate::proxy::socket(control))?,
+    );
     let listener = match listener {
         Some(listener) => tokio::net::UnixListener::from_std(listener)?,
         None => bind(&paths.socket)?,

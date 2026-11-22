@@ -1,33 +1,33 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead as _, Write as _};
 use std::net::Shutdown;
-use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use serde_json::Value;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::call::blocking;
 use crate::machines::{self, Machine};
 use crate::proto::{
-    ErrorCode, Event, EventsParams, Link, LinkState, Method, Relay, Request, Route, RpcError,
+    ErrorCode, Event, EventKind, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
 };
 use crate::{Error, Shared, lock};
 use shed_client::Conn;
 
-#[derive(Default)]
 pub(crate) struct Links {
     pub(crate) config: PathBuf,
     control: PathBuf,
     held: Mutex<BTreeMap<String, Arc<Held>>>,
+    watched: UnboundedSender<Event>,
 }
 
-struct Held {
+pub(crate) struct Held {
     machine: Machine,
-    calls: Mutex<Option<Conn>>,
-    link: Mutex<Link>,
+    watched: UnboundedSender<Event>,
+    pub(crate) calls: Mutex<Option<Conn>>,
+    pub(crate) link: Mutex<Link>,
 }
 
 impl Held {
@@ -93,14 +93,23 @@ fn prefix(value: &mut Value, machine: &str) {
     }
 }
 
+impl Default for Links {
+    fn default() -> Self {
+        Self::new(PathBuf::new(), PathBuf::new()).0
+    }
+}
+
 impl Links {
-    pub(crate) fn new(config: PathBuf, control: PathBuf) -> Self {
+    pub(crate) fn new(config: PathBuf, control: PathBuf) -> (Self, UnboundedReceiver<Event>) {
+        let (watched, rx) = unbounded_channel();
         let held = Mutex::default();
-        Self {
+        let links = Self {
             config,
             control,
             held,
-        }
+            watched,
+        };
+        (links, rx)
     }
 
     pub(crate) fn sync(&self, registry: &Shared) {
@@ -115,6 +124,7 @@ impl Links {
             }
             let link = Arc::new(Held {
                 machine: machine.clone(),
+                watched: self.watched.clone(),
                 calls: Mutex::new(None),
                 link: Mutex::new(Link {
                     since: shed_core::clock::unix_now(),
@@ -210,7 +220,7 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                     held.set(LinkState::Up, None);
                     let (to, local) = (Arc::clone(held), crate::proxy::socket(control));
                     let there = machine.clone();
-                    std::thread::spawn(move || forward(&to, &there, &local, relay));
+                    std::thread::spawn(move || crate::proxy::forward(&to, &there, &local, relay));
                     let (reader, writer) = events.split();
                     reader
                         .get_ref()
@@ -228,7 +238,14 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                         since = Some(e.seq);
                         let name = format!("{}/{}", machine.name, e.name);
                         let parent = e.parent.map(|p| format!("{}/{p}", machine.name));
-                        lock(registry).events.push(Event { name, parent, ..e });
+                        let e = Event { name, parent, ..e };
+                        if matches!(
+                            e.kind,
+                            EventKind::Exited { .. } | EventKind::Killed | EventKind::State(_)
+                        ) {
+                            held.watched.send(e.clone()).ok();
+                        }
+                        lock(registry).events.push(e);
                     }
                     socket.and_then(|s| s.shutdown(Shutdown::Both)).ok();
                     *lock(&held.calls) = None;
@@ -245,42 +262,6 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
         }
         shed_core::clock::sleep(machines::backoff(failures));
         failures += 1;
-    }
-}
-
-fn forward(held: &Held, machine: &Machine, local: &Path, mut relay: Option<Relay>) {
-    let up = || lock(&held.link).state == LinkState::Up;
-    while let Some(r) = relay.take().filter(|_| up()) {
-        let spec = format!("{}:{}", r.socket.display(), local.display());
-        let mut args = vec![];
-        for option in [
-            "BatchMode=yes",
-            "ControlPath=none",
-            "ExitOnForwardFailure=yes",
-            "ServerAliveInterval=15",
-            "StreamLocalBindMask=0177",
-        ] {
-            args.extend(["-o", option]);
-        }
-        args.extend(["-R", &spec, "--", &machine.target, "cat"]);
-        let Ok((ours, theirs)) = UnixStream::pair() else {
-            return;
-        };
-        let Ok(mut ssh) = shed_core::runner::over("ssh", args, OwnedFd::from(theirs)) else {
-            return;
-        };
-        lock(&held.link).proxy = Some(r.port);
-        while up() && matches!(ssh.try_wait(), Ok(None)) {
-            shed_core::clock::sleep(Duration::from_secs(1));
-        }
-        ssh.kill().ok();
-        ssh.wait().ok();
-        drop(ours);
-        lock(&held.link).proxy = None;
-        shed_core::clock::sleep(machines::backoff(0));
-        let mut calls = lock(&held.calls);
-        relay =
-            (calls.as_mut()).and_then(|c| c.call(Method::ProxyRelay, &serde_json::json!({})).ok());
     }
 }
 

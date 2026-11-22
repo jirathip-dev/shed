@@ -1,6 +1,9 @@
 use std::collections::BTreeMap;
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::Value;
 use shed_accounts::choice::{self, Choice};
@@ -10,12 +13,14 @@ use shed_accounts::relay::Relay;
 use shed_accounts::{Store, check, store::DEFAULT};
 use shed_client::Conn;
 use tokio::sync::OnceCell;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::call::{io_error, json};
-use crate::links::Links;
+use crate::links::{Held, Links};
+use crate::machines::Machine;
 use crate::proto::{
-    Account, ErrorCode, Event, EventKind, EventsParams, Input, KeyState, Method, Provider,
-    RpcError, RunParams, State, TerminalInfo,
+    Account, ErrorCode, Event, EventKind, Input, KeyState, LinkState, Method, Provider, RpcError,
+    RunParams, State, TerminalInfo,
 };
 use crate::{Shared, accounts, lock, providers};
 
@@ -36,11 +41,16 @@ fn record(registry: &Shared, agent: &str) -> Option<Provider> {
         .find(|p| p.agent == agent)
 }
 
-pub(crate) fn start(registry: &Shared, links: &Arc<Links>, listener: tokio::net::UnixListener) {
+pub(crate) fn start(
+    registry: &Shared,
+    links: &Arc<Links>,
+    watched: UnboundedReceiver<Event>,
+    listener: tokio::net::UnixListener,
+) {
     let held = Arc::clone(registry);
     let proxy = Proxy::beside(&state(registry), Box::new(move |a| record(&held, a)));
     tokio::spawn(Arc::new(proxy).serve(listener));
-    tokio::spawn(watch(Arc::clone(registry), Arc::clone(links)));
+    tokio::spawn(watch(Arc::clone(registry), Arc::clone(links), watched));
 }
 
 pub(crate) async fn relay(registry: &Shared) -> Result<crate::proto::Relay, RpcError> {
@@ -168,26 +178,23 @@ pub(crate) fn sweep(state: &Path, machine: &str, calls: &mut Conn) {
     }
 }
 
-async fn watch(registry: Shared, links: Arc<Links>) {
-    let mut sub = lock(&registry).events.subscribe(EventsParams::default());
+async fn watch(registry: Shared, links: Arc<Links>, mut watched: UnboundedReceiver<Event>) {
     let mut last = BTreeMap::new();
-    while sub.changed().await {
-        for e in sub.events().into_iter().filter(|e| e.name.contains('/')) {
-            match &e.kind {
-                EventKind::Exited { .. } | EventKind::Killed => {
-                    Keys::beside(&state(&registry)).end(&e.name);
-                }
-                EventKind::State(r) => {
-                    let was = last.insert(e.name.clone(), r.state.clone());
-                    if r.state == "rate-limited"
-                        && was.as_deref() != Some("rate-limited")
-                        && switch(&registry, &e.name, r.note.as_deref()).await
-                    {
-                        go_on(&links, &e.name).await;
-                    }
-                }
-                _ => {}
+    while let Some(e) = watched.recv().await {
+        match &e.kind {
+            EventKind::Exited { .. } | EventKind::Killed => {
+                Keys::beside(&state(&registry)).end(&e.name);
             }
+            EventKind::State(r) => {
+                let was = last.insert(e.name.clone(), r.state.clone());
+                if r.state == "rate-limited"
+                    && was.as_deref() != Some("rate-limited")
+                    && switch(&registry, &e.name, r.note.as_deref()).await
+                {
+                    go_on(&links, &e.name).await;
+                }
+            }
+            _ => {}
         }
     }
 }
@@ -241,5 +248,46 @@ async fn go_on(links: &Links, terminal: &str) {
         if links.call(machine, method, params).await.is_err() {
             return;
         }
+    }
+}
+
+pub(crate) fn forward(
+    held: &Held,
+    machine: &Machine,
+    local: &Path,
+    mut relay: Option<crate::proto::Relay>,
+) {
+    let up = || lock(&held.link).state == LinkState::Up;
+    while let Some(r) = relay.take().filter(|_| up()) {
+        let spec = format!("{}:{}", r.socket.display(), local.display());
+        let mut args = vec![];
+        for option in [
+            "BatchMode=yes",
+            "ControlPath=none",
+            "ExitOnForwardFailure=yes",
+            "ServerAliveInterval=15",
+            "StreamLocalBindMask=0177",
+        ] {
+            args.extend(["-o", option]);
+        }
+        args.extend(["-R", &spec, "--", &machine.target, "cat"]);
+        let Ok((ours, theirs)) = UnixStream::pair() else {
+            return;
+        };
+        let Ok(mut ssh) = shed_core::runner::over("ssh", args, OwnedFd::from(theirs)) else {
+            return;
+        };
+        lock(&held.link).proxy = Some(r.port);
+        while up() && matches!(ssh.try_wait(), Ok(None)) {
+            shed_core::clock::sleep(Duration::from_secs(1));
+        }
+        ssh.kill().ok();
+        ssh.wait().ok();
+        drop(ours);
+        lock(&held.link).proxy = None;
+        shed_core::clock::sleep(crate::machines::backoff(0));
+        let mut calls = lock(&held.calls);
+        relay =
+            (calls.as_mut()).and_then(|c| c.call(Method::ProxyRelay, &serde_json::json!({})).ok());
     }
 }
