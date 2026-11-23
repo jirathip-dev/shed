@@ -15,18 +15,18 @@ drover, in another module, for drover#1644 to place; "dropped" means no program 
 | `cmd` | `record.rs` `Record::verb` | fills the template; the empty-id refusal becomes `NO_VM` for every verb that uses `{id}` |
 | `run` | `exec.rs` | the key and the token on stdin, both cut out of the stderr it returns |
 | `log`, `last` | `log.rs` | typed `Event`s in `log.jsonl` instead of drover's event log |
-| `state` | `life.rs` `state` | pure; gains `setup`, `draining` and `absent` |
+| `state` | `life.rs` `state` | pure; gains `setup` and `absent`. It is the provider's side only: the machine's states are shed's rows (#309) |
 | `spend` | `spend.rs` `spent` | pure; the same spans, month and day |
 | `over` | `spend.rs` `over` | the same two limits and the same sentences |
-| `held` | `ls --json`: a row's `state` and `hold`, a pool's `short` | drover shows them on its board and its waiting lanes; it starts nothing on them |
+| `held` | `ls --json`: a row's `state`, `leaving` and `over`, a pool's `short` | drover shows them on its board and its waiting lanes; it starts nothing on them. A machine's own trouble (offline, key changed, a slow drain) it reads from shed, as for any machine |
 | `start` | `life.rs` `start` | run by the owner for a named VM and by the helper, from demand, for a pool VM. drover's call is deleted. Stays: the `NO_PROXY_TOKEN` check (drover's, about its own proxy), before it places a lane |
 | `catch_up` | dropped from the helper; stays | it installs drover's own release on a host that just came up: drover's self-update, for any machine whose link returns |
 | `outside` | `tick.rs`, `life.rs` `stopped` | also run before a `start` |
-| `pin` | gone | the pin is `host_key` in shed's machine entry (slice C1); `~/.ssh/herdsman/` is no longer written |
-| `moved` | `tick.rs` → `link.rs` `keep` | every pass, for each running VM |
-| `refresh` | `link.rs` | parses `address`, compares the key, calls `machine.add`. Dropped: the block in `~/.ssh/config.d/herdsman` and the known-hosts file |
-| `stop` | `drain.rs` `mark`, then `life.rs` `end` | `machine.drain` first; the verb, `machine.rm` and the log line at zero terminals. Stays: the save of a lane's work to `wip/`, now when a lane ends on a draining machine and followed by the terminal's removal. Dropped: `cloud-abort`; the row's `drain_stuck` hold says the same |
-| `Live`, `tick` | `tick.rs`, `idle.rs`, `limits.rs` | "no live agent" becomes `machine.stats`: no terminal outside `exited`. An idle VM is drained, then ended. drover's `check` stops calling it |
+| `pin` | gone | the pin is `host_key` in shed's machine entry (slice 1); `~/.ssh/herdsman/` is no longer written |
+| `moved` | `tick.rs` → `address.rs` `keep` | every pass, for each running VM |
+| `refresh` | `address.rs`, `shed.rs` `add` | parses `address`; another address with the same key is `machine.add` again (row M8). A changed key is refused by shed's own link (row M10), not judged here. Dropped: the block in `~/.ssh/config.d/herdsman` and the known-hosts file |
+| `stop` | `leave.rs` `decide`, then `life.rs` `end` | the `leave` line and `machine.drain` first; the verb, `machine.rm` and the log line at zero terminals. Stays: the save of a lane's work to `wip/`, now when a lane ends on a draining machine and followed by the terminal's removal. Dropped: `cloud-abort`; shed's `drain-slow` event says the same |
+| `Live`, `tick` | `tick.rs`, `idle.rs`, `limits.rs` | "no live agent" becomes `machine.stats`: no terminal `starting` or `running`. An idle VM is told to leave, drained by shed, then ended. drover's `check` stops calling it |
 | `card` | stays | the board's Host card is drover's screen; its numbers come from `ls --json` |
 | `github`, `token` | stays, for persistent hosts | the expiry of a host's `gh` token is a host health row. A VM has no such token: `git.rs` gives it one that lives an hour |
 | `SH`, `TOOLS`, `ACP`, `RUST` | stay | bootstrap's step lines, for a persistent host. For a pool they become the image's build script, which drover writes (drover#1644) |
@@ -69,10 +69,10 @@ drover, in another module, for drover#1644 to place; "dropped" means no program 
 |---|---|
 | `check.rs`: `cloud::tick`, `runners::tick` | deleted; the helper's own job runs the pass |
 | `check.rs`, `hosts.rs`, `update.rs`: `cloud::state(..) == "stopped"` | the row's `state` from `shed-cloud ls --json` |
-| `hosts.rs` `at`: `cloud::held` | the row's `hold` and `state`; a pool's `short` |
+| `hosts.rs` `at`: `cloud::held` | the row's `state`, `leaving` and `over`; a pool's `short`; the machine's `flow` from shed |
 | `hosts.rs` `wake`: `cloud::start` | deleted; `shed-cloud demand --by drover` publishes what waits, every pass |
 | `hosts.rs`: the host list | `[hosts]` and each running `pool` row of `ls --json`, with its pool's tags and slots |
-| placement | skips a machine whose `machine.stats` says `draining`; a `run` refused `DRAINING` is placed again next pass |
+| placement | only on a machine whose `flow` in `machine.ls` is `up`; a lane goes to the pool VM whose `items` has its issue, else to one under `max_lanes`; a `run` refused `DRAINING` is placed again next pass |
 | a lane's end | on a draining machine: the save to `wip/`, then `rm` of its terminal |
 | `hosts.rs` survey: `cloud::moved` | deleted; the pass keeps the machine's address |
 | `cli.rs`: `host destroy`, `hosts snapshot` | deleted; the owner runs `shed-cloud rm <vm> --yes` and `shed-cloud snapshot <vm>` |
