@@ -14,7 +14,7 @@ glibc floor), then publishes one GitHub release:
 |---|---|---|
 | tag | `build-<sha7>` | `build-staging-<sha7>` |
 | kind | release, kept for good | prerelease; the staging run deletes those over 14 days old, tag included |
-| assets | `shed-aarch64-apple-darwin`, `shed-x86_64-unknown-linux-gnu`, `SHA256SUMS` | the same |
+| assets | `shed-aarch64-apple-darwin`, `shed-x86_64-unknown-linux-gnu`, `shed-fake-link.py` (#308), `SHA256SUMS` | the same |
 
 `shed` is the only binary: the server is `shed serve`. `shed --version` prints `<version> (<sha7>)`, the commit it was
 built from; each build job checks that it names the sha the release is tagged with, so an installer can check it too.

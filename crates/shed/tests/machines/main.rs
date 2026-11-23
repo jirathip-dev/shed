@@ -10,6 +10,7 @@ mod acp;
 mod common;
 mod connect;
 mod exec;
+mod faults;
 mod golden;
 mod link;
 mod proxy;
@@ -33,31 +34,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const OLD: &str = "56de739";
 
-const FORWARD: &str = r#"import os, socket, sys, threading
-remote, local = sys.argv[1:3]
-log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sent.bytes")
-server = socket.socket(socket.AF_UNIX)
-server.bind(remote)
-server.listen()
-def pipe(a, b, kept):
-    while data := a.recv(65536):
-        if kept:
-            open(log, "ab").write(data)
-        b.sendall(data)
-    try:
-        b.shutdown(socket.SHUT_WR)
-    except OSError:
-        pass
-def serve():
-    while True:
-        conn, _ = server.accept()
-        up = socket.socket(socket.AF_UNIX)
-        up.connect(local)
-        threading.Thread(target=pipe, args=(conn, up, False), daemon=True).start()
-        threading.Thread(target=pipe, args=(up, conn, True), daemon=True).start()
-threading.Thread(target=serve, daemon=True).start()
-sys.stdin.buffer.read()
-"#;
+const FAKE_LINK: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/fake-link.py");
 
 fn script(path: &Path, body: &str) {
     std::fs::create_dir_all(path.parent().expect("parent")).expect("dir");
@@ -67,20 +44,8 @@ fn script(path: &Path, body: &str) {
 
 fn fake_hosts(root: &Path) -> PathBuf {
     let bin = root.join("bin");
-    script(
-        &bin.join("ssh"),
-        "# A fake ssh: a forward (-R) relays the remote socket to the local one, here, until stdin ends;\n\
-         # else it logs its arguments, skips the options, runs the command on the target's PATH.\n\
-         case \" $* \" in *\" -R \"*) while [ \"$1\" != -R ]; do shift; done\n\
-         exec python3 \"$(dirname \"$0\")/forward.py\" \"${2%%:*}\" \"${2#*:}\";; esac\n\
-         echo \"$*\" >> \"$(dirname \"$0\")/ssh.log\"\n\
-         echo $$ >> \"$(dirname \"$0\")/ssh.pids\"\n\
-         while [ \"$1\" = -o ]; do shift 2; done\n\
-         [ \"$1\" = -- ] && shift\n\
-         target=$1\nshift\n\
-         PATH=\"$(dirname \"$0\")/../$target:$PATH\" exec \"$@\"\n",
-    );
-    std::fs::write(bin.join("forward.py"), FORWARD).expect("write forward.py");
+    std::fs::create_dir_all(&bin).expect("bin");
+    std::fs::copy(FAKE_LINK, bin.join("ssh")).expect("the fake link");
     let remote = root.join("remote");
     script(
         &root.join("user@box.example/shed"),
@@ -98,6 +63,10 @@ fn fake_hosts(root: &Path) -> PathBuf {
         &format!("read -r line\nprintf '%s\\n' '{refusal}'\n"),
     );
     bin
+}
+
+fn fault(root: &Path, faults: &str) {
+    std::fs::write(root.join("bin/faults"), faults).expect("write the faults");
 }
 
 fn shed_on(root: &Path, args: &[&str]) -> Command {

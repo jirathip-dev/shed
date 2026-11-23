@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use shed_server::Paths;
 
 use crate::common::{self, Server, temp_dir};
-use crate::{SHED, fake_hosts, link, ok, script, shed_on};
+use crate::{SHED, fake_hosts, fault, link, ok, script, shed_on};
 
 const TOKENS: [(&str, &str); 2] = [
     ("spare", "sk-fake-oat01-spare-0123456789abcdef"),
@@ -240,5 +240,49 @@ fn ended_key_is_refused(root: &Path, seen: &Seen, secret: &str) {
         seen.lock().expect("seen").len(),
         2,
         "an ended key never reaches upstream"
+    );
+}
+
+#[test]
+#[ignore = "TODO(#309): a key ends when one link's ls misses its terminal"]
+fn a_key_ends_with_its_terminal_not_with_one_links_guess() {
+    let root = temp_dir("symptom-key");
+    let (port, _seen) = upstream();
+    let _servers = lab(&root, port);
+    let cwd = root.join("remote");
+    let cwd = cwd.to_str().expect("utf-8 dir");
+    let run = [
+        "--on",
+        "box",
+        "run",
+        "--name",
+        "a",
+        "--acp",
+        "fake",
+        "--account",
+        "auto",
+    ];
+    assert_eq!(ok(&root, &[&run[..], &["--cwd", cwd]].concat()), "box/a\n");
+    common::eventually("a live key", || keys(&root)[0]["state"] == "live");
+    let moved = root.join("moved");
+    let _moved = Server::start(&moved);
+    let exec = format!("exec '{SHED}' --dir '{}' \"$@\"\n", moved.display());
+    script(&root.join("new.example/shed"), &exec);
+    fault(&root, "user@box.example cut\n");
+    common::eventually("the link cut", || link(&root, "box")["state"] != "up");
+    fault(&root, "user@box.example moved new.example\n");
+    common::eventually("the link at the new address", || {
+        link(&root, "box")["state"] == "up"
+    });
+    let there = std::process::Command::new(SHED)
+        .arg("--dir")
+        .arg(root.join("remote"))
+        .args(["get", "a"])
+        .output();
+    assert!(String::from_utf8_lossy(&there.expect("shed get").stdout).contains("running"));
+    assert_eq!(
+        keys(&root)[0]["state"],
+        "live",
+        "a still runs where it started"
     );
 }
