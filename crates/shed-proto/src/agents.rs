@@ -47,6 +47,8 @@ pub struct Provider {
     pub model_args: Vec<String>,
     /// The variable that sets the model, where the adapter takes one.
     pub model_env: Option<String>,
+    /// Variables its logins, status checks and runs on an account get.
+    pub env: BTreeMap<String, String>,
     /// The adapter's arguments that set the effort, `{effort}` standing for one of `efforts`.
     pub effort_args: Vec<String>,
     /// The effort levels it takes.

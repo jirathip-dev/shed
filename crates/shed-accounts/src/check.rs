@@ -36,7 +36,8 @@ pub fn command(
     if let (Some(var), Some(folder)) = (&provider.config_dir_var, folder) {
         cmd.push(format!("{var}={}", folder.display()));
     }
-    cmd.extend(env.iter().map(|(k, v)| format!("{k}={v}")));
+    let set = provider.env.iter().chain(env);
+    cmd.extend(set.map(|(k, v)| format!("{k}={v}")));
     cmd.extend(["sh".to_owned(), "-c".to_owned(), line.to_owned()]);
     cmd
 }

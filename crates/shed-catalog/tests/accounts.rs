@@ -112,4 +112,18 @@ fn the_records_carry_the_account_keys() {
     assert_eq!(gemini.login.as_deref(), Some("gemini"));
     let codex = record("codex");
     assert!(codex.usage.is_none() && codex.proxy.is_none() && codex.status_read.is_none());
+    let agy = record("antigravity-acp");
+    assert_eq!(agy.id, "antigravity-acp");
+    assert_eq!(agy.config_dir_var.as_deref(), Some("GEMINI_HOME"));
+    assert_eq!(agy.model_env.as_deref(), Some("AGY_ACP_DEFAULT_MODEL"));
+    assert_eq!(
+        agy.env
+            .get("AGY_ACP_FORCE_FILE_STORAGE")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert!(agy.logout.is_none() && agy.token_var.is_none());
+    let line = "Usage Limit Reached\n\nYou have reached your current quota for this period. Your limit will reset in 4 hours.";
+    let hit = agy.limit_hit(line).map(|h| h.1);
+    assert_eq!(hit, Some(Some("4 hours".to_owned())));
 }

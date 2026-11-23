@@ -1,0 +1,34 @@
+# Antigravity's ACP server. It has no login command: the login line, given the installed agent's command as
+# its arguments, sends it ACP `initialize` and `authenticate` (Google sign-in in the browser, the link on
+# screen). With file storage forced the token is <GEMINI_HOME>/antigravity-acp/acp_token.json, one per account.
+# A file of the same name in <config>/providers/ overrides keys of this one.
+id = "antigravity-acp"
+agent = "antigravity-acp"
+limit = ["You have reached your current quota for this period."]
+resets = ["Your limit will reset in ", "Your limit will reset on "]
+login = '''
+[ $# -gt 0 ] || { echo 'antigravity-acp is not installed; fix: shed agents add antigravity-acp' >&2; exit 1; }
+d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+trap 'exit 1' HUP INT TERM
+mkfifo "$d/in" || exit 1
+"$@" < "$d/in" | cat > "$d/out" &
+exec 3> "$d/in"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"authenticate","params":{"methodId":"oauth-personal"}}' >&3
+while kill -0 $! 2>/dev/null && ! grep -Eq '"id": ?2[,}]' "$d/out"; do sleep 1; done
+exec 3>&-
+wait
+r=$(grep -E '"id": ?2[,}]' "$d/out")
+case $r in
+  *'"result"'*) echo signed in with Google ;;
+  *) echo "sign-in failed: ${r:-antigravity-acp exited}" >&2; exit 1 ;;
+esac
+'''
+status = 'test -s "${GEMINI_HOME:-$HOME/.gemini}/antigravity-acp/acp_token.json" && echo signed in with Google'
+config_dir_var = "GEMINI_HOME"
+install = "shed agents add antigravity-acp"
+model_env = "AGY_ACP_DEFAULT_MODEL"
+
+[env]
+AGY_ACP_FORCE_FILE_STORAGE = "1"

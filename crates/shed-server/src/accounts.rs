@@ -155,7 +155,12 @@ pub(crate) async fn login(cx: &Call<'_>, p: AccountLogin) -> Result<Login, RpcEr
         files();
     }
     let none = std::collections::BTreeMap::new();
-    let cmd = check::command(&provider, folder.as_deref(), line, &none, &[]);
+    let mut cmd = check::command(&provider, folder.as_deref(), line, &none, &[]);
+    let installed = crate::agents::list(&reg.path).unwrap_or_default();
+    if let Some(agent) = installed.into_iter().find(|a| a.id == provider.id) {
+        cmd.push("sh".to_owned());
+        cmd.extend(agent.cmd);
+    }
     let cwd = folder.unwrap_or_else(|| PathBuf::from("/"));
     let run = RunParams {
         name: Some(terminal.clone()),
