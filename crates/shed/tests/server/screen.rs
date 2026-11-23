@@ -82,7 +82,7 @@ fn screen_watch_sends_at_most_20_updates_a_second() {
     watch.result("screen.watch", &json!({"terminal": "w"}));
     watch.event();
 
-    let start = std::time::Instant::now();
+    let start = shed_server::clock::now();
     let flood = "i=0; while [ $i -lt 3000 ]; do echo l$i; i=$((i+1)); done; echo end\n";
     c.result("terminal.input", &json!({"terminal": "w", "text": flood}));
     let n = until_row(&mut watch, "end").len();

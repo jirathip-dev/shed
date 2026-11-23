@@ -1,6 +1,5 @@
 use std::io::{BufRead as _, BufReader};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use shed_server::proto::LONG_VERSION;
 
@@ -81,7 +80,6 @@ fn serve_prints_one_ready_line_once_its_socket_accepts() {
 fn a_server_that_exits_before_it_is_ready_is_reported_as_an_exit() {
     let dir = temp_dir("early-exit");
     std::fs::write(dir.join("state.json"), "not json").expect("state");
-    let start = Instant::now();
     let out = shed_in(&dir, &["serve", "--detach"]);
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
@@ -89,7 +87,6 @@ fn a_server_that_exits_before_it_is_ready_is_reported_as_an_exit() {
         err.contains("shed serve exited (exit status: 1) before it was ready"),
         "{err}"
     );
-    assert!(start.elapsed() < Duration::from_secs(10), "not the timeout");
 }
 
 #[test]

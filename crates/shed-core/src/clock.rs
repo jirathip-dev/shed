@@ -27,3 +27,20 @@ pub fn unix_now() -> u64 {
 pub fn sleep(d: Duration) {
     std::thread::sleep(d);
 }
+
+/// How long a test waits on an event before it calls it lost: only a hang reaches it, never load.
+pub const PATIENCE: Duration = Duration::from_mins(1);
+
+/// Checks `done` every 20 ms until it holds (true) or `within` passes (false).
+pub fn poll(within: Duration, mut done: impl FnMut() -> bool) -> bool {
+    let deadline = now() + within;
+    loop {
+        if done() {
+            return true;
+        }
+        if now() >= deadline {
+            return false;
+        }
+        sleep(Duration::from_millis(20));
+    }
+}

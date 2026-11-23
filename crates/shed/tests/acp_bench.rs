@@ -85,7 +85,7 @@ fn best_turn<E>(
         .map(|_| {
             let mut events = events(&dir);
             let text = frame(&Input::Prompt(format!("flood {updates}")));
-            let sent = Instant::now();
+            let sent = shed_server::clock::now();
             let params = serde_json::json!({ "name": name, "text": text });
             let _: Value = client.call(Method::Send, &params).expect("send");
             let (texts, first) = count(&mut events, sent);
@@ -126,7 +126,11 @@ fn shed_only() {
             }
             if line.contains(r#""event":"text""#) {
                 texts += 1;
-                first = if texts == 1 { Instant::now() } else { first };
+                first = if texts == 1 {
+                    shed_server::clock::now()
+                } else {
+                    first
+                };
             }
         }
         panic!("the events ended before the reply");
@@ -150,7 +154,7 @@ fn replay() {
     std::fs::write(&transcript, format!("{chunk}\n").repeat(UPDATES)).expect("the transcript");
     let _server = Server::start(&dir);
     let mut events = events(&dir, "r");
-    let began = Instant::now();
+    let began = shed_server::clock::now();
     let history = history.to_str().expect("utf-8");
     start(&dir, "r", &["--resume", "sess-1"], &["--history", history]);
     assert_eq!(texts_until(&mut events, "session"), UPDATES);
@@ -182,7 +186,7 @@ fn rss(dir: &Path, name: &str) -> (u64, usize) {
 
 fn wake(dir: &Path, name: &str, prompt: &str) -> u128 {
     let mut events = events(dir, name).filter(|e| e["replay"] != true);
-    let began = Instant::now();
+    let began = shed_server::clock::now();
     out(dir, &["send", name, prompt]);
     let first =
         events.find(|e| ["text", "tool_call", "plan"].contains(&e["event"].as_str().unwrap_or("")));
@@ -226,7 +230,7 @@ fn hibernate() {
             out(&dir, &["send", name, "hi"]);
             out(&dir, &["wait", name, "--until", "done", "--timeout", "10"]);
         }
-        std::thread::sleep(std::time::Duration::from_secs(2));
+        shed_server::clock::sleep(std::time::Duration::from_secs(2));
         if after != "0" {
             for name in &names {
                 out(

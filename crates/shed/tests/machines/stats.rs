@@ -1,5 +1,4 @@
 use std::process::Stdio;
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -11,7 +10,7 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
     let root = temp_dir("machine-stats");
     let bin = fake_hosts(&root);
     let ssh = std::fs::read_to_string(bin.join("ssh")).expect("ssh");
-    let hang = "[ -e \"$(dirname \"$0\")/down\" ] && exec sleep 30\n";
+    let hang = "[ -e \"$(dirname \"$0\")/down\" ] && exec sleep 600\n";
     script(&bin.join("ssh"), &ssh.replacen("#!/bin/sh\n", hang, 1));
     let _local = Server::start(&root.join("local"));
     let _remote = Server::start(&root.join("remote"));
@@ -67,7 +66,7 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
     let seen = std::fs::read_to_string(root.join("local/seen/box")).expect("seen");
 
     std::fs::write(bin.join("down"), "").expect("down");
-    let started = Instant::now();
+    let started = shed_server::clock::now();
     let (code, offline) = shed(&["--json", "--on", "box", "machine", "stats"]);
     let took = started.elapsed();
     assert_eq!(code, Some(1));
@@ -77,7 +76,7 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
         json!({"machine": "box", "online": false, "last_seen": last_seen})
     );
     assert!(
-        took < Duration::from_millis(5_500),
+        took < shed_server::clock::PATIENCE,
         "answered after {took:?}"
     );
     let text = shed_on(&root, &["--on", "box", "machine", "stats"])

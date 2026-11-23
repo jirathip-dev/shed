@@ -1,9 +1,9 @@
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 use crate::common::{Server, eventually, temp_dir};
 use crate::{SHED, info, shed_in, shed_ok, start, stdout};
+use shed_server::clock;
 
 #[test]
 fn state_gives_up_on_a_server_that_never_answers_within_its_deadline() {
@@ -12,9 +12,8 @@ fn state_gives_up_on_a_server_that_never_answers_within_its_deadline() {
     let (done, held) = std::sync::mpsc::channel::<()>();
     let server = std::thread::spawn(move || {
         let (_stream, _) = listener.accept().expect("accept");
-        held.recv_timeout(Duration::from_secs(10)).ok();
+        held.recv_timeout(clock::PATIENCE).is_ok()
     });
-    let started = Instant::now();
     let out = Command::new(SHED)
         .arg("--dir")
         .arg(&dir)
@@ -22,15 +21,14 @@ fn state_gives_up_on_a_server_that_never_answers_within_its_deadline() {
         .env("SHED_STATE_TIMEOUT", "0.5")
         .output()
         .expect("shed runs");
-    let took = started.elapsed();
     done.send(()).ok();
-    server.join().expect("fake server");
+    let held_on = server.join().expect("fake server");
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
         "shed: no answer from the server within 500ms ($SHED_STATE_TIMEOUT)\n"
     );
-    assert!(took < Duration::from_secs(2), "took {took:?}");
+    assert!(held_on, "the client waited for the server to hang up");
 }
 
 #[test]

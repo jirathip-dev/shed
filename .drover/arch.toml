@@ -121,9 +121,9 @@ reason = "process types and calls come from shed_core::runner"
 
 [[ban]]
 pattern = "thread::sleep"
-paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/clock.rs"]
-reason = "sleep through shed_core::clock"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/shed-core/src/clock.rs", "crates/shed-script/tests/perf.rs"]
+reason = "sleep through shed_core::clock; tests wait on events through clock::poll, not sleeps (#310); perf.rs's ignored speed reports time the engine, which has no shed-core (its gate counts steps)"
 
 [[ban]]
 pattern = "env::var"
@@ -133,15 +133,15 @@ reason = "read the environment through shed_server::config"
 
 [[ban]]
 pattern = "SystemTime::now"
-paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/clock.rs"]
-reason = "read the time through shed_core::clock"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/shed-core/src/clock.rs", "crates/shed-script/tests/perf.rs"]
+reason = "read the time through shed_core::clock; tests wait on events through clock::poll, not sleeps (#310); perf.rs's ignored speed reports time the engine, which has no shed-core (its gate counts steps)"
 
 [[ban]]
 pattern = "Instant::now"
-paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/clock.rs"]
-reason = "read the time through shed_core::clock"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/shed-core/src/clock.rs", "crates/shed-script/tests/perf.rs"]
+reason = "read the time through shed_core::clock; tests wait on events through clock::poll, not sleeps (#310); perf.rs's ignored speed reports time the engine, which has no shed-core (its gate counts steps)"
 
 [[ban]]
 pattern = "std::fs"
