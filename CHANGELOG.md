@@ -382,3 +382,5 @@ All notable changes to this project are documented here. The format follows
 - `scripts/fake-link.py`, a fake `ssh` with latency, loss, stalls, hangs, cuts, a host gone, an address change
   and a host-key change, ships with each release as `shed-fake-link.py`; shed's machine tests run over it.
   `scripts/soak.py` times throwaway terminals on real machines against `ci/soak.toml`, nightly.
+- A release of a main commit that lacks `scripts/fake-link.py` no longer fails: staging's release workflow skips
+  `shed-fake-link.py` with a notice and still publishes the binaries.
