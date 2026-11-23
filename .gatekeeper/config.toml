@@ -2,9 +2,9 @@ packs = ["core", "rust"]
 integration = "staging"
 
 [pin]
-version = "1.1.0"
-x86_64-unknown-linux-gnu = "5cc4e98a0140ee0e190752bd141d74cf7790c943e7846078fbba4dddeaca85e4"
-aarch64-apple-darwin = "61be2d06fb38d761348f289c4b5c8e1c43be4b346c3fc00f22b5019e2fa9d959"
+version = "1.1.1"
+x86_64-unknown-linux-gnu = "c5546582c424cb11b488c9dea8c7194fd23ba314b8c49f08d04b5a66cffaa7d7"
+aarch64-apple-darwin = "4e011e77c5123fbdeb9297b78c460740ab97d0937641afb1fa474c6ec3fcd583"
 
 [cache]
 

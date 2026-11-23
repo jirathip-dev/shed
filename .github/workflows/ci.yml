@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   gates:
-    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@c76c64fa790a1a5e5e608c25139960e74db8b44d # v1.1.0
+    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@a1e76ca28aa643261034e6eabd8b452e0d5860ac # v1.1.1
     with:
       runners: >-
         ${{ vars.CI_RUNNER && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
