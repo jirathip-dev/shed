@@ -40,3 +40,36 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
     };
     Some((to_value(params).unwrap(), to_value(result).unwrap()))
 }
+
+#[test]
+fn skill_methods_md_matches_the_methods() {
+    use std::fmt::Write as _;
+    let mut want = String::from(
+        "# shed's methods in a script\n\n\
+         <!-- Generated from crates/shed-proto by `just generate`; do not edit. -->\n\n\
+         Call one as `shed.<method>(params)`; `shed.describe(\"<method>\")` gives its params and result.\n\
+         A `read` is called as it is, a `guarded` one goes through the server's guard first (refused with \
+         none), and a `refused` one is a `ShedError` `NOT_IN_SCRIPT`.\n\n\
+         | Method | In a script | What it does |\n|---|---|---|\n",
+    );
+    for m in Method::ALL {
+        let summary = m.summary().replace('|', "\\|");
+        writeln!(
+            want,
+            "| `{}` | {} | {summary} |",
+            m.name(),
+            m.in_script().name()
+        )
+        .unwrap();
+    }
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skill/script/methods.md");
+    if std::env::var_os("SHED_BLESS").is_some() {
+        std::fs::write(&path, &want).unwrap();
+    }
+    let have = std::fs::read_to_string(&path).unwrap_or_default();
+    assert!(
+        have == want,
+        "skill/script/methods.md is stale; run `just generate`"
+    );
+}

@@ -13,6 +13,7 @@ mod exec;
 mod golden;
 mod link;
 mod proxy;
+mod script;
 mod split;
 mod stats;
 

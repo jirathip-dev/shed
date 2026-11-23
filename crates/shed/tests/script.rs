@@ -576,3 +576,147 @@ fn read_rows(dir: &Path) {
         busy,
     );
 }
+
+fn cli(dir: &Path, args: &[&str], stdin: &str) -> std::process::Output {
+    let mut child = Command::new(SHED)
+        .arg("--dir")
+        .arg(dir)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+fn skill(name: &str) -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skill/script/examples");
+    path.join(name).to_str().unwrap().to_owned()
+}
+
+#[test]
+fn check_reports_a_syntax_error_and_makes_no_call() {
+    let dir = temp_dir("script-cli-check");
+    let _server = Server::start(&dir);
+    guard(&dir, "allow", "run");
+    let checked = cli(&dir, &["script", "--check", "-f", &skill("start.js")], "");
+    let stderr = String::from_utf8_lossy(&checked.stderr);
+    assert!(checked.status.success(), "{checked:?}");
+    assert!(
+        checked.stdout.is_empty() && stderr.starts_with("[0 calls, "),
+        "{checked:?}"
+    );
+    let bad = cli(
+        &dir,
+        &["script", "--check", "-"],
+        "const a = 1;\nreturn /x/;",
+    );
+    assert_eq!(bad.status.code(), Some(1), "{bad:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&bad.stderr),
+        "error: SyntaxError 2:8: a regex literal is not in the subset: use text.includes(…) or text.matches(pattern)\n"
+    );
+    assert_eq!(
+        lines(&dir, "starts"),
+        Vec::<String>::new(),
+        "no guard was started"
+    );
+    assert_eq!(
+        code(&dir, "return (await shed.ls({})).length;")["result"],
+        0
+    );
+}
+
+#[test]
+fn the_skill_examples_are_the_goldens_and_run_on_a_real_server() {
+    for name in ["blocked.js", "start.js", "errors.js"] {
+        let golden = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../shed-script/tests/golden")
+            .join(name);
+        let golden = std::fs::read_to_string(golden).unwrap();
+        let example = std::fs::read_to_string(skill(name)).unwrap();
+        assert_eq!(golden.split_once('\n').unwrap().1, example, "{name}");
+    }
+    let dir = temp_dir("script-examples");
+    let _server = Server::start(&dir);
+    let d = dir.to_str().unwrap();
+    let out = "printf 'Compiling a\\nerror[E0308]: mismatched types\\ntest result: FAILED. 1 passed; 1 failed\\n'; exec cat >/dev/null";
+    shed_ok(
+        &dir,
+        &[
+            "run",
+            "--name",
+            "impl-190",
+            "--cwd",
+            d,
+            "--label",
+            "fleet=shed",
+            "--",
+            "sh",
+            "-c",
+            out,
+        ],
+    );
+    shed_ok(
+        &dir,
+        &["state", "impl-190", "blocked", "--note", "Bash: cargo test"],
+    );
+    eventually("impl-190's output", || {
+        code(&dir, "return (await shed.read({ name: 'impl-190' })).text;")["result"]
+            .as_str()
+            .is_some_and(|t| t.contains("test result"))
+    });
+    let run = |name: &str| {
+        let out = cli(&dir, &["script", "-f", &skill(name), "--json"], "");
+        let reply: Value = serde_json::from_slice(&out.stdout).unwrap();
+        (out.status.code(), reply)
+    };
+    let (status, blocked) = run("blocked.js");
+    assert_eq!(status, Some(0), "{blocked}");
+    let lane = &blocked["result"][0];
+    assert_eq!(
+        (&lane["name"], &lane["note"]),
+        (&json!("impl-190"), &json!("Bash: cargo test"))
+    );
+    assert!(
+        lane["tail"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("error[E0308]: mismatched types"))
+    );
+    let (status, errors) = run("errors.js");
+    assert_eq!(status, Some(0), "{errors}");
+    let kept: Vec<&Value> = errors["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| &k["line"])
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            "error[E0308]: mismatched types",
+            "test result: FAILED. 1 passed; 1 failed"
+        ]
+    );
+    assert!(
+        errors["logs"][0]
+            .as_str()
+            .unwrap()
+            .ends_with(" lines read, 2 kept"),
+        "{errors}"
+    );
+    let (status, start) = run("start.js");
+    assert_eq!(status, Some(1), "{start}");
+    assert_eq!(
+        (error_code(&start), &start["acting"][0]["method"]),
+        ("NO_GUARD", &json!("run"))
+    );
+}
