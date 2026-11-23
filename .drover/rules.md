@@ -23,3 +23,4 @@
 - Don't add workflow or issue logic (GitHub issues, pull requests, queues, review verdicts, merges): it is drover's (enforced by: local/boundary (scripts/boundary.sh))
 - Don't add chat UI, bot code or screens JSON: chat and bots are cooee's, screens drover's (enforced by: local/boundary (scripts/boundary.sh))
 - Don't fail an active lesson check in this file (a shadow one only reports) (enforced by: core/rules (drover lesson-check))
+- Don't leave the code a slice replaces for a later PR: delete it in the same one, and its removed lines lower the size baseline and the cap (enforced by: local/shrink (scripts/shrink.py))
