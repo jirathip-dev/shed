@@ -3,6 +3,7 @@ generated = [
     "CHANGELOG.md",
     "docs/protocol.md",
     "docs/shed.openrpc.json",
+    "docs/flows.md",
     "crates/shed-script/tests/perf/counts.json",
     "skill/script/methods.md",
     "Cargo.lock",
@@ -385,11 +386,7 @@ paths = ["crates/shed-server/src/providers.rs", "crates/shed-proto/tests/protoco
 max_file_lines = 230
 
 [[size]]
-paths = ["crates/shed-server/src/links.rs"]
-max_file_lines = 300
-
-[[size]]
-paths = ["crates/shed-proto/tests/protocol_doc/acp.rs"]
+paths = ["crates/shed-server/src/links.rs", "crates/shed-proto/tests/protocol_doc/acp.rs"]
 max_file_lines = 300
 
 [[size]]
@@ -501,3 +498,7 @@ pattern = "out::"
 paths = ["crates/shed/src/doctor/**"]
 except = []
 reason = "a doctor row returns its rows; cmd/doctor.rs prints them"
+
+[[collect]]
+dir = "crates/shed-proto/flows"
+glob = "*.md"
