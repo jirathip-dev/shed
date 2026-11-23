@@ -147,6 +147,7 @@ impl Method {
             | Self::Wait
             | Self::MachineStats
             | Self::MachineLinks
+            | Self::FlowReport
             | Self::Agents
             | Self::AgentsMatch
             | Self::Discover

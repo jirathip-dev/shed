@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json, to_value};
+use shed_proto::flow::{Class, Differs, FlowName, FlowReport, Mode};
 use shed_proto::{
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Hello, Link,
-    LinkState, MachineParams, MachineStats, MemLevel, Method, Proc, Sample, Span, StatsParams,
+    LinkState, MachineParams, MachineStats, MemLevel, Method, Proc, Report, ReportParams, Sample,
+    Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -84,8 +86,41 @@ fn sample(at: u64) -> Sample {
     }
 }
 
+fn report_example() -> (Value, Value) {
+    let terminal = FlowReport {
+        flow: FlowName::Terminal,
+        mode: Mode::Shadow,
+        subjects: 4,
+        fired: BTreeMap::from([("T1".into(), 4), ("T4".into(), 4), ("T9".into(), 1)]),
+        never_seen: vec!["replace".into(), "expired".into()],
+        unexpected: BTreeMap::new(),
+        stuck: BTreeMap::from([("tree-left".into(), 1)]),
+        disagreements: vec![Class {
+            kind: Differs::Action,
+            row: "T9".into(),
+            table: "end-tree".into(),
+            code: "exited".into(),
+            count: 1,
+            first: 1_762_416_000,
+            last: 1_762_416_000,
+            sample: "build".into(),
+        }],
+    };
+    let params = ReportParams {
+        since: Some(1_762_000_000),
+        machine: None,
+    };
+    let report = Report {
+        build: "4254d78".into(),
+        since: 1_762_000_000,
+        flows: vec![terminal],
+    };
+    (to_value(params).unwrap(), to_value(report).unwrap())
+}
+
 pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
     Some(match method {
+        Method::FlowReport => report_example(),
         Method::MachineStats => stats_example(),
         Method::MachineLinks => links_example(),
         Method::Exec => (

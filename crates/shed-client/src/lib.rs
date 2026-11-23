@@ -20,8 +20,8 @@ use shed_proto::{
     AcpSession, AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
     HandoverCheckParams, HandoverParams, Input, KeyId, KeysParams, Link, Login, LsParams,
     MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ProxyKey,
-    ReadParams, ReadResult, Reported, ResizeParams, RunParams, SendParams, StateParams,
-    StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
+    ReadParams, ReadResult, Report, ReportParams, Reported, ResizeParams, RunParams, SendParams,
+    StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -252,6 +252,11 @@ pub trait Calls {
     /// The machine's health.
     fn stats(&self, params: &StatsParams) -> Result<MachineStats, Error> {
         typed(self, Method::MachineStats, params)
+    }
+
+    /// Each flow's table beside today's code: its counts and shadow disagreements.
+    fn flow_report(&self, params: &ReportParams) -> Result<Report, Error> {
+        typed(self, Method::FlowReport, params)
     }
 
     /// A file's bytes.
