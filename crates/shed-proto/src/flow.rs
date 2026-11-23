@@ -230,7 +230,7 @@ impl<T: Table> Tracker<T> {
             };
         }
         self.arm(row, now);
-        step(row, from, to, row.act)
+        step(row, from, to)
     }
 
     /// The clock at `now`: a retry, an `every` run, or `stuck` and the `gave_up` row.
@@ -258,7 +258,7 @@ impl<T: Table> Tracker<T> {
                 return Some(gave_up);
             }
         }
-        Some(step(row, state, state, row.act))
+        Some(step(row, state, state))
     }
 
     fn arm(&mut self, row: &'static Row<T>, now: u64) {
@@ -275,12 +275,8 @@ impl<T: Table> Tracker<T> {
     }
 }
 
-fn step<T: Table>(
-    row: &'static Row<T>,
-    from: T::State,
-    to: T::State,
-    act: Do<T::Action>,
-) -> Step<T> {
+fn step<T: Table>(row: &'static Row<T>, from: T::State, to: T::State) -> Step<T> {
+    let act = row.act;
     Step {
         row,
         from,
