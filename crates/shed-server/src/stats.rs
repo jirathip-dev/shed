@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use shed_core::clock::unix_now;
-use shed_proto::Sample;
+use shed_proto::{MemLevel, Sample};
 
 const EVERY: u64 = 60;
 const DAY: u64 = 86_400;
@@ -79,6 +79,7 @@ fn probe() -> Sample {
         "vm.swapusage",
         "kern.boottime",
         "hw.memsize",
+        "kern.memorystatus_vm_pressure_level",
     ];
     parse_sysctl(
         &stdout("/usr/sbin/sysctl", std::iter::once("-n").chain(keys)),
@@ -103,12 +104,19 @@ fn parse_sysctl(text: &str, vm_stat: &str, now: u64) -> Sample {
     let swap = after(next(), "used = ", '.');
     let boot = after(next(), "sec = ", ',');
     let total = first::<u64>(next()).unwrap_or(0) >> 20;
+    let level = match first::<u8>(next()) {
+        Some(1) => Some(MemLevel::Normal),
+        Some(2) => Some(MemLevel::Warn),
+        Some(4) => Some(MemLevel::Critical),
+        _ => None,
+    };
     let swap_out = vm_stat
         .lines()
         .find_map(|l| first(l.strip_prefix("Swapouts:")?));
     Sample {
         load_per_cpu: load.unwrap_or(0.0),
         mem_pressure_pct: 100 - free,
+        mem_level: level,
         mem_free_mb: total * free / 100,
         mem_total_mb: total,
         swap_used_mb: swap.unwrap_or(0),
@@ -212,5 +220,21 @@ mod tests {
         };
         assert_eq!(parse_sysctl(text, vm_stat, 1_762_003_600), sample);
         assert_eq!(parse_sysctl("", "", 5), Sample::default());
+        for (value, level) in [
+            ("1", Some(MemLevel::Normal)),
+            ("2", Some(MemLevel::Warn)),
+            ("4", Some(MemLevel::Critical)),
+            ("3", None),
+        ] {
+            let text = format!("{text}{value}\n");
+            let parsed = parse_sysctl(&text, vm_stat, 1_762_003_600);
+            assert_eq!(
+                parsed,
+                Sample {
+                    mem_level: level,
+                    ..sample.clone()
+                }
+            );
+        }
     }
 }

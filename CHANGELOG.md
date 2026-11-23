@@ -295,6 +295,9 @@ All notable changes to this project are documented here. The format follows
   one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
   session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
   preference, and `account ls` shows it.
+- `machine.stats` reports macOS's memory pressure level as `mem_level` (`normal`, `warn` or `critical`), now and in
+  `history`, and every process row in it and in `terminal.procs` carries `cpu_ms`, its CPU time, so two reads give a
+  CPU share.
 
 ### Changed
 

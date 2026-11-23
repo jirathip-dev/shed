@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Hello, Link,
-    LinkState, MachineParams, MachineStats, Method, Proc, Sample, Span, StatsParams,
+    LinkState, MachineParams, MachineStats, MemLevel, Method, Proc, Sample, Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -57,6 +57,7 @@ fn proc(pid: i32, terminal: Option<&str>) -> Proc {
         ppid: 4200,
         depth: 1,
         cpu_pct: 85,
+        cpu_ms: 510_000,
         rss_mb: 1_200,
         elapsed_s: 600,
         command: "cargo test --workspace".into(),
@@ -70,6 +71,7 @@ fn sample(at: u64) -> Sample {
         at,
         load_per_cpu: 0.25,
         mem_pressure_pct: 42,
+        mem_level: Some(MemLevel::Normal),
         mem_free_mb: 9_500,
         mem_total_mb: 16_384,
         swap_used_mb: 512,
@@ -140,6 +142,7 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
                 ppid: 1,
                 pid: 4200,
                 cpu_pct: 3,
+                cpu_ms: 18_000,
                 rss_mb: 180,
                 command: "node agent.js".into(),
                 own: true,
