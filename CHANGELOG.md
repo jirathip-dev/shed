@@ -347,6 +347,8 @@ All notable changes to this project are documented here. The format follows
   the logs are `~/Library/Logs/dev.shed.serve.log` and `dev.shed.update.log`. `shed uninstall` unloads and
   removes both jobs instead of printing the lines, and `shed install` loads only a job that changed or is
   not loaded. The job templates in `dist/` are gone: their golden copies are farrier's `fixtures/units/`.
+- `shed serve` no longer moves an ACP transcript from the old `acp/` folder to its session on upgrade:
+  servers from before the sessions index (#183) upgrade through a release that has it.
 
 ### Fixed
 
