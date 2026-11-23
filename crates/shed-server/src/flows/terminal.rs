@@ -44,8 +44,9 @@ pub(crate) fn observe(
                 }
                 let leader = leaders.get(&t.name);
                 let runs = |p: &[ProcessInfo], l| p.iter().any(|q| q.pgid == l && !q.zombie);
-                let empty = procs.is_some_and(|p| leader.is_none_or(|l| !runs(p, *l)));
-                facts.extend(empty.then_some(Fact::Empty));
+                let known = was.is_some_and(|w| w == "exited:true");
+                let empty = known || procs.is_some_and(|p| leader.is_none_or(|l| !runs(p, *l)));
+                facts.extend((empty && !known).then_some(Fact::Empty));
                 let agrees: &[Life] = &[Life::Exited, Life::Gone];
                 (format!("exited:{empty}"), "exited", agrees)
             }

@@ -280,7 +280,9 @@ impl Runner {
             let reg = lock(registry);
             (reg.ls(&LsParams::default()), reg.leaders())
         };
-        let exited = infos.iter().any(|t| t.state == State::Exited);
+        let seen = |t: &TerminalInfo| self.terminal.seen.get(&t.name).map(String::as_str);
+        let exited =
+            (infos.iter()).any(|t| t.state == State::Exited && seen(t) != Some("exited:true"));
         let procs = blocking(move || exited.then(|| proctree::system().list().ok()).flatten());
         let procs = procs.await.ok().flatten();
         let seen = terminal::observe(&infos, &leaders, procs.as_deref(), &self.terminal.seen);
