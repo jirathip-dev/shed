@@ -7,7 +7,8 @@ The helper keeps no machine state of its own: draining, key changed, added, up, 
 Slices: (1) machines: a port, a pinned host key, an identity file; (2) draining; (3) the helper, by hand; (4) the 5-minute pass, its job and its release; (5) pools, demand, the per-VM git token, the pool VM in the nightly soak; (6) the golden image; (7) runner groups. Slices 1 and 2 need #309's slices 1 and 2; slices 3 to 7 also need #309's terminal and machine take-overs. Then drover's own issues (drover#1644, drover#1648). About 2,000 lines added in shed, about 850 leave drover.
 Open questions: none. The owner's answers of 2026-11-23 are decisions here: a GitHub App mints each VM's git token, a named VM is started by the owner only, cooee's desks stay in cooee, and the cap raise is its own issue, filed when slice 3 starts.
 
-**Status:** revised by the architect lane, 2026-11-23, after the owner's revise (decision q3271): issues
+**Status:** approved by the owner, 2026-11-23.
+Revised by the architect lane the same day, after the owner asked for a revision: issues
 counted by the `item` label, the fake link and the soak moved to #308, the machine's states left to #309's
 table, time as a value under #310, and the four open questions answered. Read on shed staging `c1fba0b` and
 drover staging `7c0a28c1c`. It follows the owner's decisions of the same day on drover#1644: cloud VMs leave
