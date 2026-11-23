@@ -5,7 +5,7 @@ setup = ["rust"]
 paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "CHANGELOG.md", "changelog.d/**", "docs/**", "README.md", "skill/**", "scripts/generate.sh", "scripts/changelog.py", "scripts/commands.py"]
 run = """
 set -eu
-files="CHANGELOG.md changelog.d docs/protocol.md docs/shed.openrpc.json crates/shed-script/tests/perf/counts.json Cargo.lock crates/shed/tests/golden README.md skill/script/methods.md"
+files="CHANGELOG.md changelog.d docs/protocol.md docs/shed.openrpc.json docs/flows.md crates/shed-script/tests/perf/counts.json Cargo.lock crates/shed/tests/golden README.md skill/script/methods.md"
 state() { git status --porcelain --untracked-files=all -- $files; git diff HEAD --binary -- $files | git hash-object --stdin; }
 before=$(state)
 scripts/generate.sh
