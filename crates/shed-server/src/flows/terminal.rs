@@ -28,7 +28,9 @@ pub(crate) fn observe(
 ) -> Vec<Seen<Terminal>> {
     let one = |t: &TerminalInfo| {
         let was = was.get(&t.name);
-        let mut facts: Vec<_> = was.is_none().then_some(Fact::Run).into_iter().collect();
+        let reborn = t.state == State::Running && was.is_some_and(|w| w.starts_with("exited"));
+        let mut facts: Vec<_> = reborn.then_some(Fact::Rm).into_iter().collect();
+        facts.extend((was.is_none() || reborn).then_some(Fact::Run));
         let (view, code, agrees) = match t.state {
             State::Running => {
                 let reported = t.reported.as_ref().map_or("", |r| r.state.as_str());

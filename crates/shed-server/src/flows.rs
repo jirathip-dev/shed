@@ -534,4 +534,29 @@ mod tests {
         );
         assert_eq!(runner.link.report.stuck.get("link-down"), Some(&1));
     }
+
+    #[test]
+    fn a_name_removed_and_run_again_between_two_looks_is_running_again_with_no_line() {
+        let state = crate::temp_dir("flows-reborn").join("state.json");
+        let info = |state: &str| {
+            let t = json!({"name": "build", "labels": {}, "cwd": "/", "cmd": ["make"],
+                "keep": false, "state": state, "exit": 0, "pid": null});
+            vec![serde_json::from_value::<TerminalInfo>(t).unwrap()]
+        };
+        let mut runner = Runner::new(&state);
+        let mut o = out(0);
+        for (now, state) in [(0, "exited"), (2, "running")] {
+            o.now = now;
+            let seen =
+                terminal::observe(&info(state), &BTreeMap::new(), None, &runner.terminal.seen);
+            runner.terminal.observe(seen, &mut o);
+            runner.tick(&mut o);
+        }
+        o.now = 10;
+        runner.tick(&mut o);
+        assert!(o.lines.is_empty(), "{:?}", o.lines);
+        let build = &runner.terminal.subjects["build"].tracker;
+        assert_eq!(build.state(), shed_proto::flow::Life::Running);
+        assert_eq!(runner.terminal.report.fired.get("T27"), Some(&1));
+    }
 }

@@ -593,7 +593,7 @@ LimitError 12:1: the reply is 9,437,201 bytes, over the limit of 8,388,608: retu
 
 | class | methods | in a script |
 |---|---|---|
-| read | `ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs` | called as they are; work with no guard configured |
+| read | `ls`, `get`, `read`, `wait`, `machine.stats`, `machine.links`, `flow.report`, `agents`, `agents.match`, `rpc.discover`, `terminal.procs` | called as they are; work with no guard configured |
 | guarded | `run`, `send`, `keys`, `kill`, `rm`, `resize`, `state`, `acp.model`, `exec`, `file.write`, `file.read` (it changes nothing but reads any file the server's user can: the owner's decision), `code.outline`, `code.grep` and `code.find` (they read files too), `machine.add`, `machine.rm`, `account.add`, `account.rm`, `account.ls` and `account.status` (they run the provider's status command), `account.use` (it moves lanes), `proxy.keys` and `proxy.revoke` (they list or end the per-run keys) | the guard first |
 | refused | `events`, `attach`, `screen.watch`, `terminal.input`, `account.login` (a person signs in at its screen), `proxy.relay` (it belongs to the link between machines), `terminal.keys`, `terminal.resize`, `terminal.readonly`, `handover`, `handover.check`, `hello`, `heartbeat`, `emit`, `script` | `ShedError` `NOT_IN_SCRIPT`: they stream, belong to a person's keyboard or to the connection, or replace the server |
 

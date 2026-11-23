@@ -395,7 +395,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 505
+max_file_lines = 515
 
 [[collect]]
 dir = "crates/shed/tests"
