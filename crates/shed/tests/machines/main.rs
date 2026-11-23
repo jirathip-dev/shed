@@ -11,6 +11,7 @@ mod common;
 mod connect;
 mod exec;
 mod faults;
+mod flow;
 mod golden;
 mod link;
 mod proxy;

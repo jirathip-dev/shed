@@ -1210,6 +1210,43 @@
       }
     },
     {
+      "name": "flow.report",
+      "description": "Each flow's table as it ran beside today's code (#309): its mode, the subjects it tracks, how often each row fired, the facts it never took, the `never` rows that fired and the `stuck` reasons, all kept in `flow-counts.json` since they were first kept; and the lines of `flow-shadow.jsonl` from `since` on (default the last 7 days), by class: `state` when the table and today's code showed different states for more than 2 s, `action` when the table's row would have acted and today's code did not. `machine` asks that machine, over its held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Disagreements from this time on, unix seconds; default the last 7 days."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ask this machine, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Report"
+        }
+      }
+    },
+    {
       "name": "get",
       "description": "One terminal.",
       "paramStructure": "by-name",
@@ -5456,6 +5493,224 @@
           "end"
         ],
         "description": "A span of lines, 1-based and inclusive."
+      },
+      "Report": {
+        "type": "object",
+        "properties": {
+          "build": {
+            "type": "string",
+            "description": "The build that answered."
+          },
+          "since": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Disagreements from this time on, unix seconds."
+          },
+          "flows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowReport"
+            },
+            "description": "One entry a flow."
+          }
+        },
+        "required": [
+          "build",
+          "since",
+          "flows"
+        ],
+        "description": "`flow.report` result."
+      },
+      "FlowReport": {
+        "type": "object",
+        "properties": {
+          "flow": {
+            "$ref": "#/components/schemas/FlowName",
+            "description": "The flow."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode",
+            "description": "Shadow or drive."
+          },
+          "subjects": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The subjects it tracks now."
+          },
+          "fired": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "Row id to times it fired."
+          },
+          "never_seen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Facts it never took, besides `gave_up`."
+          },
+          "unexpected": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "`never` rows that fired, to times."
+          },
+          "stuck": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "`stuck` reasons, to times."
+          },
+          "disagreements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Class"
+            },
+            "description": "The shadow lines, by class.",
+            "default": []
+          }
+        },
+        "required": [
+          "flow",
+          "mode",
+          "subjects",
+          "fired",
+          "never_seen",
+          "unexpected",
+          "stuck"
+        ],
+        "description": "One flow in a [`Report`]: its counts since they were first kept, and its disagreements since `since`."
+      },
+      "FlowName": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "terminal",
+            "description": "A terminal name on one shed."
+          },
+          {
+            "type": "string",
+            "const": "link",
+            "description": "The held link to one machine."
+          },
+          {
+            "type": "string",
+            "const": "machine",
+            "description": "A machine in the main host's list."
+          },
+          {
+            "type": "string",
+            "const": "drain",
+            "description": "This shed's own drain."
+          },
+          {
+            "type": "string",
+            "const": "account",
+            "description": "One account of one provider."
+          },
+          {
+            "type": "string",
+            "const": "key",
+            "description": "One proxy key."
+          }
+        ],
+        "description": "The flows, as events and reports name them."
+      },
+      "Mode": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "shadow",
+            "description": "Facts step the table, no action runs, and today's code is compared."
+          },
+          {
+            "type": "string",
+            "const": "drive",
+            "description": "The table's actions run."
+          }
+        ],
+        "description": "Whether a flow's table only watches today's code or drives."
+      },
+      "Class": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/Differs",
+            "description": "How they differ."
+          },
+          "row": {
+            "type": "string",
+            "description": "The table's row."
+          },
+          "table": {
+            "type": "string",
+            "description": "The table's state or action."
+          },
+          "code": {
+            "type": "string",
+            "description": "What today's code showed or did."
+          },
+          "count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many lines."
+          },
+          "first": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The first line's time."
+          },
+          "last": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The last line's time."
+          },
+          "sample": {
+            "type": "string",
+            "description": "One subject it was seen on."
+          }
+        },
+        "required": [
+          "kind",
+          "row",
+          "table",
+          "code",
+          "count",
+          "first",
+          "last",
+          "sample"
+        ],
+        "description": "Shadow lines that differ the same way."
+      },
+      "Differs": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "state",
+            "description": "They showed different states for more than 2 s."
+          },
+          {
+            "type": "string",
+            "const": "action",
+            "description": "The table's row would have acted and today's code did not."
+          }
+        ],
+        "description": "How the table and today's code differ."
       },
       "Handover": {
         "type": "object",
