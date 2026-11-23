@@ -93,6 +93,10 @@ Also out of scope:
 - No TUI layouts, tabs, splits, themes or plugins.
 - No agent-brand detection. Programs report their state; a screen-text fallback is optional and per-harness.
 - No Windows in v0.1.
+- No host setup. A shed machine is only a place shed can run an agent: the link, processes, and their CPU and
+  memory. shed installs no toolchain, manages no build cache (sccache, pnpm's store, cargo targets) and cleans no
+  disk beyond its own state folder, where its pruning of exited terminals and ACP sessions stays. Host setup is
+  shed-cloud's recipe; a lane's cache env is drover's.
 
 ## Constraints
 
