@@ -22,3 +22,4 @@
 - Don't add workflow or issue logic (GitHub issues, pull requests, queues, review verdicts, merges): it is drover's (enforced by: `just boundary` (scripts/boundary.sh))
 - Don't add chat UI, bot code or screens JSON: chat and bots are cooee's, screens drover's (enforced by: `just boundary` (scripts/boundary.sh))
 - Don't fail an active lesson check in this file (a shadow one only reports) (enforced by: `just lessons` (drover lesson-check))
+- Don't assert that a test's measured time stays under a ceiling: it goes red on Linux CI or a loaded host (enforced by: wall-clock-bound `scripts/wall-clock-bound.py`, shadow since 2026-11-21)
