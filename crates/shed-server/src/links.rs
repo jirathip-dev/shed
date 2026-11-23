@@ -4,7 +4,6 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use serde_json::Value;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -16,8 +15,6 @@ use crate::proto::{
 };
 use crate::{Error, Shared, lock};
 use shed_client::Conn;
-
-const CALL_BOUND: Duration = Duration::from_secs(10);
 
 pub(crate) struct Links {
     pub(crate) config: PathBuf,
@@ -78,21 +75,6 @@ pub(crate) fn remote(method: Method, request: &Request) -> Option<(String, Value
         None => _ = params.as_object_mut()?.remove(field),
     }
     Some((machine.to_owned(), params))
-}
-
-fn bound(method: Method, params: &Value) -> Option<Duration> {
-    let timeout = params.get("timeout").and_then(Value::as_f64);
-    let timeout = timeout.and_then(|t| Duration::try_from_secs_f64(t).ok());
-    match method {
-        Method::Wait
-        | Method::Script
-        | Method::Run
-        | Method::Send
-        | Method::FileRead
-        | Method::FileWrite => None,
-        Method::Exec => timeout.map(|t| t + CALL_BOUND),
-        _ => Some(CALL_BOUND),
-    }
 }
 
 fn prefix(value: &mut Value, machine: &str) {
@@ -190,7 +172,7 @@ impl Links {
         };
         let (own, _ends) = machines::alone(&held.machine, &self.control);
         let alone = matches!(method, Method::Wait | Method::Script);
-        let (bound, cut) = (bound(method, &params), Arc::clone(&held));
+        let (bound, cut) = (machines::bound(method, &params), Arc::clone(&held));
         let answer = blocking(move || {
             if alone && lock(&held.link).state == LinkState::Up {
                 return match own(method, &params) {

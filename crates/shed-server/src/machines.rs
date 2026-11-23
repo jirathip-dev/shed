@@ -365,6 +365,23 @@ pub(crate) fn refusal(e: Error) -> RpcError {
     }
 }
 
+const CALL_BOUND: Duration = Duration::from_secs(10);
+
+pub(crate) fn bound(method: Method, params: &Value) -> Option<Duration> {
+    let timeout = params.get("timeout").and_then(Value::as_f64);
+    let timeout = timeout.and_then(|t| Duration::try_from_secs_f64(t).ok());
+    match method {
+        Method::Wait
+        | Method::Script
+        | Method::Run
+        | Method::Send
+        | Method::FileRead
+        | Method::FileWrite => None,
+        Method::Exec => timeout.map(|t| t + CALL_BOUND),
+        _ => Some(CALL_BOUND),
+    }
+}
+
 /// How long a machine has to answer `machine.stats` before it counts as offline.
 pub const STATS_TIMEOUT: Duration = Duration::from_secs(5);
 
