@@ -28,11 +28,8 @@ pub(crate) fn observe(
 ) -> Vec<Seen<Terminal>> {
     let one = |t: &TerminalInfo| {
         let was = was.get(&t.name);
-        let mut facts = Vec::new();
-        if was.is_none() {
-            facts.push(Fact::Run);
-        }
-        let (seen, code, agrees) = match t.state {
+        let mut facts: Vec<_> = was.is_none().then_some(Fact::Run).into_iter().collect();
+        let (view, code, agrees) = match t.state {
             State::Running => {
                 let reported = t.reported.as_ref().map_or("", |r| r.state.as_str());
                 let (fact, code, agrees) = live(reported);
@@ -41,11 +38,7 @@ pub(crate) fn observe(
             }
             State::Exited => {
                 if was.is_none_or(|w| !w.starts_with("exited")) {
-                    facts.push(if t.exit.is_some() {
-                        Fact::Exit
-                    } else {
-                        Fact::Lost
-                    });
+                    facts.push(t.exit.map_or(Fact::Lost, |_| Fact::Exit));
                 }
                 let leader = leaders.get(&t.name);
                 let runs = |p: &[ProcessInfo], l| p.iter().any(|q| q.pgid == l && !q.zombie);
@@ -55,14 +48,7 @@ pub(crate) fn observe(
                 (format!("exited:{empty}"), "exited", agrees)
             }
         };
-        let id = t.name.clone();
-        Seen {
-            id,
-            seen,
-            facts,
-            code,
-            agrees,
-        }
+        Seen::new(t.name.clone(), view, facts, code, agrees)
     };
     infos.iter().map(one).collect()
 }

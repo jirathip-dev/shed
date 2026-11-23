@@ -26,23 +26,16 @@ pub(crate) fn observe(
 ) -> Vec<Seen<Machine>> {
     let one = |m: &machines::Machine| {
         let link = links.get(&m.name).map(|l| l.state);
-        let mut facts = Vec::new();
-        if !was.contains_key(&m.name) {
-            facts.push(Fact::Listed);
-        }
+        let mut facts: Vec<_> = (!was.contains_key(&m.name))
+            .then_some(Fact::Listed)
+            .into_iter()
+            .collect();
         facts.extend(match link {
             Some(LinkState::Up) => Some(Fact::LinkUp),
             Some(LinkState::Down) => Some(Fact::LinkDown),
             _ => None,
         });
-        let (id, seen) = (m.name.clone(), format!("{link:?}"));
-        Seen {
-            id,
-            seen,
-            facts,
-            code: "listed",
-            agrees: LISTED,
-        }
+        Seen::new(m.name.clone(), format!("{link:?}"), facts, "listed", LISTED)
     };
     listed.iter().map(one).collect()
 }

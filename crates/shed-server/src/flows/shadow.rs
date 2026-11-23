@@ -50,8 +50,8 @@ pub(super) fn write(
     if fs::metadata(&path)?.len() > MAX_BYTES {
         let all = fs::read_to_string(&path)?;
         let half = all.lines().count() / 2;
-        let kept: String = all.lines().skip(half).map(|l| format!("{l}\n")).collect();
-        open(&path, false)?.write_all(kept.as_bytes())?;
+        let kept: Vec<&str> = all.lines().skip(half).chain([""]).collect();
+        open(&path, false)?.write_all(kept.join("\n").as_bytes())?;
     }
     Ok(())
 }

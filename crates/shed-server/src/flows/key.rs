@@ -28,14 +28,13 @@ pub(crate) fn observe(
         };
         let mut facts = vec![fact];
         facts.extend((k.state == KeyState::Revoked).then_some(Fact::Revoke));
-        let (id, seen) = (k.id.clone(), format!("{code}:{fact:?}"));
-        Seen {
-            id,
-            seen,
+        Seen::new(
+            k.id.clone(),
+            format!("{code}:{fact:?}"),
             facts,
             code,
             agrees,
-        }
+        )
     };
     keys.iter().map(one).collect()
 }

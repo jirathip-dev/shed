@@ -26,14 +26,7 @@ pub(crate) fn observe(
             LinkState::Down if dropped => (Fact::Refused, "down", &[State::Down]),
             LinkState::Down => (Fact::DialFailed, "down", &[State::Down]),
         };
-        let (id, seen, facts) = (id.clone(), code.to_owned(), vec![fact]);
-        Seen {
-            id,
-            seen,
-            facts,
-            code,
-            agrees,
-        }
+        Seen::new(id.clone(), code.to_owned(), vec![fact], code, agrees)
     };
     report.iter().map(one).collect()
 }

@@ -26,32 +26,19 @@ enum Action {
 
 fn text(report: &Report) -> String {
     let mut out = format!("build {} since {}\n", report.build, report.since);
-    let join = |list: Vec<String>| if list.is_empty() { "-".to_owned() } else { list.join(" ") };
-    let pairs = |m: &std::collections::BTreeMap<String, u64>| {
-        join(m.iter().map(|(k, n)| format!("{k}={n}")).collect())
-    };
     for f in &report.flows {
         let fired: u64 = f.fired.values().sum();
-        let (flow, mode) = (format!("{:?}", f.flow), format!("{:?}", f.mode));
-        writeln!(
-            out,
-            "{flow} ({mode}): {} subjects, {fired} rows fired; never seen: {}; unexpected: {}; stuck: {}",
-            f.subjects,
-            join(f.never_seen.clone()),
-            pairs(&f.unexpected),
-            pairs(&f.stuck),
-        )
-        .ok();
+        let flow = format!("{:?} ({:?})", f.flow, f.mode).to_lowercase();
+        let (never, odd, stuck) = (&f.never_seen, &f.unexpected, &f.stuck);
+        let counts = format!("never seen {never:?}, unexpected {odd:?}, stuck {stuck:?}");
+        writeln!(out, "{flow}: {} subjects, {fired} rows fired, {counts}", f.subjects).ok();
         for c in &f.disagreements {
-            writeln!(
-                out,
-                "  {:?} at {}: table {}, code {}: {} times, {} to {}, e.g. {}",
-                c.kind, c.row, c.table, c.code, c.count, c.first, c.last, c.sample
-            )
-            .ok();
+            let (kind, from, to) = (format!("{:?}", c.kind).to_lowercase(), c.first, c.last);
+            let what = format!("table {}, code {}: {} times", c.table, c.code, c.count);
+            writeln!(out, "  {kind} at {}: {what}, {from} to {to}, e.g. {}", c.row, c.sample).ok();
         }
     }
-    out.to_lowercase()
+    out
 }
 
 pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {

@@ -9,8 +9,8 @@ use shed_accounts::Store;
 use shed_accounts::keys::Keys;
 use shed_core::proctree::{self, ProcessTable as _};
 use shed_proto::flow::{
-    Differs, Disagreement, FlowReport, Mode, Step, Table, Tracker, account::Account, drain::Drain,
-    key::Key, link::Link, machine::Machine, terminal::Terminal,
+    Differs, Disagreement, FlowReport, Mode, Step, Table, Tracker, account::Account, key::Key,
+    link::Link, machine::Machine, terminal::Terminal,
 };
 use shed_proto::{BUILD, LsParams, Method, State, TerminalInfo};
 
@@ -30,21 +30,34 @@ pub(crate) use shadow::report;
 const MODE: Mode = Mode::Shadow;
 
 pub(crate) struct Seen<T: Table> {
-    pub(crate) id: String,
-    pub(crate) seen: String,
-    pub(crate) facts: Vec<T::Fact>,
-    pub(crate) code: &'static str,
-    pub(crate) agrees: &'static [T::State],
+    id: String,
+    view: String,
+    facts: Vec<T::Fact>,
+    code: &'static str,
+    agrees: &'static [T::State],
+}
+
+impl<T: Table> Seen<T> {
+    fn new(
+        id: String,
+        view: String,
+        facts: Vec<T::Fact>,
+        code: &'static str,
+        agrees: &'static [T::State],
+    ) -> Self {
+        Self {
+            id,
+            view,
+            facts,
+            code,
+            agrees,
+        }
+    }
 }
 
 pub(crate) trait Shadow: Table {
     const GONE: Option<Self::Fact>;
     const UNDONE: &'static [Self::Action];
-}
-
-impl Shadow for Drain {
-    const GONE: Option<Self::Fact> = None;
-    const UNDONE: &'static [Self::Action] = &[];
 }
 
 struct Out {
@@ -89,10 +102,8 @@ fn name(debug: impl Debug, sep: char) -> String {
 }
 
 fn wire(state: impl Serialize) -> String {
-    let value = serde_json::to_value(state).ok();
-    value
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_default()
+    let value = serde_json::to_value(state).unwrap_or_default();
+    value.as_str().unwrap_or_default().to_owned()
 }
 
 fn record<T: Shadow>(
@@ -176,7 +187,7 @@ impl<T: Shadow> Shadowed<T> {
             }
         }
         for seen in all {
-            if self.seen.get(&seen.id) == Some(&seen.seen) {
+            if self.seen.get(&seen.id) == Some(&seen.view) {
                 continue;
             }
             let old = self.subjects.remove(&seen.id);
@@ -194,7 +205,7 @@ impl<T: Shadow> Shadowed<T> {
                 self.step(&seen.id, &mut s, fact, tell, out);
             }
             self.subjects.insert(seen.id.clone(), s);
-            self.seen.insert(seen.id, seen.seen);
+            self.seen.insert(seen.id, seen.view);
         }
     }
 
@@ -227,7 +238,6 @@ struct Runner {
     terminal: Shadowed<Terminal>,
     link: Shadowed<Link>,
     machine: Shadowed<Machine>,
-    drain: Shadowed<Drain>,
     account: Shadowed<Account>,
     key: Shadowed<Key>,
 }
@@ -240,7 +250,6 @@ impl Runner {
             terminal: Shadowed::new(&kept),
             link: Shadowed::new(&kept),
             machine: Shadowed::new(&kept),
-            drain: Shadowed::new(&kept),
             account: Shadowed::new(&kept),
             key: Shadowed::new(&kept),
         }
@@ -251,7 +260,6 @@ impl Runner {
             &self.terminal.report,
             &self.link.report,
             &self.machine.report,
-            &self.drain.report,
             &self.account.report,
             &self.key.report,
         ]
@@ -263,7 +271,6 @@ impl Runner {
         self.terminal.tick(out);
         self.link.tick(out);
         self.machine.tick(out);
-        self.drain.tick(out);
         self.account.tick(out);
         self.key.tick(out);
     }
@@ -273,14 +280,9 @@ impl Runner {
             let reg = lock(registry);
             (reg.ls(&LsParams::default()), reg.leaders())
         };
-        let procs = if infos.iter().any(|t| t.state == State::Exited) {
-            blocking(|| proctree::system().list().ok())
-                .await
-                .ok()
-                .flatten()
-        } else {
-            None
-        };
+        let exited = infos.iter().any(|t| t.state == State::Exited);
+        let procs = blocking(move || exited.then(|| proctree::system().list().ok()).flatten());
+        let procs = procs.await.ok().flatten();
         let seen = terminal::observe(&infos, &leaders, procs.as_deref(), &self.terminal.seen);
         self.terminal.observe(seen, out);
         let report = links.report();
@@ -317,13 +319,11 @@ impl Runner {
         };
         self.account.observe(account::observe(&accounts), out);
         let mut there = BTreeMap::new();
-        for m in keys
+        let machines: BTreeSet<&str> = keys
             .iter()
             .filter_map(|k| Some(k.terminal.split_once('/')?.0))
-        {
-            if there.contains_key(m) {
-                continue;
-            }
+            .collect();
+        for m in machines {
             let ls = links.call(m, Method::Ls, serde_json::json!({}));
             let ls = tokio::time::timeout(Duration::from_secs(10), ls).await;
             let ls = ls.ok().and_then(Result::ok);
@@ -352,8 +352,8 @@ pub(crate) async fn run(registry: Shared, links: Arc<Links>) {
         }
         runner.tick(&mut out);
         let counts = (n % 60 == 0).then(|| runner.reports());
-        let (state, lines) = (state.clone(), out.lines);
-        blocking(move || shadow::write(&state, &lines, counts.as_deref()).ok())
+        let (file, found) = (state.clone(), out.lines);
+        blocking(move || shadow::write(&file, &found, counts.as_deref()).ok())
             .await
             .ok();
     }
@@ -379,7 +379,7 @@ mod tests {
         }
     }
 
-    fn flow<'a>(reports: &'a [FlowReport], name: shed_proto::flow::FlowName) -> &'a FlowReport {
+    fn flow(reports: &[FlowReport], name: shed_proto::flow::FlowName) -> &FlowReport {
         reports.iter().find(|r| r.flow == name).unwrap()
     }
 
@@ -428,10 +428,10 @@ mod tests {
         observe(&reg, &mut runner, &mut o);
         runner.tick(&mut o);
         assert_eq!(o.lines.len(), 1, "{:?}", o.lines);
-        let line = &o.lines[0];
-        assert_eq!((line.kind, line.row.as_str()), (Differs::Action, "T9"));
+        let got = &o.lines[0];
+        assert_eq!((got.kind, got.row.as_str()), (Differs::Action, "T9"));
         assert_eq!(
-            (line.table.as_str(), line.code.as_str()),
+            (got.table.as_str(), got.code.as_str()),
             ("end-tree", "exited")
         );
         let state_now = runner.terminal.subjects["left"].tracker.state();
@@ -480,12 +480,9 @@ mod tests {
             runner.tick(&mut o);
         }
         assert_eq!(o.lines.len(), 1, "{:?}", o.lines);
-        let line = &o.lines[0];
-        assert_eq!((line.kind, line.at), (Differs::State, 63));
-        assert_eq!(
-            (line.table.as_str(), line.code.as_str()),
-            ("in_use", "ended")
-        );
+        let got = &o.lines[0];
+        assert_eq!((got.kind, got.at), (Differs::State, 63));
+        assert_eq!((got.table.as_str(), got.code.as_str()), ("in_use", "ended"));
         shadow::write(&state, &o.lines, Some(&runner.reports())).unwrap();
         let shown = report(&state, Some(61), 70);
         let keys = flow(&shown.flows, shed_proto::flow::FlowName::Key);
@@ -526,13 +523,13 @@ mod tests {
             runner.tick(&mut o);
         }
         assert_eq!(o.lines.len(), 1, "{:?}", o.lines);
-        let line = &o.lines[0];
+        let got = &o.lines[0];
         assert_eq!(
-            (line.kind, line.row.as_str(), line.at),
+            (got.kind, got.row.as_str(), got.at),
             (Differs::State, "L7", 73)
         );
         assert_eq!(
-            (line.table.as_str(), line.code.as_str()),
+            (got.table.as_str(), got.code.as_str()),
             ("down", "reconnecting")
         );
         assert_eq!(runner.link.report.stuck.get("link-down"), Some(&1));
