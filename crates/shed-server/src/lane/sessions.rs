@@ -6,7 +6,7 @@ use std::io::{self, Write as _};
 use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
 use std::path::{Path, PathBuf};
 
-use shed_proto::{SessionRecord, TerminalInfo};
+use shed_proto::SessionRecord;
 
 fn file(state: &Path, id: &str, ext: &str) -> PathBuf {
     let name: String = (id.bytes())
@@ -104,29 +104,6 @@ pub(crate) fn prune(state: &Path, now: u64, keep: u64, live: &BTreeSet<String>) 
     let old = |r: &SessionRecord| now.saturating_sub(r.updated) >= keep && !live.contains(&r.id);
     for record in list(state).unwrap_or_default().iter().filter(|r| old(r)) {
         remove(state, &record.id);
-    }
-}
-
-pub(crate) fn carry_over(state: &Path, info: &TerminalInfo, now: u64) {
-    let (Some(agent), Some(session)) = (&info.acp, &info.session) else {
-        return;
-    };
-    let old = state
-        .with_file_name("acp")
-        .join(format!("{}.jsonl", info.name));
-    let new = transcript(state, &session.id);
-    if session.id.is_empty() || new.exists() || !old.exists() || folder(&new).is_err() {
-        return;
-    }
-    let record = SessionRecord {
-        id: session.id.clone(),
-        agent: agent.clone(),
-        cwd: info.cwd.clone(),
-        updated: now,
-        ..SessionRecord::default()
-    };
-    if fs::rename(old, new).is_ok() {
-        write(state, &record).ok();
     }
 }
 

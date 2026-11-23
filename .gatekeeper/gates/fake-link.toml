@@ -1,0 +1,6 @@
+about = "the multi-host fault gate (#308): shed's link, machine, exec/file, stats, account and token-proxy tests over the fake ssh link (scripts/fake-link.py), each fault with its time bound"
+fix = "fix the fault the log names: a call to a machine answers or fails within its bound, one hung link never holds a call to another, and a link reads up or down as its calls find it"
+budget_secs = 300
+setup = ["rust"]
+paths = ["crates/shed-server/src/links.rs", "crates/shed-server/src/machines.rs", "crates/shed-server/src/proxy.rs", "crates/shed-server/src/methods/**", "crates/shed-accounts/**", "crates/shed-client/**", "crates/shed/src/cx.rs", "crates/shed/tests/machines/**", "scripts/fake-link.py"]
+run = "cargo test --locked -p shed --test machines"

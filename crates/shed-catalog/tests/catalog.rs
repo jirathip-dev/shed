@@ -30,6 +30,7 @@ fn each_built_in_record_is_one_file_and_gemini_has_one_id() {
     assert_eq!(
         ids,
         [
+            ("antigravity-acp", "built-in"),
             ("claude-acp", "built-in"),
             ("codex-acp", "built-in"),
             ("dsh", "built-in"),

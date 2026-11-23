@@ -42,3 +42,16 @@ cd ~/actions-runner
 
 `./svc.sh stop && ./svc.sh uninstall && ./config.sh remove --token <TOKEN>` takes it off again; unset
 `CI_RUNNER` first so jobs fall back to `macos-latest`.
+
+## The multi-host fault gate and the nightly soak (#308)
+
+`scripts/fake-link.py` stands in for `ssh`: it joins a target to a shed in a temp folder and applies the faults
+its `faults` file names (latency, loss, stall, hang, cut, gone, moved, rekey; the script's docstring has the
+format). shed's machine tests (`crates/shed/tests/machines/`) all run over it, and `faults.rs` gives each fault
+its own test with a time bound. `local/fake-link` runs them on any PR that touches the link, machine, exec/file,
+stats, account or token-proxy code. Each release carries the script as `shed-fake-link.py`, so drover's tests can
+put it on PATH as `ssh` and set `FAKE_LINK_HOSTS` and `FAKE_LINK_FAULTS`.
+
+`.github/workflows/soak.yml` runs `scripts/soak.py` nightly on the self-hosted runner: this machine and each
+`label=ssh-target` in the repository variable `SOAK_MACHINES`, timed against `ci/soak.toml`. The run's summary
+and its `soak` artifact hold the numbers; each missed target files one issue that night.

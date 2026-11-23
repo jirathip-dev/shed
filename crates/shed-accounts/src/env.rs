@@ -65,8 +65,8 @@ impl Injected {
             return Err(RpcError::new(ErrorCode::AccountLimited, why));
         }
         let mut run = Self {
+            set: provider.env.clone(),
             unset: dropped(provider).cloned().collect(),
-            ..Self::default()
         };
         match account.folder {
             Some(folder) => _ = run.set.insert(var.clone(), folder.display().to_string()),
@@ -106,6 +106,7 @@ mod tests {
                 api_vars: vec!["FAKE_API_KEY".into()],
             }),
             setup_files: vec!["settings.json".into()],
+            env: BTreeMap::from([("FAKE_STORE".into(), "file".into())]),
             ..Provider::default()
         }
     }
@@ -140,10 +141,13 @@ mod tests {
         };
         store.keep(&provider, "work", ready).expect("kept");
         let run = Injected::for_run(&store, &provider, "work", &none).expect("injected");
-        assert_eq!(run.set.keys().collect::<Vec<_>>(), ["FAKE_HOME"]);
+        assert_eq!(
+            run.set.keys().collect::<Vec<_>>(),
+            ["FAKE_HOME", "FAKE_STORE"]
+        );
         assert_eq!(run.unset, ["FAKE_TOKEN", "FAKE_SCRUB", "FAKE_API_KEY"]);
         let default = Injected::for_run(&store, &provider, "default", &none).expect("default");
-        assert!(default.set.is_empty());
+        assert_eq!(default.set.keys().collect::<Vec<_>>(), ["FAKE_STORE"]);
         assert_eq!(default.unset.last().map(String::as_str), Some("FAKE_HOME"));
     }
 

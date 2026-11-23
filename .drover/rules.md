@@ -22,4 +22,6 @@
 - Don't give a job a self-hosted runner unless its `runs-on` or `if:` checks the code is from this repo (enforced by: local/self-hosted (scripts/self-hosted.py))
 - Don't add workflow or issue logic (GitHub issues, pull requests, queues, review verdicts, merges): it is drover's (enforced by: local/boundary (scripts/boundary.sh))
 - Don't add chat UI, bot code or screens JSON: chat and bots are cooee's, screens drover's (enforced by: local/boundary (scripts/boundary.sh))
+- Don't file a bug issue without `Root cause: #N` or `Root cause: new`: a bug issue names its root cause (enforced by: the `Root cause:` line in .github/ISSUE_TEMPLATE/bug.md, kept by local/root-cause)
 - Don't fail an active lesson check in this file (a shadow one only reports) (enforced by: core/rules (drover lesson-check))
+- Don't leave the code a slice replaces for a later PR: delete it in the same one, and its removed lines lower the size baseline and the cap (enforced by: local/shrink (scripts/shrink.py))

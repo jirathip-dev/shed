@@ -1,0 +1,5 @@
+about = "the bug template asks for the root cause (#308): .github/ISSUE_TEMPLATE/bug.md keeps its `Root cause:` line"
+fix = "put back the `Root cause: #N` (or `Root cause: new`) line in .github/ISSUE_TEMPLATE/bug.md"
+budget_secs = 5
+paths = [".github/ISSUE_TEMPLATE/**", ".drover/rules.md"]
+run = "grep -q '^Root cause: ' .github/ISSUE_TEMPLATE/bug.md"
