@@ -347,6 +347,8 @@ All notable changes to this project are documented here. The format follows
   the logs are `~/Library/Logs/dev.shed.serve.log` and `dev.shed.update.log`. `shed uninstall` unloads and
   removes both jobs instead of printing the lines, and `shed install` loads only a job that changed or is
   not loaded. The job templates in `dist/` are gone: their golden copies are farrier's `fixtures/units/`.
+- `shed serve` no longer moves an ACP transcript from the old `acp/` folder to its session on upgrade:
+  servers from before the sessions index (#183) upgrade through a release that has it.
 
 ### Fixed
 
@@ -373,3 +375,10 @@ All notable changes to this project are documented here. The format follows
 - `shed events` no longer drops agent text chunks for a reader that falls more than 256 chunks behind
   but stays within the 4,096-event window: every chunk in the last 4,096 events is kept until it is read,
   and only a reader past that window is dropped, with a `lagged` line.
+- One hung machine link no longer blocks the server: a quick call over a link (`ls`, `get`, `read`, `kill`,
+  `state`, …) answers or fails `NO_LINK` within 10 s (an `exec` within its own timeout plus 10 s), and a link
+  whose call got no answer is cut, so `machine ls` reads it reconnecting at once. `ls` asks every machine at
+  the same time. A link's handshake gives up after 20 s instead of waiting for ever.
+- `scripts/fake-link.py`, a fake `ssh` with latency, loss, stalls, hangs, cuts, a host gone, an address change
+  and a host-key change, ships with each release as `shed-fake-link.py`; shed's machine tests run over it.
+  `scripts/soak.py` times throwaway terminals on real machines against `ci/soak.toml`, nightly.

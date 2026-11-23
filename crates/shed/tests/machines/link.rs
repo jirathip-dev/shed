@@ -1,6 +1,6 @@
 use std::io::BufRead as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -8,7 +8,7 @@ use shed_server::proto::{BUILD, EventsParams, Method};
 
 use crate::common::{self, temp_dir};
 use crate::{
-    OLD, SHED, VERSION, box_ssh, fake_hosts, link, linked, local_events, ok, script, shed_on,
+    OLD, SHED, VERSION, box_ssh, fake_hosts, fault, link, linked, local_events, ok, script, shed_on,
 };
 
 #[test]
@@ -122,17 +122,11 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     until("l1", "started", &mut seen);
     let before = until("box/r1", "started", &mut seen)["seq"].clone();
 
-    let pids = std::fs::read_to_string(root.join("bin/ssh.pids")).expect("pids");
-    for pid in pids.lines() {
-        Command::new("kill")
-            .arg(pid)
-            .stderr(Stdio::null())
-            .status()
-            .ok();
-    }
+    fault(&root, "* cut\n");
     common::eventually("reconnecting", || {
         link(&root, "box")["state"] == "reconnecting"
     });
+    fault(&root, "");
     let down = link(&root, "box");
     assert!(down["down_since"].is_u64(), "{down}");
     assert_eq!(down["down_since"], down["since"], "left up at the drop");

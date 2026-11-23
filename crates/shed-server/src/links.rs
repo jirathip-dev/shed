@@ -28,6 +28,7 @@ pub(crate) struct Held {
     watched: UnboundedSender<Event>,
     pub(crate) calls: Mutex<Option<Conn>>,
     pub(crate) link: Mutex<Link>,
+    lines: Mutex<Vec<UnixStream>>,
 }
 
 impl Held {
@@ -42,6 +43,12 @@ impl Held {
             link.down_since = (!up).then_some(now);
         }
         (link.state, link.error) = (state, error);
+    }
+
+    fn cut(&self) {
+        for line in lock(&self.lines).drain(..) {
+            line.shutdown(Shutdown::Both).ok();
+        }
     }
 
     fn learn(&self, calls: &mut Conn) {
@@ -126,6 +133,7 @@ impl Links {
                 machine: machine.clone(),
                 watched: self.watched.clone(),
                 calls: Mutex::new(None),
+                lines: Mutex::default(),
                 link: Mutex::new(Link {
                     since: shed_core::clock::unix_now(),
                     down_since: Some(shed_core::clock::unix_now()),
@@ -164,7 +172,8 @@ impl Links {
         };
         let (own, _ends) = machines::alone(&held.machine, &self.control);
         let alone = matches!(method, Method::Wait | Method::Script);
-        let mut value = blocking(move || {
+        let (bound, cut) = (machines::bound(method, &params), Arc::clone(&held));
+        let answer = blocking(move || {
             if alone && lock(&held.link).state == LinkState::Up {
                 return match own(method, &params) {
                     Err(Error::Client(shed_client::Error::Rpc(e))) => Err(e),
@@ -192,8 +201,21 @@ impl Links {
                 }
                 Ok(value) => Ok(value),
             }
-        })
-        .await??;
+        });
+        let Some(bound) = bound else {
+            let mut value = answer.await??;
+            prefix(&mut value, machine);
+            return Ok(value);
+        };
+        let Ok(answer) = tokio::time::timeout(bound, answer).await else {
+            cut.cut();
+            let why = format!(
+                "{machine}: no answer in {} s; the link is cut",
+                bound.as_secs()
+            );
+            return Err(RpcError::new(ErrorCode::NoLink, why));
+        };
+        let mut value = answer??;
         prefix(&mut value, machine);
         Ok(value)
     }
@@ -202,10 +224,11 @@ impl Links {
 fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) {
     let (mut since, mut failures) = (None, 0);
     while Arc::strong_count(held) > 1 {
-        let pair = machines::connect(machine, control, false)
-            .and_then(|calls| Ok((calls, machines::connect(machine, control, false)?)));
+        let pair = machines::line(machine, control, false)
+            .and_then(|calls| Ok((calls, machines::line(machine, control, false)?)));
         match pair {
-            Ok((mut calls, mut events)) => {
+            Ok(((mut calls, calls_line), (mut events, events_line))) => {
+                *lock(&held.lines) = vec![calls_line, events_line];
                 let params = EventsParams {
                     labels: BTreeMap::new(),
                     since,
@@ -227,7 +250,6 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                         .set_read_timeout(Some(crate::WRITE_TIMEOUT))
                         .ok();
                     std::thread::spawn(move || beat(&writer));
-                    let socket = reader.get_ref().try_clone();
                     for line in reader.lines().map_while(Result::ok) {
                         if Arc::strong_count(held) == 1 {
                             break;
@@ -247,10 +269,11 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                         }
                         lock(registry).events.push(e);
                     }
-                    socket.and_then(|s| s.shutdown(Shutdown::Both)).ok();
+                    held.cut();
                     *lock(&held.calls) = None;
                     held.set(LinkState::Reconnecting, None);
                 }
+                held.cut();
             }
             Err(e) => {
                 let reconnecting = lock(&held.link).state == LinkState::Reconnecting;
