@@ -1,0 +1,9 @@
+about = "no drover or cooee job in shed (#257): no workflow, issue, chat or bot code in crates/*/src (scripts/boundary.sh); the fixture proves the check bites"
+fix = "move the workflow code to drover, or the chat and bot code to cooee"
+budget_secs = 5
+paths = ["crates/**", "scripts/boundary.sh", "ci/fixtures/boundary/**"]
+run = """
+set -eu
+scripts/boundary.sh
+! scripts/boundary.sh ci/fixtures/boundary
+"""

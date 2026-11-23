@@ -162,10 +162,8 @@ def code_of(text):
 
 
 def denied():
-    rules = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ci/denylist.txt")
-    with open(rules) as f:
-        lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-    return [re.compile(line.replace("[[:<:]]", r"\b")) for line in lines]
+    names = os.environ.get("DROVER_PRIVATE_NAMES", "").splitlines()
+    return [re.compile(rf"\b{re.escape(n.strip())}\b", re.I) for n in names if n.strip()]
 
 
 DENIED = denied()
@@ -173,7 +171,7 @@ DENIED = denied()
 
 def judge(path, text):
     if any(rule.search(text) for rule in DENIED):
-        return ("skip", "hygiene: a name ci/denylist.txt keeps out of the repo")
+        return ("skip", "hygiene: a private name core/hygiene keeps out of the repo")
     meta = front(text)
     for flag in meta["flags"]:
         if flag not in FLAGS:

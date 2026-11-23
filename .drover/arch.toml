@@ -1,8 +1,4 @@
-# `drover arch-check` (just arch): the generated files, the layers, the banned calls and the size limits.
-# A generated file must equal what `generate` writes; an update round reruns it instead of merging (#116).
-# A frozen file takes no new line, a `shared` one stays under its `[[size]]` limit, and a row of a `[[collect]]`
-# folder is a new file there (#246).
-frozen = ["docs/acp/README.md"]
+frozen = ["docs/acp/README.md", ".github/workflows/ci.yml"]
 generated = [
     "CHANGELOG.md",
     "docs/protocol.md",
@@ -13,11 +9,10 @@ generated = [
     "crates/shed/tests/golden/**",
     "README.md",
 ]
-generate = "just generate"
+generate = "sh \"$(git rev-parse --show-toplevel)/scripts/arch-gen.sh\""
 shared = [
     ".drover/arch.toml",
     ".drover/rules.md",
-    ".github/workflows/ci.yml",
     "Cargo.toml",
     "justfile",
     "crates/shed-core/Cargo.toml",
@@ -232,10 +227,66 @@ paths = ["crates/*/src/**"]
 except = []
 reason = "#238: jobs are written, loaded and restarted only by farrier-service"
 
+[[ban]]
+pattern = "claude"
+paths = ["crates/*/src/**"]
+except = ["crates/*/src/providers/**", "crates/shed-server/src/providers.rs"]
+reason = "#64: core names no agent or provider; agent specifics are data in crates/shed-catalog/providers/<name>.toml"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "anthropic"
+paths = ["crates/*/src/**"]
+except = ["crates/*/src/providers/**", "crates/shed-server/src/providers.rs"]
+reason = "#64: core names no agent or provider; agent specifics are data in crates/shed-catalog/providers/<name>.toml"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "codex"
+paths = ["crates/*/src/**"]
+except = ["crates/*/src/providers/**", "crates/shed-server/src/providers.rs"]
+reason = "#64: core names no agent or provider; agent specifics are data in crates/shed-catalog/providers/<name>.toml"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "openai"
+paths = ["crates/*/src/**"]
+except = ["crates/*/src/providers/**", "crates/shed-server/src/providers.rs"]
+reason = "#64: core names no agent or provider; agent specifics are data in crates/shed-catalog/providers/<name>.toml"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "gemini"
+paths = ["crates/*/src/**"]
+except = ["crates/*/src/providers/**", "crates/shed-server/src/providers.rs"]
+reason = "#64: core names no agent or provider; agent specifics are data in crates/shed-catalog/providers/<name>.toml"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "hermes"
+paths = ["crates/*/src/**"]
+except = ["crates/*/src/providers/**", "crates/shed-server/src/providers.rs"]
+reason = "#64: core names no agent or provider; agent specifics are data in crates/shed-catalog/providers/<name>.toml"
+comments = true
+ignore_case = true
+
+[[size]]
+paths = ["crates/*/tests/**/*.rs"]
+max_file_lines = 100000
+max_fn_lines = 105
+
+[comments]
+policy = "on"
+
 [[size]]
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
-max_fn_lines = 150
+max_fn_lines = 105
 
 [[collect]]
 dir = "docs/accounts"
@@ -266,8 +317,8 @@ dir = "docs/acp"
 glob = "**/[!R]*.md"
 
 [[collect]]
-dir = ".github/workflows"
-glob = "bench-*.yml"
+dir = ".gatekeeper/gates"
+glob = "*.toml"
 
 [[collect]]
 dir = "crates/shed-core/tests"
@@ -292,10 +343,6 @@ max_file_lines = 55
 [[size]]
 paths = ["Cargo.toml"]
 max_file_lines = 70
-
-[[size]]
-paths = [".github/workflows/ci.yml"]
-max_file_lines = 100
 
 [[size]]
 paths = ["justfile"]
@@ -327,7 +374,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 440
+max_file_lines = 480
 
 [[collect]]
 dir = "crates/shed/tests"

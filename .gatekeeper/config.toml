@@ -1,0 +1,21 @@
+packs = ["core", "rust"]
+integration = "staging"
+
+[pin]
+version = "1.1.1"
+x86_64-unknown-linux-gnu = "c5546582c424cb11b488c9dea8c7194fd23ba314b8c49f08d04b5a66cffaa7d7"
+aarch64-apple-darwin = "4e011e77c5123fbdeb9297b78c460740ab97d0937641afb1fa474c6ec3fcd583"
+
+[cache]
+
+[legs.macos]
+platform = "macos"
+
+[legs.bench-acp]
+platform = "linux"
+
+[legs.bench-drain]
+platform = "linux"
+
+[legs.bench-fanout]
+platform = "linux"

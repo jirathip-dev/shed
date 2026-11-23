@@ -1,125 +1,15 @@
-# Every CI gate, locally.
-check: generate fmt clippy banned budget doc deny cap deps hygiene neutral boundary comments actionlint self-hosted arch protocol lessons temp-left
+# Every gate, the same command CI and `drover turn done` run: gatekeeper's core and rust packs and the gates in
+# .gatekeeper/gates/.
+check:
+    ./.gatekeeper/run check
 
-# The generated files in .drover/arch.toml, written in the current folder (so a fixture gets its own):
-# CHANGELOG.md's Unreleased section from changelog.d/, then docs/protocol.md and docs/shed.openrpc.json,
-# then the script engine's counts of its fixed scripts (crates/shed-script/tests/perf/counts.json), then the
-# goldens the CLI, ACP, server and machines tests write (crates/shed/tests/golden/, their `golden.rs`), then
-# Cargo.lock from the manifests, then README.md's command table from docs/commands/.
-[no-cd]
+# The generated files in .drover/arch.toml (scripts/generate.sh).
 generate:
-    python3 -I "{{justfile_directory()}}/scripts/changelog.py"
-    SHED_BLESS=1 cargo test -p shed-proto --features schema --locked --test protocol_doc
-    SHED_BLESS=1 cargo test -p shed-script --locked --test perf counts
-    SHED_BLESS=1 cargo test -p shed --locked --test cli --test acp --test server --test machines golden::
-    cargo metadata --format-version 1 > /dev/null
-    python3 -I "{{justfile_directory()}}/scripts/commands.py"
+    scripts/generate.sh
 
-fmt:
-    cargo fmt --all --check
-
-clippy:
-    cargo clippy --workspace --all-targets --locked -- -D warnings
-    # At most 10 allows in the workspace, each with a reason (clippy checks the reason).
-    test "$(grep -rE 'allow\(' crates | wc -l)" -le 10
-
-# The banned APIs (#67): each fixture breaks one [workspace.lints] ban, and clippy must reject it.
-banned:
-    scripts/banned.sh
-
-# The tests, crate by crate within each one's `[package.metadata.gate] test_secs` (scripts/budget.py), in a
-# fresh private temp dir that target/test-tmp links to, so temp-left sees only what they leave.
-test:
-    #!/bin/sh
-    set -eu
-    if old=$(readlink target/test-tmp); then rm -rf "${old:?}"; fi
-    mkdir -p target
-    dir=$(mktemp -d /tmp/shed-test.XXXXXX)
-    ln -sfn "$dir" target/test-tmp
-    TMPDIR="$dir" scripts/budget.py
-
-# The tests within their time budgets (`just test`); the fixture crate, with a budget of 0, proves it bites.
-budget: test
-    ! scripts/budget.py ci/fixtures/budget
-
-doc:
-    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
-
-deny:
-    cargo deny --locked check
-
-# The cap is the newest ci/cap.d/ raise by name, else ci/cap.toml; the fixtures prove both.
-cap:
-    scripts/line-cap.sh
-    ! scripts/line-cap.sh ci/fixtures/cap-toml
-    scripts/line-cap.sh ci/fixtures/cap-raise
-
-deps:
-    scripts/dep-direction.sh
-    scripts/proto-features.sh
-
-hygiene:
-    scripts/hygiene.sh
-
-# No agent or provider name in core code (#64); the leaky fixture proves the check bites.
-neutral:
-    scripts/neutral-core.sh
-    ! scripts/neutral-core.sh ci/fixtures/leaky-core
-
-# No workflow or chat code in shed (#257); the fixture proves the check bites.
-boundary:
-    scripts/boundary.sh
-    ! scripts/boundary.sh ci/fixtures/boundary
-
-# The comment rule (#65); the two breaking fixtures prove the check bites, the allowed one that it passes.
-comments:
-    scripts/comment-rule.py
-    ! scripts/comment-rule.py ci/fixtures/comment-plain
-    ! scripts/comment-rule.py ci/fixtures/comment-private-doc
-    scripts/comment-rule.py ci/fixtures/comment-allowed
-
-# The GitHub workflows lint clean; the broken fixture proves the check bites.
-actionlint:
-    actionlint
-    ! actionlint ci/fixtures/actionlint-bad.yml
-
-# Self-hosted runners only for same-repo code (#93); the unguarded fixture proves the check bites.
-self-hosted:
-    scripts/self-hosted.py
-    ! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
-
-# Layers, banned calls (processes only in shed_core::runner, time and sleep only in shed_core::clock, the
-# environment only in shed_server::config, a hello only in shed_client and the server's dispatch), size
-# limits and generated files in .drover/arch.toml; each ci/fixtures/arch-*/ folder breaks one. On a pull request CI sets ARCH_BASE=HEAD^1, the PR's base, for `--base`.
-arch:
-    drover arch-check ${ARCH_BASE:+--base "$ARCH_BASE"}
-    for d in ci/fixtures/arch-*/; do (cd "$d" && ! drover arch-check --config ../../../.drover/arch.toml) || exit 1; done
-
-# A change that drops or retypes a method, field or type in docs/shed.openrpc.json raises PROTOCOL (against ARCH_BASE, else HEAD); the fixture proves the check bites.
-protocol:
-    scripts/protocol.py ${ARCH_BASE:+--base "$ARCH_BASE"}
-    ! scripts/protocol.py ci/fixtures/protocol-dropped
-
-# The lesson checks in .drover/rules.md: an active one that fails fails, a shadow one only reports.
-lessons:
-    drover lesson-check
-    ! env -u GITHUB_STEP_SUMMARY drover lesson-check --rules ci/fixtures/lesson-active.md
-    env -u GITHUB_STEP_SUMMARY drover lesson-check --rules ci/fixtures/lesson-shadow.md
-
-# Tests leave no shed-* temp folders (run after `just test`); the fixture folder proves the check bites.
-temp-left:
-    scripts/temp-left.sh
-    ! scripts/temp-left.sh ci/fixtures/temp-left
-
-# The CLI timing report (soft target: a non-waiting call under 20 ms) and the history throughput report.
-bench:
-    cargo test -p shed --locked --test cli timing_report -- --nocapture
-    cargo test -p shed-core --locked --test history throughput_report -- --nocapture
-
-# The script speed report: the engine's targets 3, 4 and 5 (#214), then the server's targets 2 and 6 (#217), each the median and range of 5 runs.
+# The script engine's speed report (#214): targets 3, 4 and 5, each the median and range of 5 runs.
 script-bench:
     cargo test -p shed-script --release --locked --test perf speed_report -- --ignored --nocapture --test-threads 1
-    cargo test -p shed --release --locked --test script speed_report -- --ignored --nocapture --test-threads 1
 
 # Build shed and install it to BIN_DIR/shed (default ~/.cargo/bin), signed on macOS with "herdsman-local" (#56).
 install *BIN_DIR:

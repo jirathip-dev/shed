@@ -1,0 +1,15 @@
+about = "every workspace test on the MSRV, crate by crate within its test_secs (scripts/budget.py), in a fresh temp dir no test may leave a shed-* folder in (scripts/temp-left.sh); each fixture proves its check bites"
+fix = "fix the failing or slow test the log names; make each test remove its temp folders"
+budget_secs = 600
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/budget.py", "scripts/temp-left.sh", "ci/fixtures/budget/**", "ci/fixtures/temp-left/**"]
+run = """
+set -eu
+dir=$(mktemp -d /tmp/shed-test.XXXXXX)
+trap 'rm -rf "${dir:?}"' EXIT
+if [ -n "${CI:-}" ]; then mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"; fi
+TMPDIR="$dir" scripts/budget.py
+if scripts/budget.py ci/fixtures/budget; then echo "the budget fixture passed: the time budget does not bite"; exit 1; fi
+scripts/temp-left.sh "$dir/"
+! scripts/temp-left.sh ci/fixtures/temp-left
+"""

@@ -26560,7 +26560,7 @@ language/statements/class/decorator/syntax/valid/decorator-member-expr-identifie
 language/statements/class/decorator/syntax/valid/decorator-parenthesized-expr-identifier-reference.js
 language/statements/class/elements/field-definition-accessor-no-line-terminator.js
 language/statements/class/elements/syntax/valid/grammar-field-accessor.js
-# hygiene: a name ci/denylist.txt keeps out of the repo: 18
+# hygiene: a private name core/hygiene keeps out of the repo: 18
 built-ins/Array/from/from-string.js
 built-ins/Array/prototype/sort/bug_596_1.js
 built-ins/Array/prototype/sort/bug_596_2.js

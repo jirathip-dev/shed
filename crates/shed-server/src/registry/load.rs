@@ -223,7 +223,7 @@ mod tests {
                 "m2",
                 r#","reported":{"state":"done","note":"ok"},"idle_after":30"#,
             ),
-            terminal("m2c", r#","acp":"claude-acp""#),
+            terminal("m2c", r#","acp":"agent-acp""#),
             terminal(
                 "osc",
                 r#","reported":{"state":"blocked","state_source":"jan-osc9999"}"#,
@@ -249,7 +249,7 @@ mod tests {
         assert_eq!(registry.get("m2").unwrap().idle_after, Some(30));
         assert_eq!(
             registry.get("m2c").unwrap().acp.as_deref(),
-            Some("claude-acp")
+            Some("agent-acp")
         );
         let osc = registry.get("osc").unwrap().reported.unwrap();
         assert_eq!(osc.state_source.as_deref(), Some("jan-osc9999"));

@@ -1,0 +1,10 @@
+about = "each ci/fixtures/arch-*/ breaks one rule of .drover/arch.toml (a layer, a ban, a size), and arch-check must refuse it"
+fix = "a fixture passed: the rule it breaks no longer bites; fix the rule in .drover/arch.toml"
+budget_secs = 30
+paths = [".drover/**", "ci/fixtures/arch-*/**"]
+run = """
+for d in ci/fixtures/arch-*/; do
+  if (cd "$d" && {tool:drover} arch-check --config ../../../.drover/arch.toml >/dev/null); then echo "$d: arch-check passed it"; exit 1; fi
+  echo "$d: refused"
+done
+"""

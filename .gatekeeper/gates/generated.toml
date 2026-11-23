@@ -1,0 +1,13 @@
+about = "every generated file in .drover/arch.toml is what scripts/generate.sh writes (core/arch's own run of it is cut to a no-op: drover gives it 60 s)"
+fix = "run scripts/generate.sh (just generate) and commit what it writes; never hand-edit a generated file"
+budget_secs = 300
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "CHANGELOG.md", "changelog.d/**", "docs/**", "README.md", "skill/**", "scripts/generate.sh", "scripts/changelog.py", "scripts/commands.py"]
+run = """
+set -eu
+files="CHANGELOG.md changelog.d docs/protocol.md docs/shed.openrpc.json crates/shed-script/tests/perf/counts.json Cargo.lock crates/shed/tests/golden README.md skill/script/methods.md"
+state() { git status --porcelain --untracked-files=all -- $files; git diff HEAD --binary -- $files | git hash-object --stdin; }
+before=$(state)
+scripts/generate.sh
+if [ "$(state)" != "$before" ]; then git status --short -- $files; echo "a generated file differs from what scripts/generate.sh writes"; exit 1; fi
+"""

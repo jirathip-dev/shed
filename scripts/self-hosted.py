@@ -2,7 +2,8 @@
 """Fork code never reaches a self-hosted runner (#93), in every workflow under DIR (default .github/workflows).
 
 shed is public: a job that names `self-hosted` or the `vars.CI_RUNNER` labels must gate that runner on
-`github.event.pull_request.head.repo.full_name == github.repository`, in its `runs-on` or its job `if:`.
+`github.event.pull_request.head.repo.full_name == github.repository`, in its `runs-on`, its job `if:` or, for a
+reusable workflow's call, the `with:` that hands it the runners.
 A job's steps are not read.
 """
 
@@ -37,7 +38,7 @@ def unguarded(path):
         for line in lines:
             m = KEY.match(line)
             key = m.group(1) if m else key
-            if key in ("runs-on", "if") and GUARD in line:
+            if key in ("runs-on", "if", "with") and GUARD in line:
                 guarded = True
         if not guarded:
             yield f"{path}: job `{name}` uses a self-hosted runner without `{GUARD}`"

@@ -1,0 +1,8 @@
+about = "every workspace test on stable Rust, on macOS"
+fix = "fix the test the log names; it fails on macOS but not on Linux"
+budget_secs = 420
+platform = "macos"
+leg = "macos"
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml"]
+run = "RUSTUP_TOOLCHAIN=stable cargo test --workspace --locked"
