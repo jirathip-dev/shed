@@ -295,6 +295,9 @@ All notable changes to this project are documented here. The format follows
   one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
   session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
   preference, and `account ls` shows it.
+- The flow tables run in shadow beside today's code: where they disagree, a line goes to `flow-shadow.jsonl`
+  beside the state file; `shed flow report` (`flow.report`) shows rows fired, facts never seen, stuck rows and
+  the disagreements by class, and `shed doctor` counts the last 24 h's.
 
 ### Changed
 

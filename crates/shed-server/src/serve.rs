@@ -202,6 +202,7 @@ async fn listen(
     let (links, watched) = links::Links::new(paths.config.clone(), control.to_owned());
     let links = Arc::new(links);
     links.sync(&registry);
+    tokio::spawn(crate::flows::run(Arc::clone(&registry), Arc::clone(&links)));
     crate::proxy::start(
         &registry,
         &links,

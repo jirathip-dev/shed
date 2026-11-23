@@ -19,6 +19,7 @@ pub use envelope::*;
 pub mod events;
 pub use events::*;
 pub mod flow;
+pub use flow::{Report, ReportParams};
 pub mod handover;
 pub use handover::*;
 pub mod input;
