@@ -413,6 +413,7 @@ impl Table for {table} {{
     const START: State = State::{start};
     const GAVE_UP: Fact = Fact::GaveUp;
     const ROWS: &'static [Row<Self>] = &[{ids}];
+    const FACTS: &'static [Fact] = &[{all_facts}];
 
     fn row(state: State, fact: Fact) -> &'static Row<Self> {{
         match (state, fact) {{
@@ -427,6 +428,12 @@ impl Table for {table} {{
             ""
         },
         ids = ids.join(", "),
+        all_facts = flow
+            .facts
+            .iter()
+            .map(|(f, _)| format!("Fact::{}", camel(f)))
+            .collect::<Vec<_>>()
+            .join(", "),
     )
 }
 

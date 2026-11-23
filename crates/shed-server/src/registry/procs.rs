@@ -41,6 +41,11 @@ impl Entry {
 }
 
 impl Registry {
+    pub(crate) fn leaders(&self) -> BTreeMap<String, i32> {
+        let leader = |(n, e): (&String, &Entry)| Some((n.clone(), e.term.as_ref()?.pid()));
+        self.entries.iter().filter_map(leader).collect()
+    }
+
     pub(crate) fn procs(&self, name: &str, procs: &[ProcessInfo]) -> Result<Vec<Proc>, RpcError> {
         let entry = self.entry(name)?;
         let tree = entry.tree(procs);

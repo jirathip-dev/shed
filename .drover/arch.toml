@@ -395,7 +395,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 505
+max_file_lines = 515
 
 [[collect]]
 dir = "crates/shed/tests"
@@ -502,3 +502,13 @@ reason = "a doctor row returns its rows; cmd/doctor.rs prints them"
 [[collect]]
 dir = "crates/shed-proto/flows"
 glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-server/src/flows"
+glob = "*.rs"
+
+[[ban]]
+pattern = "Tracker"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-proto/src/flow.rs", "crates/shed-server/src/flows.rs"]
+reason = "only the runner steps a flow: give it a fact"

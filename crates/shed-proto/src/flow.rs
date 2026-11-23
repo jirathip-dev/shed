@@ -1,5 +1,6 @@
 //! The flow tables and their pure engine: each `flows/<flow>.md` becomes a module here with its `State`, `Fact`, `Action` and `row()`; a [`Tracker`] steps one subject through it, with time passed in as a number.
 
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 #[cfg(feature = "schema")]
@@ -50,6 +51,8 @@ pub trait Table: 'static {
     const GAVE_UP: Self::Fact;
     /// Every row, in file order.
     const ROWS: &'static [Row<Self>];
+    /// Every fact, in file order.
+    const FACTS: &'static [Self::Fact];
     /// The one row for this pair.
     fn row(state: Self::State, fact: Self::Fact) -> &'static Row<Self>;
 }
@@ -138,6 +141,121 @@ pub struct Stuck {
     pub row: String,
     /// When it gave up, unix seconds.
     pub since: u64,
+}
+
+/// Whether a flow's table only watches today's code or drives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Mode {
+    /// Facts step the table, no action runs, and today's code is compared.
+    Shadow,
+    /// The table's actions run.
+    Drive,
+}
+
+/// How the table and today's code differ.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Differs {
+    /// They showed different states for more than 2 s.
+    State,
+    /// The table's row would have acted and today's code did not.
+    Action,
+}
+
+/// One line of `flow-shadow.jsonl`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Disagreement {
+    /// When, unix seconds.
+    pub at: u64,
+    /// The build that wrote it.
+    pub build: String,
+    /// The flow.
+    pub flow: FlowName,
+    /// The subject.
+    pub id: String,
+    /// How they differ.
+    pub kind: Differs,
+    /// The table's row at that moment.
+    pub row: String,
+    /// The last fact the table took.
+    pub fact: String,
+    /// The state the table holds, or the action its row names.
+    pub table: String,
+    /// What today's code shows or did.
+    pub code: String,
+}
+
+/// `flow.report` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct ReportParams {
+    /// Disagreements from this time on, unix seconds; default the last 7 days.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<u64>,
+    /// Ask this machine, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// `flow.report` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Report {
+    /// The build that answered.
+    pub build: String,
+    /// Disagreements from this time on, unix seconds.
+    pub since: u64,
+    /// One entry a flow.
+    pub flows: Vec<FlowReport>,
+}
+
+/// One flow in a [`Report`]: its counts since they were first kept, and its disagreements since `since`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FlowReport {
+    /// The flow.
+    pub flow: FlowName,
+    /// Shadow or drive.
+    pub mode: Mode,
+    /// The subjects it tracks now.
+    pub subjects: u64,
+    /// Row id to times it fired.
+    pub fired: BTreeMap<String, u64>,
+    /// Facts it never took, besides `gave_up`.
+    pub never_seen: Vec<String>,
+    /// `never` rows that fired, to times.
+    pub unexpected: BTreeMap<String, u64>,
+    /// `stuck` reasons, to times.
+    pub stuck: BTreeMap<String, u64>,
+    /// The shadow lines, by class.
+    #[serde(default)]
+    pub disagreements: Vec<Class>,
+}
+
+/// Shadow lines that differ the same way.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Class {
+    /// How they differ.
+    pub kind: Differs,
+    /// The table's row.
+    pub row: String,
+    /// The table's state or action.
+    pub table: String,
+    /// What today's code showed or did.
+    pub code: String,
+    /// How many lines.
+    pub count: u64,
+    /// The first line's time.
+    pub first: u64,
+    /// The last line's time.
+    pub last: u64,
+    /// One subject it was seen on.
+    pub sample: String,
 }
 
 /// What one fact or one clock did.
