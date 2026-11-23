@@ -3,7 +3,7 @@
   "info": {
     "title": "shed",
     "version": "0.0.0",
-    "x-protocol": 5
+    "x-protocol": 6
   },
   "methods": [
     {
@@ -1514,6 +1514,49 @@
       }
     },
     {
+      "name": "machine.drain",
+      "description": "Drain this shed, as `shed machine drain` does: from then on `run` is refused with `DRAINING` and its warm spares end, while every call on a terminal that exists still works; `machine.stats` shows `draining`. It is kept in `drain.json` beside the state file, so it outlives a restart. Draining twice keeps the first time and reason; `on: false` lifts it; `machine` asks that machine, over its held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "on",
+          "required": true,
+          "schema": {
+            "type": "boolean",
+            "description": "Drain it; `false` lifts the drain."
+          }
+        },
+        {
+          "name": "why",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, shown with the refusal and in the stats."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Drain this machine, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "machine.links",
       "description": "Each configured machine's held link: `up`, `reconnecting` or `down`, since when, why it is down, and `down_since`, when it last left `up` (or was first tried; a retry does not move it); once up, the shed there (`hello`) and the machine's `os`, `arch` and `home`. A request naming `<machine>/<name>` (`get`, `read`, `send`, `keys`, `kill`, `rm`, `state`, `acp.model`, `terminal.procs`, `wait`; `run` with `machine`, ACP ones bridged by that server) goes over the link; `ls` and `events` include every machine, their names so prefixed. Reads the config again, linking machines added since.",
       "paramStructure": "by-name",
@@ -1551,7 +1594,7 @@
     },
     {
       "name": "machine.stats",
-      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
+      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`; a warm spare is `spare`, not a terminal), and `draining` (since when and why) while this shed drains. The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -5953,7 +5996,7 @@
               "format": "uint64",
               "minimum": 0
             },
-            "description": "Terminals by state: the reported state while running, else `running`; `exited`."
+            "description": "Terminals by state: the reported state while running, else `running`; `exited`; a warm spare is `spare`."
           },
           "history": {
             "type": "array",
@@ -5975,6 +6018,17 @@
               "$ref": "#/components/schemas/Proc"
             },
             "description": "With `top`: the processes using the most memory, most first."
+          },
+          "draining": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Draining"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set while this shed is draining: it takes no new terminal."
           }
         },
         "required": [
@@ -6068,7 +6122,7 @@
               "format": "uint64",
               "minimum": 0
             },
-            "description": "Terminals by state: the reported state while running, else `running`; `exited`."
+            "description": "Terminals by state: the reported state while running, else `running`; `exited`; a warm spare is `spare`."
           }
         },
         "required": [
@@ -6147,6 +6201,28 @@
           "command"
         ],
         "description": "One process, as `terminal.procs` and `machine.stats`'s `top` report it."
+      },
+      "Draining": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Since when, unix seconds."
+          },
+          "why": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why, as `machine.drain` gave it."
+          }
+        },
+        "required": [
+          "since"
+        ],
+        "description": "A shed that takes no new terminal, as `machine.stats` shows it."
       },
       "ProxyKey": {
         "type": "object",
@@ -7216,6 +7292,10 @@
       "NO_PROXY": {
         "code": -32018,
         "message": "NO_PROXY"
+      },
+      "DRAINING": {
+        "code": -32019,
+        "message": "DRAINING"
       },
       "INVALID_REQUEST": {
         "code": -32600,

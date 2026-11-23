@@ -81,8 +81,8 @@ impl Registry {
         Some(name)
     }
 
-    pub(crate) fn stale_spares(&self) -> Vec<String> {
-        let (now, idle) = (shed_core::clock::now(), crate::config::warm_idle());
+    pub(crate) fn stale_spares(&self, idle: std::time::Duration) -> Vec<String> {
+        let now = shed_core::clock::now();
         let stale = |e: &&Entry| {
             e.started
                 .is_none_or(|t| now.saturating_duration_since(t) >= idle)

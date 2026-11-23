@@ -17,8 +17,8 @@ use serde_json::{Map, Value};
 pub use shed_proto as proto;
 use shed_proto::{
     Account, AccountAdd, AccountLogin, AccountMoves, AccountName, AccountUse, AccountsParams,
-    AcpSession, AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
-    HandoverCheckParams, HandoverParams, Input, KeyId, KeysParams, Link, Login, LsParams,
+    AcpSession, AgentInfo, DrainParams, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams,
+    Handover, HandoverCheckParams, HandoverParams, Input, KeyId, KeysParams, Link, Login, LsParams,
     MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ProxyKey,
     ReadParams, ReadResult, Report, ReportParams, Reported, ResizeParams, RunParams, SendParams,
     StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
@@ -232,6 +232,11 @@ pub trait Calls {
     fn machine_add(&self, name: &str, target: &str) -> Result<(), Error> {
         let (name, target) = (name.to_owned(), target.to_owned());
         unit(self, Method::MachineAdd, &MachineParams { name, target })
+    }
+
+    /// Drains the shed (`on: false` lifts it): it takes no new terminal.
+    fn drain(&self, params: &DrainParams) -> Result<(), Error> {
+        unit(self, Method::MachineDrain, params)
     }
 
     /// Removes a machine and drops its link.

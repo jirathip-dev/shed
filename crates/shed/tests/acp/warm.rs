@@ -118,3 +118,36 @@ fn a_warm_spare_is_taken_renamed_and_replaced_within_its_limits_and_hibernates_a
         assert_eq!(info["state"], "running", "{name}");
     }
 }
+
+#[test]
+fn a_drain_ends_the_warm_spare_counted_as_spare_and_refuses_run_until_lifted() {
+    let dir = temp_dir("acp-drain");
+    let history = dir.join("history.jsonl");
+    let _server = Server::with_env(&dir, "0.3", &[("SHED_WARM_MAX", "1")]);
+    start_warm(&dir, "a", &dir, &history);
+    assert_eq!(spares(&dir).len(), 1);
+    let stats = || -> Value {
+        serde_json::from_str(&ok(&dir, &["--json", "machine", "stats"])).expect("JSON")
+    };
+    assert_eq!(stats()["terminals"]["spare"], 1, "{}", stats());
+    let drained = ok(&dir, &["machine", "drain", "--why", "maintenance"]);
+    assert_eq!(drained, "shed draining\n");
+    assert_eq!(spares(&dir), [], "the spare ended before the answer");
+    let now = stats();
+    assert_eq!(now["draining"]["why"], "maintenance", "{now}");
+    assert!(now["terminals"].get("spare").is_none(), "{now}");
+    let refused = crate::shed(&dir, &["run", "--name", "x", "--", "true"]);
+    assert!(!refused.status.success());
+    let since = now["draining"]["since"].as_u64().expect("since");
+    let said = String::from_utf8_lossy(&refused.stderr);
+    let want = format!("DRAINING: takes no new terminal since {since} (maintenance)");
+    assert!(said.contains(&want), "{said}");
+    let info: Value = serde_json::from_str(&ok(&dir, &["get", "a"])).expect("JSON");
+    assert_eq!(
+        info["state"], "running",
+        "a terminal that exists is untouched"
+    );
+    ok(&dir, &["machine", "drain", "--off"]);
+    assert!(stats().get("draining").is_none());
+    ok(&dir, &["run", "--name", "x", "--", "true"]);
+}

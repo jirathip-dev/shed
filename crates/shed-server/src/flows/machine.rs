@@ -22,6 +22,7 @@ const LISTED: &[State] = &[
 pub(crate) fn observe(
     listed: &[machines::Machine],
     links: &BTreeMap<String, shed_proto::Link>,
+    draining: &BTreeMap<String, bool>,
     was: &BTreeMap<String, String>,
 ) -> Vec<Seen<Machine>> {
     let one = |m: &machines::Machine| {
@@ -35,7 +36,10 @@ pub(crate) fn observe(
             Some(LinkState::Down) => Some(Fact::LinkDown),
             _ => None,
         });
-        Seen::new(m.name.clone(), format!("{link:?}"), facts, "listed", LISTED)
+        let drain = draining.get(&m.name).copied();
+        facts.extend(drain.map(|d| if d { Fact::Draining } else { Fact::Serving }));
+        let view = format!("{link:?}:{drain:?}");
+        Seen::new(m.name.clone(), view, facts, "listed", LISTED)
     };
     listed.iter().map(one).collect()
 }

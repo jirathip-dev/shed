@@ -142,6 +142,7 @@ impl Registry {
         for e in self.entries.values() {
             let state = match (e.info.state, &e.info.reported) {
                 (State::Exited, _) => "exited",
+                (State::Running, _) if e.recipe.is_some() => "spare",
                 (State::Running, Some(r)) => &r.state,
                 (State::Running, None) => "running",
             };
@@ -175,6 +176,7 @@ impl Registry {
         MachineStats {
             now,
             history,
+            draining: self.drain.draining(),
             ..MachineStats::default()
         }
     }

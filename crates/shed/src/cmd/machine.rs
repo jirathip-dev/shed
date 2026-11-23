@@ -5,7 +5,7 @@ use clap::Subcommand;
 use serde::Serialize;
 use shed_client::Calls as _;
 use shed_server::machines::{self, Machine};
-use shed_server::proto::{Link, MachineStats, StatsParams};
+use shed_server::proto::{DrainParams, Link, MachineStats, StatsParams};
 use shed_server::runner::ExitCode;
 
 use crate::cx::{Cx, On, links};
@@ -30,11 +30,18 @@ enum Action {
         #[arg(long, value_name = "T")]
         since: Option<u64>,
     },
+    Drain {
+        #[arg(long)]
+        off: bool,
+        #[arg(long, value_name = "TEXT")]
+        why: Option<String>,
+    },
 }
 
 pub fn on(args: &Args) -> On {
     match args.command {
         Action::Stats { .. } => On::Ssh,
+        Action::Drain { .. } => On::Link,
         _ => On::No,
     }
 }
@@ -72,6 +79,14 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         Action::Rm { name } => {
             let m = machines::remove(&paths.config, &name)?;
             cx.print(&m, || format!("{} removed\n", m.name))
+        }
+        Action::Drain { off, why } => {
+            let machine = cx.server.machine();
+            let p = DrainParams { on: !off, why, machine };
+            cx.server.connect(None)?.drain(&p)?;
+            let name = cx.server.on.as_ref().map_or("shed", |m| m.name.as_str());
+            let state = if off { "no longer draining" } else { "draining" };
+            cx.print(&p, || format!("{name} {state}\n"))
         }
         Action::Stats { since } => {
             return stats(cx, StatsParams {
@@ -124,8 +139,10 @@ fn stats(cx: &Cx<'_>, params: StatsParams) -> anyhow::Result<ExitCode> {
             s.disk_free_mb,
         );
         let terminals = terminals.join(",");
+        let draining = stats.draining.as_ref().map(|d| format!("  draining {d}"));
+        let draining = draining.unwrap_or_default();
         format!(
-            "load/cpu {load:.2}  memory {mem}%  swap {swap}M  disk free {disk}M  cpus {}  up {}s  terminals {terminals}\n",
+            "load/cpu {load:.2}  memory {mem}%  swap {swap}M  disk free {disk}M  cpus {}  up {}s  terminals {terminals}{draining}\n",
             s.cpus, s.uptime_s
         )
     })?;

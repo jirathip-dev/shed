@@ -4,9 +4,9 @@ use std::path::PathBuf;
 use serde_json::{Value, json, to_value};
 use shed_proto::flow::{Class, Differs, FlowName, FlowReport, Mode};
 use shed_proto::{
-    ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Hello, Link,
-    LinkState, MachineParams, MachineStats, Method, Proc, Report, ReportParams, Sample, Span,
-    StatsParams,
+    DrainParams, Draining, ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams,
+    HandoverParams, Hello, Link, LinkState, MachineParams, MachineStats, Method, Proc, Report,
+    ReportParams, Sample, Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -44,6 +44,10 @@ fn stats_example() -> (Value, Value) {
         history: vec![sample(1_762_416_060)],
         top_cpu: vec![proc(4242, Some("box/lane-1"))],
         top_mem: vec![proc(4242, Some("box/lane-1"))],
+        draining: Some(Draining {
+            since: 1_762_416_000,
+            why: Some("idle 20 min".into()),
+        }),
     };
     let params = StatsParams {
         since,
@@ -120,6 +124,15 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
     Some(match method {
         Method::FlowReport => report_example(),
         Method::MachineStats => stats_example(),
+        Method::MachineDrain => (
+            to_value(DrainParams {
+                on: true,
+                why: Some("idle 20 min".into()),
+                machine: Some("dev-16".into()),
+            })
+            .unwrap(),
+            json!({}),
+        ),
         Method::MachineLinks => links_example(),
         Method::Exec => (
             to_value(ExecParams {

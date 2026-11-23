@@ -9,6 +9,7 @@ mod acp;
 #[path = "../common/mod.rs"]
 mod common;
 mod connect;
+mod drain;
 mod exec;
 mod faults;
 mod flow;

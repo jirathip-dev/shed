@@ -57,6 +57,7 @@ pub(crate) struct Registry {
     pub(crate) saver: Saver,
     pub(crate) events: Events,
     pub(crate) stats: Stats,
+    pub(crate) drain: crate::flows::Drain,
     handed: Option<Handed>,
     pub(crate) control: Option<Arc<crate::handover::Control>>,
 }

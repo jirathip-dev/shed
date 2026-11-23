@@ -168,6 +168,7 @@ impl Method {
             | Self::CodeFind
             | Self::MachineAdd
             | Self::MachineRm
+            | Self::MachineDrain
             | Self::AccountAdd
             | Self::AccountRm
             | Self::AccountLs

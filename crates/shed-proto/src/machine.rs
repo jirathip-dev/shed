@@ -82,6 +82,38 @@ pub struct StatsParams {
     pub machine: Option<String>,
 }
 
+/// `machine.drain` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct DrainParams {
+    /// Drain it; `false` lifts the drain.
+    pub on: bool,
+    /// Why, shown with the refusal and in the stats.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+    /// Drain this machine, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// A shed that takes no new terminal, as `machine.stats` shows it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Draining {
+    /// Since when, unix seconds.
+    pub since: u64,
+    /// Why, as `machine.drain` gave it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
+}
+
+impl std::fmt::Display for Draining {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "since {}", self.since)?;
+        self.why.as_ref().map_or(Ok(()), |w| write!(f, " ({w})"))
+    }
+}
+
 /// `machine.add` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -148,7 +180,7 @@ pub struct Sample {
     pub cpus: u64,
     /// Seconds since boot.
     pub uptime_s: u64,
-    /// Terminals by state: the reported state while running, else `running`; `exited`.
+    /// Terminals by state: the reported state while running, else `running`; `exited`; a warm spare is `spare`.
     pub terminals: BTreeMap<String, u64>,
 }
 
@@ -213,4 +245,7 @@ pub struct MachineStats {
     /// With `top`: the processes using the most memory, most first.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub top_mem: Vec<Proc>,
+    /// Set while this shed is draining: it takes no new terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draining: Option<Draining>,
 }

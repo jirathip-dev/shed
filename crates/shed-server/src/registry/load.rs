@@ -177,6 +177,7 @@ impl Registry {
             saver,
             events,
             stats: Stats::load(&path.with_file_name("stats.json")),
+            drain: crate::flows::Drain::load(path, now),
             handed: None,
             control: None,
         };

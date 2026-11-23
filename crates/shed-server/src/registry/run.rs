@@ -101,6 +101,7 @@ impl Registry {
     }
 
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
+        self.drain.refuse()?;
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
         if p.warm && (p.acp.is_none() || p.resume.is_some() || !p.env.is_empty()) {
             return Err(bad("warm needs acp and takes no resume or env"));

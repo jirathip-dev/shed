@@ -55,18 +55,20 @@ pub(crate) async fn kill(registry: &Shared, name: &str) -> Result<TerminalInfo, 
     lock(registry).killed(name, &term, status)
 }
 
+pub(crate) async fn end_spare(registry: &Shared, name: &str) {
+    kill(registry, name).await.ok();
+    let files = lock(registry).rm(name).map(|(_, files)| files);
+    if let Ok(files) = files {
+        blocking(files).await.ok();
+    }
+}
+
 async fn sample(registry: Shared, every: Duration) {
     loop {
         tokio::time::sleep(every).await;
-        for name in lock(&registry).stale_spares() {
+        for name in lock(&registry).stale_spares(crate::config::warm_idle()) {
             let registry = Arc::clone(&registry);
-            tokio::spawn(async move {
-                kill(&registry, &name).await.ok();
-                let files = lock(&registry).rm(&name).map(|(_, files)| files);
-                if let Ok(files) = files {
-                    blocking(files).await.ok();
-                }
-            });
+            tokio::spawn(async move { end_spare(&registry, &name).await });
         }
         if let Ok(Ok(procs)) = blocking(|| proctree::system().list()).await {
             for pid in lock(&registry).sample(&procs, shed_core::clock::now()) {

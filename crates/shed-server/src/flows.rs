@@ -4,15 +4,19 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use shed_accounts::Store;
 use shed_accounts::keys::Keys;
 use shed_core::proctree::{self, ProcessTable as _};
+use shed_proto::flow::drain::Fact as DrainFact;
 use shed_proto::flow::{
-    Differs, Disagreement, FlowReport, Mode, Step, Table, Tracker, account::Account, key::Key,
-    link::Link, machine::Machine, terminal::Terminal,
+    Differs, Disagreement, Flow, FlowReport, Mode, Step, Table, Tracker, account::Account, drain,
+    key::Key, link::Link, machine::Machine, terminal::Terminal,
 };
-use shed_proto::{BUILD, LsParams, Method, State, TerminalInfo};
+use shed_proto::{
+    BUILD, Draining, ErrorCode, LinkState, LsParams, MachineStats, Method, RpcError, State,
+    TerminalInfo,
+};
 
 use crate::call::blocking;
 use crate::links::Links;
@@ -58,6 +62,59 @@ impl<T: Table> Seen<T> {
 pub(crate) trait Shadow: Table {
     const GONE: Option<Self::Fact>;
     const UNDONE: &'static [Self::Action];
+}
+
+#[derive(Serialize, Deserialize)]
+struct Kept {
+    flow: Flow<drain::State>,
+    why: Option<String>,
+}
+
+pub(crate) struct Drain {
+    tracker: Tracker<drain::Drain>,
+    why: Option<String>,
+    path: PathBuf,
+}
+
+impl Drain {
+    pub(crate) fn load(state: &Path, now: u64) -> Self {
+        let path = state.with_file_name("drain.json");
+        let kept = std::fs::read(&path).ok();
+        let kept = kept.and_then(|b| serde_json::from_slice::<Kept>(&b).ok());
+        let tracker =
+            (kept.as_ref()).map_or_else(|| Tracker::new(now), |k| Tracker::resume(&k.flow));
+        let why = kept.and_then(|k| k.why);
+        Self { tracker, why, path }
+    }
+
+    pub(crate) fn draining(&self) -> Option<Draining> {
+        let Flow { state, since, .. } = self.tracker.kept();
+        let why = self.why.clone();
+        (state == drain::State::Draining).then_some(Draining { since, why })
+    }
+
+    pub(crate) fn refuse(&self) -> Result<(), RpcError> {
+        let refused = |d| RpcError::new(ErrorCode::Draining, format!("takes no new terminal {d}"));
+        self.draining().map_or(Ok(()), |d| Err(refused(d)))
+    }
+
+    pub(crate) fn set(&mut self, on: bool, why: Option<String>, now: u64) -> std::io::Result<bool> {
+        let fact = if on {
+            DrainFact::Drain
+        } else {
+            DrainFact::Lift
+        };
+        let step = self.tracker.on(fact, now);
+        if step.from != step.to {
+            self.why = why.filter(|_| on);
+            let kept = Kept {
+                flow: self.tracker.kept(),
+                why: self.why.clone(),
+            };
+            std::fs::write(&self.path, serde_json::to_vec(&kept)?)?;
+        }
+        Ok(step.run == Some(drain::Action::EndSpares))
+    }
 }
 
 struct Out {
@@ -311,7 +368,15 @@ impl Runner {
             return;
         };
         if let Some(listed) = listed {
-            let seen = machine::observe(&listed, &links.report(), &self.machine.seen);
+            let report = links.report();
+            let mut draining = BTreeMap::new();
+            for m in listed.iter().map(|m| &m.name) {
+                if report.get(m).is_some_and(|l| l.state == LinkState::Up) {
+                    let got = ask::<MachineStats>(links, m, Method::MachineStats).await;
+                    draining.extend(got.map(|s| (m.clone(), s.draining.is_some())));
+                }
+            }
+            let seen = machine::observe(&listed, &report, &draining, &self.machine.seen);
             self.machine.observe(seen, out);
         }
         let accounts: Vec<_> = {
@@ -326,14 +391,16 @@ impl Runner {
             .filter_map(|k| Some(k.terminal.split_once('/')?.0))
             .collect();
         for m in machines {
-            let ls = links.call(m, Method::Ls, serde_json::json!({}));
-            let ls = tokio::time::timeout(Duration::from_secs(10), ls).await;
-            let ls = ls.ok().and_then(Result::ok);
-            let ls = ls.and_then(|v| serde_json::from_value::<Vec<TerminalInfo>>(v).ok());
-            there.insert(m.to_owned(), ls);
+            there.insert(m.to_owned(), ask(links, m, Method::Ls).await);
         }
         self.key.observe(key::observe(&keys, &there), out);
     }
+}
+
+async fn ask<T: serde::de::DeserializeOwned>(links: &Links, m: &str, method: Method) -> Option<T> {
+    let answer = links.call(m, method, serde_json::json!({}));
+    let answer = tokio::time::timeout(Duration::from_secs(10), answer).await;
+    serde_json::from_value(answer.ok()?.ok()?).ok()
 }
 
 pub(crate) async fn run(registry: Shared, links: Arc<Links>) {
@@ -459,6 +526,23 @@ mod tests {
             created: 0,
             state,
         }
+    }
+
+    #[test]
+    fn a_drain_outlives_a_restart_keeps_its_first_time_and_ends_spares_once() {
+        let state = crate::temp_dir("drain").join("state.json");
+        let mut drain = Drain::load(&state, 100);
+        assert_eq!(drain.draining(), None);
+        assert!(drain.set(true, Some("idle 20 min".into()), 200).unwrap());
+        assert!(!drain.set(true, Some("again".into()), 300).unwrap());
+        let mut drain = Drain::load(&state, 400);
+        let shown = Draining {
+            since: 200,
+            why: Some("idle 20 min".into()),
+        };
+        assert_eq!(drain.draining(), Some(shown));
+        assert!(!drain.set(false, None, 500).unwrap());
+        assert_eq!(Drain::load(&state, 600).draining(), None);
     }
 
     #[test]
