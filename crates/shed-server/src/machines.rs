@@ -34,6 +34,7 @@ use shed_client::Conn;
 use shed_core::runner::Child;
 
 const CONNECT_TIMEOUT: u32 = 10;
+const HELLO_TIMEOUT: Duration = Duration::from_secs(20);
 static WRITES: AtomicU64 = AtomicU64::new(0);
 
 /// A machine: a name and the `ssh` target it stands for.
@@ -212,9 +213,17 @@ pub fn find(path: &Path, name: &str) -> Result<Machine, Error> {
 /// [`Error::MachineVersion`] when the shed there is another version; [`Error::Unreachable`] when
 /// `ssh` or the shed there gives no answer; [`Error::Io`] when `ssh` cannot start.
 pub fn connect(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<Conn, Error> {
-    let (conn, ssh) = dial(machine, control_dir, autostart)?;
+    Ok(line(machine, control_dir, autostart)?.0)
+}
+
+pub(crate) fn line(
+    machine: &Machine,
+    control_dir: &Path,
+    autostart: bool,
+) -> Result<(Conn, UnixStream), Error> {
+    let (conn, ssh, line) = dial(machine, control_dir, autostart)?;
     ssh.keep();
-    Ok(conn)
+    Ok((conn, line))
 }
 
 struct Ssh(Option<Child>);
@@ -257,7 +266,7 @@ pub(crate) fn alone(
     let ending = Arc::new(Mutex::new((false, None)));
     let ends = Ends(Arc::clone(&ending));
     let call = move |method, params: &Value| {
-        let (mut conn, ssh) = dial(&machine, &control_dir, false)?;
+        let (mut conn, ssh, _) = dial(&machine, &control_dir, false)?;
         let mut slot = crate::lock(&ending);
         if slot.0 {
             return Err(io::Error::from(io::ErrorKind::Interrupted).into());
@@ -269,8 +278,14 @@ pub(crate) fn alone(
     (call, ends)
 }
 
-fn dial(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<(Conn, Ssh), Error> {
+fn dial(
+    machine: &Machine,
+    control_dir: &Path,
+    autostart: bool,
+) -> Result<(Conn, Ssh, UnixStream), Error> {
     let (ours, theirs) = UnixStream::pair()?;
+    let line = ours.try_clone()?;
+    line.set_read_timeout(Some(HELLO_TIMEOUT))?;
     fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -320,7 +335,11 @@ fn dial(machine: &Machine, control_dir: &Path, autostart: bool) -> Result<(Conn,
                 target: machine.target.clone(),
             })
         }
-        conn => Ok((conn?, ssh)),
+        conn => {
+            let conn = conn?;
+            line.set_read_timeout(None)?;
+            Ok((conn, ssh, line))
+        }
     }
 }
 

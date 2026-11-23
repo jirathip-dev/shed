@@ -1,0 +1,10 @@
+# The nightly soak's targets (#308): scripts/soak.py measures each on every machine it is given, and
+# .github/workflows/soak.yml files one issue a night for each target a machine missed.
+terminals = 8
+
+[targets]
+link_up_s = 30
+start_ms = 2000
+read_ms = 3000
+dead_link_s = 20
+stuck = 0

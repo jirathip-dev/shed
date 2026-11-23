@@ -14,8 +14,11 @@ pub(super) async fn call(cx: &mut Call<'_>) -> Reply {
         return list;
     };
     let links = &cx.session.links;
-    for machine in links.up() {
-        if let Ok(Value::Array(more)) = links.call(&machine, cx.method, cx.request.params.clone()).await {
+    let params = &cx.request.params;
+    let up = links.up();
+    let calls = up.iter().map(|m| links.call(m, cx.method, params.clone()));
+    for more in futures::future::join_all(calls).await {
+        if let Ok(Value::Array(more)) = more {
             list.extend(more);
         }
     }
