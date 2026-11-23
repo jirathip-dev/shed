@@ -2,6 +2,7 @@
 //! `launchctl` and `systemctl` on `PATH` log what install runs, so no test touches the real job.
 #![cfg(test)]
 
+mod antigravity;
 mod autostart;
 #[path = "../common/mod.rs"]
 mod common;

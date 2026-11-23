@@ -3099,6 +3099,14 @@
             "description": "The variable that sets the model, where the adapter takes one.",
             "default": null
           },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Variables its logins, status checks and runs on an account get.",
+            "default": {}
+          },
           "effort_args": {
             "type": "array",
             "items": {
