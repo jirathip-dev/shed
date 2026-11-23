@@ -339,6 +339,7 @@ impl Runner {
 pub(crate) async fn run(registry: Shared, links: Arc<Links>) {
     let state = lock(&registry).path.clone();
     let mut runner = Runner::new(&state);
+    let mut up = Vec::new();
     for n in 0u64.. {
         tokio::time::sleep(Duration::from_secs(1)).await;
         let now = shed_core::clock::unix_now();
@@ -349,11 +350,13 @@ pub(crate) async fn run(registry: Shared, links: Arc<Links>) {
         if n % 2 == 0 {
             runner.often(&registry, &links, &mut out).await;
         }
-        if n % 60 == 0 {
+        let was = std::mem::replace(&mut up, links.up());
+        let seldom = n % 60 == 0 || was != up;
+        if seldom {
             runner.seldom(&registry, &links, &mut out).await;
         }
         runner.tick(&mut out);
-        let counts = (n % 60 == 0).then(|| runner.reports());
+        let counts = seldom.then(|| runner.reports());
         let (file, found) = (state.clone(), out.lines);
         blocking(move || shadow::write(&file, &found, counts.as_deref()).ok())
             .await
