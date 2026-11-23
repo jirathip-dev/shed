@@ -73,7 +73,8 @@ impl Injected {
             None => run.unset.push(var.clone()),
         }
         let signed_out = store.reading(provider, name).state == AccountState::SignedOut;
-        if let (Some(var), Some(_), true) = (&provider.token_var, account.token, signed_out) {
+        let token = account.token.filter(|t| !t.rejected);
+        if let (Some(var), Some(_), true) = (&provider.token_var, token, signed_out) {
             let token = Token::read(&store.token_file(provider, name))?;
             run.set.insert(var.clone(), token.expose().to_owned());
         }

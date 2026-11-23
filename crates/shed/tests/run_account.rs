@@ -246,8 +246,5 @@ fn a_caller_env_that_sets_an_account_variable_is_refused() {
     };
     let refused = client.call::<_, Value>(Method::Run, &remote).map(|_| ());
     let refused = refused.expect_err("refused").to_string();
-    assert!(
-        refused.contains("no account until the token proxy"),
-        "{refused}"
-    );
+    assert!(refused.contains("runs on the main host only"), "{refused}");
 }

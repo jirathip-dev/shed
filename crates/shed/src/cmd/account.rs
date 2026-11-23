@@ -34,6 +34,8 @@ enum Action {
     Login {
         provider: String,
         name: String,
+        #[arg(long)]
+        token: bool,
     },
     Status {
         provider: String,
@@ -115,8 +117,12 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
             shed.account_add(&add)?
         }
         Action::Status { provider, name } => shed.account_status(&provider, &name)?,
-        Action::Login { provider, name } => {
-            let terminal = shed.account_login(&provider, &name)?.terminal;
+        Action::Login {
+            provider,
+            name,
+            token,
+        } => {
+            let terminal = shed.account_login(&provider, &name, token)?.terminal;
             login(cx, &terminal)?;
             shed.account_status(&provider, &name)?
         }
@@ -144,7 +150,7 @@ fn login(cx: &Cx<'_>, terminal: &str) -> anyhow::Result<()> {
     let shed = cx.server.connect(None)?;
     let mut shown = String::new();
     loop {
-        let waited = shed.wait_state(terminal, &["exited"], 2.0)?;
+        let waited = shed.wait_state(terminal, &["done"], 2.0)?;
         let screen = shed.screen(terminal)?;
         if screen != shown {
             out::line(format_args!("\x1b[H\x1b[2J{screen}"));

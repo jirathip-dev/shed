@@ -24,6 +24,6 @@ pub fn run(cx: &Cx<'_>, Args { autostart }: Args) -> anyhow::Result<ExitCode> {
         }
         connect(paths, cx.dir, Some(true), None)?;
     }
-    shed_server::relay(&paths.socket).context("shed connect")?;
+    shed_server::relay::relay(&paths.socket).context("shed connect")?;
     Ok(ExitCode::SUCCESS)
 }
