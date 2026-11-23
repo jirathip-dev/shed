@@ -184,6 +184,7 @@ async fn listen(
     }
     tokio::spawn(registry::keep_saved(Arc::clone(&registry)));
     tokio::spawn(sample(Arc::clone(&registry), sample_every));
+    tokio::spawn(crate::accounts::beat(Arc::clone(&registry)));
     let first = record_stats(&registry).await;
     let recorder = Arc::clone(&registry);
     tokio::spawn(async move {
@@ -198,8 +199,15 @@ async fn listen(
         .recursive(true)
         .mode(0o700)
         .create(control)?;
-    let links = Arc::new(links::Links::new(paths.config.clone(), control.to_owned()));
+    let (links, watched) = links::Links::new(paths.config.clone(), control.to_owned());
+    let links = Arc::new(links);
     links.sync(&registry);
+    crate::proxy::start(
+        &registry,
+        &links,
+        watched,
+        bind(&crate::proxy::socket(control))?,
+    );
     let listener = match listener {
         Some(listener) => tokio::net::UnixListener::from_std(listener)?,
         None => bind(&paths.socket)?,

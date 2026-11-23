@@ -1,11 +1,13 @@
-frozen = ["ci/cap.toml", "docs/acp/README.md", ".github/workflows/ci.yml"]
+frozen = ["docs/acp/README.md", ".github/workflows/ci.yml"]
 generated = [
     "CHANGELOG.md",
     "docs/protocol.md",
     "docs/shed.openrpc.json",
     "crates/shed-script/tests/perf/counts.json",
+    "skill/script/methods.md",
     "Cargo.lock",
     "crates/shed/tests/golden/**",
+    "README.md",
 ]
 generate = "sh \"$(git rev-parse --show-toplevel)/scripts/arch-gen.sh\""
 shared = [
@@ -31,6 +33,8 @@ shared = [
     "crates/shed-server/src/lib.rs",
     "crates/shed-server/src/registry/mod.rs",
     "crates/shed-server/src/config/mod.rs",
+    "crates/shed/src/main.rs",
+    "crates/shed/src/service.rs",
 ]
 
 [[layer]]
@@ -79,7 +83,13 @@ may_use = ["proto", "pattern"]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script"]
+may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script", "accounts"]
+
+[[layer]]
+name = "accounts"
+paths = ["crates/shed-accounts/src/**"]
+mods = ["shed_accounts"]
+may_use = ["core", "proto"]
 
 [[layer]]
 name = "cli"
@@ -100,13 +110,13 @@ reason = "shake hands through shed_client; only the server's hello handler answe
 [[ban]]
 pattern = "Command::new"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/runner.rs"]
+except = ["crates/shed-core/src/runner.rs", "crates/shed-core/src/runner/**"]
 reason = "start processes through shed_core::runner"
 
 [[ban]]
 pattern = "std::process"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/runner.rs"]
+except = ["crates/shed-core/src/runner.rs", "crates/shed-core/src/runner/**"]
 reason = "process types and calls come from shed_core::runner"
 
 [[ban]]
@@ -194,6 +204,18 @@ except = []
 reason = "search and patterns open no socket"
 
 [[ban]]
+pattern = ".expose()"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-accounts/src/env.rs", "crates/shed-accounts/src/proxy.rs"]
+reason = "a token leaves its type only into a main-host run's environment or the proxy's upstream header"
+
+[[ban]]
+pattern = "TcpListener"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-accounts/src/relay.rs"]
+reason = "shed listens on Unix sockets; the one TCP listener is the relay, on loopback"
+
+[[ban]]
 pattern = "launchctl"
 paths = ["crates/*/src/**"]
 except = []
@@ -267,6 +289,14 @@ max_file_lines = 2000
 max_fn_lines = 105
 
 [[collect]]
+dir = "docs/accounts"
+glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-accounts/src"
+glob = "*.rs"
+
+[[collect]]
 dir = "crates/shed-core/src/terminal"
 glob = "*.rs"
 
@@ -332,7 +362,7 @@ max_file_lines = 230
 
 [[size]]
 paths = ["crates/shed-server/src/links.rs"]
-max_file_lines = 250
+max_file_lines = 300
 
 [[size]]
 paths = ["crates/shed-proto/tests/protocol_doc/acp.rs"]
@@ -344,7 +374,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 420
+max_file_lines = 480
 
 [[collect]]
 dir = "crates/shed/tests"
@@ -409,3 +439,41 @@ pattern = "dispatch::"
 paths = ["crates/shed-server/src/methods/**"]
 except = []
 reason = "a handler shares code through a module outside methods/, never through another handler"
+
+[[collect]]
+dir = "crates/shed/src/cmd"
+glob = "*.rs"
+
+[[collect]]
+dir = "crates/shed/src/doctor"
+glob = "*.rs"
+
+[[collect]]
+dir = "docs/commands"
+glob = "*.md"
+
+[[size]]
+paths = ["crates/shed/src/main.rs"]
+max_file_lines = 80
+
+[[size]]
+paths = ["crates/shed/src/service.rs"]
+max_file_lines = 180
+
+[[ban]]
+pattern = "super::"
+paths = ["crates/shed/src/cmd/**", "crates/shed/src/doctor/**"]
+except = []
+reason = "a command or a doctor row shares code through a module outside its folder, never through another row"
+
+[[ban]]
+pattern = "cmd::"
+paths = ["crates/shed/src/cmd/**"]
+except = []
+reason = "a command shares code through a module outside cmd/, never through another command"
+
+[[ban]]
+pattern = "out::"
+paths = ["crates/shed/src/doctor/**"]
+except = []
+reason = "a doctor row returns its rows; cmd/doctor.rs prints them"

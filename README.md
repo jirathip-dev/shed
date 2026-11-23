@@ -45,26 +45,31 @@ shed is the core runtime under the agents. Its job:
 
 The v0.1 commands:
 
+<!-- commands -->
 | Command | What it does |
 |---|---|
-| `shed serve` | The per-user server (launchd/systemd user job). Owns the PTYs, the state and the socket. |
-| `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and (re)start the server under it, so the running server is this binary (uninstall prints how to unload it); check the job, socket, log, and that the server runs this binary's build. |
-| `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] [--mem-max SIZE] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. `--mem-max` (`200M`, `4G`; default `$SHED_MEM_MAX` of `shed serve`, else none): on Linux with a user systemd that has the memory controller the program gets its own scope with `MemoryMax`; elsewhere the sampler ends the largest process the agent started after two samples over, a guard against sustained use that a fast allocation can pass between samples. Either is a `mem-limit` event; `shed doctor` says which. |
-| `shed ls [--label k=v] [--json]` | List terminals: name, labels, cwd, state, pid tree, RSS/CPU, age. |
-| `shed get <t>` | One terminal as JSON. |
-| `shed read <t> [--lines N] [--screen\|--history]` | The current screen, or scrollback, as plain text. |
-| `shed send <t> <text> [--no-paste] [--no-enter] [--draft-wait S]` / `shed keys <t> enter esc ctrl+c…` | Paste text then press enter (bracketed when the program asks for it), or press keys. Sends go in whole, one at a time, and wait while a person attached has an unsent line (60 s by default, then the send fails and writes nothing). |
-| `shed wait <t> [--until working\|idle\|done\|blocked] [--output RE] [--timeout S]` | Block until the state or output matches. |
-| `shed state <t> working\|blocked\|done\|error [--note TEXT]` | Report state (also via `$SHED` + OSC 7501-compatible escape). |
-| `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |
+| `shed account add\|ls\|login\|status\|rm\|use` | The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `login --token` its setup-token command, saving the token it prints for runs on other machines, `status` reads it now, `ls` lists them (the preferred one marked) and `rm` signs one out and removes it (docs/accounts/store.md). `use <provider> <name>` makes a ready named account the one `auto` picks first and moves every live `auto` and `default` lane to it; `use <provider> --clear` drops the preference (docs/accounts/accounts.md). |
+| `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
-| `shed top [<t> [--full]]` | The terminals by memory use, largest first, an ACP agent's split into AGENT and WORK (what it started), then a totals line; with `<t>`, that terminal's processes over 50 MB by name (the command line with `--full`). |
-| `shed watch [--label k=v]` | A live list of the terminals beside a read-only preview of the selected one; Enter attaches, `Ctrl+\` comes back, `/` filters, `q` quits. |
-| `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
+| `shed exec [--on M] [--cwd D] [--timeout S] [-i] -- CMD…` / `shed file read\|write [--on M] PATH` | Run a program without a terminal and get exactly the bytes it wrote to stdout and stderr and its exit code; nothing it started outlives it. `-i` feeds it stdin. `file read` prints a file, `file write` replaces it with stdin (temp file and rename, mode kept). A reply over 8 MiB is an error, never cut. |
+| `shed get <t>` | One terminal as JSON. |
+| `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and (re)start the server under it, so the running server is this binary (uninstall prints how to unload it); check the job, socket, log, and that the server runs this binary's build. |
+| `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |
+| `shed ls [--label k=v] [--json]` | List terminals: name, labels, cwd, state, pid tree, RSS/CPU, age. |
 | `shed --on <machine> …` / `shed machine add\|ls\|rm` | The same commands on another host over SSH (key login only). The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `wait`, `approve` and `cancel`, and `--on <machine> run --acp` starts an agent installed there; `machine ls --json` shows each link. |
 | `shed machine stats [--on M] [--since T]` | Load per CPU, memory pressure, swap, free disk, uptime and terminals by state; one sample a minute kept 24 h. An unreachable machine answers offline (last seen) within 5 s. |
-| `shed exec [--on M] [--cwd D] [--timeout S] [-i] -- CMD…` / `shed file read\|write [--on M] PATH` | Run a program without a terminal and get exactly the bytes it wrote to stdout and stderr and its exit code; nothing it started outlives it. `-i` feeds it stdin. `file read` prints a file, `file write` replaces it with stdin (temp file and rename, mode kept). A reply over 8 MiB is an error, never cut. |
+| `shed proxy keys\|revoke` | The token proxy's per-run keys: `keys` lists them, newest first, with their terminal, account and state (never a key); `revoke <id>` stops one signing at once (docs/accounts/token-proxy.md). |
+| `shed read <t> [--lines N] [--screen\|--history]` | The current screen, or scrollback, as plain text. |
+| `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] [--mem-max SIZE] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. `--mem-max` (`200M`, `4G`; default `$SHED_MEM_MAX` of `shed serve`, else none): on Linux with a user systemd that has the memory controller the program gets its own scope with `MemoryMax`; elsewhere the sampler ends the largest process the agent started after two samples over, a guard against sustained use that a fast allocation can pass between samples. Either is a `mem-limit` event; `shed doctor` says which. |
+| `shed script [--on M] (-f FILE \| -) [--check] [--timeout S] [--role R]` | Run a program in shed's JavaScript subset on the server, so many dependent calls and a filter are one round trip (skill/script/SKILL.md). It prints the program's logs, then what it returned; an error prints its name, line and column and exits 1. `--check` only parses and compiles: nothing runs and no call is made. A call that acts goes through the guard in the server's `[script]` config, and is refused without one. |
+| `shed send <t> <text> [--no-paste] [--no-enter] [--draft-wait S]` / `shed keys <t> enter esc ctrl+c…` | Paste text then press enter (bracketed when the program asks for it), or press keys. Sends go in whole, one at a time, and wait while a person attached has an unsent line (60 s by default, then the send fails and writes nothing). |
+| `shed serve` | The per-user server (launchd/systemd user job). Owns the PTYs, the state and the socket. |
+| `shed state <t> working\|blocked\|done\|error [--note TEXT]` | Report state (also via `$SHED` + OSC 7501-compatible escape). |
+| `shed top [<t> [--full]]` | The terminals by memory use, largest first, an ACP agent's split into AGENT and WORK (what it started), then a totals line; with `<t>`, that terminal's processes over 50 MB by name (the command line with `--full`). |
+| `shed wait <t> [--until working\|idle\|done\|blocked] [--output RE] [--timeout S]` | Block until the state or output matches. |
+| `shed watch [--label k=v]` | A live list of the terminals beside a read-only preview of the selected one; Enter attaches, `Ctrl+\` comes back, `/` filters, `q` quits. |
+<!-- /commands -->
 
 **Persistence:** the server keeps PTYs alive while it runs. On server restart, kept terminals come back as shells in
 their last cwd (never re-running a task). State and labels are saved to a small JSON file (atomic writes).
@@ -114,8 +119,8 @@ shed runs them as a second kind of terminal, through the same API:
 | `shed read <t>` | The transcript as text: prompts, one line per tool call, final replies. |
 
 `shed events` adds `turn`, `text`, `tool_call`, `plan`, `mode`, `approval_request`, `approved`, `reply` and `session`, and
-`shed wait --until done` is exact. The PTY mode stays for agents without ACP. shed never handles provider
-credentials: each agent logs in its own way. See [docs/acp/accounts.md](docs/acp/accounts.md), including the Claude adapter caveat.
+`shed wait --until done` is exact. The PTY mode stays for agents without ACP. `run --account` runs an agent on one of
+shed's accounts; see [docs/accounts/accounts.md](docs/accounts/accounts.md).
 
 ## Integration with herdsman
 

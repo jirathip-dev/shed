@@ -23,7 +23,7 @@ after `--`, `run --acp <id> -- <cmd…>` runs that command as the adapter instea
 
 The state is `working` from `send` until the turn ends, and `done` (note: the stop reason, e.g. `end_turn` or
 `cancelled`) after; an agent error is `error`; [Lane states](lane-states.md) has them all. A turn also
-ends as `error` when the agent's login failed (note `auth: <the line>`, see [Accounts](accounts.md)) or when
+ends as `error` when the agent's login failed (note `auth: <the line>`, see [Accounts](../accounts/accounts.md)) or when
 it hears nothing from the agent for `$SHED_TURN_IDLE_TIMEOUT` seconds in the environment of `shed serve`
 (default 1800; note `no response`). Anything the agent sends counts: every update (thought chunks, plans,
 usage, tool-call progress), any request, and each line it writes to stderr; a permission request waiting for

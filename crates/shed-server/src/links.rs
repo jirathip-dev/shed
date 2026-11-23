@@ -2,39 +2,53 @@ use std::collections::BTreeMap;
 use std::io::{BufRead as _, Write as _};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::call::blocking;
 use crate::machines::{self, Machine};
 use crate::proto::{
-    ErrorCode, Event, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
+    ErrorCode, Event, EventKind, EventsParams, Link, LinkState, Method, Request, Route, RpcError,
 };
 use crate::{Error, Shared, lock};
 use shed_client::Conn;
 
-#[derive(Default)]
 pub(crate) struct Links {
-    config: PathBuf,
+    pub(crate) config: PathBuf,
     control: PathBuf,
     held: Mutex<BTreeMap<String, Arc<Held>>>,
+    watched: UnboundedSender<Event>,
 }
 
-struct Held {
+pub(crate) struct Held {
     machine: Machine,
-    calls: Mutex<Option<Conn>>,
-    link: Mutex<Link>,
+    watched: UnboundedSender<Event>,
+    pub(crate) calls: Mutex<Option<Conn>>,
+    pub(crate) link: Mutex<Link>,
 }
 
 impl Held {
     fn set(&self, state: LinkState, error: Option<String>) {
         let mut link = lock(&self.link);
+        let now = shed_core::clock::unix_now();
         if link.state != state {
-            link.since = shed_core::clock::unix_now();
+            link.since = now;
+        }
+        let up = state == LinkState::Up;
+        if up || link.state == LinkState::Up {
+            link.down_since = (!up).then_some(now);
         }
         (link.state, link.error) = (state, error);
+    }
+
+    fn learn(&self, calls: &mut Conn) {
+        let [os, arch, home] = machines::facts(calls);
+        let mut link = lock(&self.link);
+        (link.hello, link.os, link.arch) = (Some(calls.server().clone()), os, arch);
+        link.home = home.map(PathBuf::from);
     }
 }
 
@@ -66,35 +80,56 @@ fn prefix(value: &mut Value, machine: &str) {
             if let Some(terminal) = o.get_mut("terminal") {
                 prefix(terminal, machine);
             }
+            for key in ["top_cpu", "top_mem"] {
+                let procs = o.get_mut(key).and_then(Value::as_array_mut);
+                for p in procs.into_iter().flatten() {
+                    if let Some(Value::String(name)) = p.get_mut("terminal") {
+                        *name = format!("{machine}/{name}");
+                    }
+                }
+            }
         }
         _ => {}
     }
 }
 
+impl Default for Links {
+    fn default() -> Self {
+        Self::new(PathBuf::new(), PathBuf::new()).0
+    }
+}
+
 impl Links {
-    pub(crate) fn new(config: PathBuf, control: PathBuf) -> Self {
+    pub(crate) fn new(config: PathBuf, control: PathBuf) -> (Self, UnboundedReceiver<Event>) {
+        let (watched, rx) = unbounded_channel();
         let held = Mutex::default();
-        Self {
+        let links = Self {
             config,
             control,
             held,
-        }
+            watched,
+        };
+        (links, rx)
     }
 
     pub(crate) fn sync(&self, registry: &Shared) {
-        let machines = machines::load(&self.config).unwrap_or_default();
+        let Ok(machines) = machines::load(&self.config) else {
+            return;
+        };
         let mut held = lock(&self.held);
+        held.retain(|name, _| machines.iter().any(|m| m.name == *name));
         for machine in machines {
             if held.contains_key(&machine.name) {
                 continue;
             }
             let link = Arc::new(Held {
                 machine: machine.clone(),
+                watched: self.watched.clone(),
                 calls: Mutex::new(None),
                 link: Mutex::new(Link {
-                    state: LinkState::Down,
                     since: shed_core::clock::unix_now(),
-                    error: None,
+                    down_since: Some(shed_core::clock::unix_now()),
+                    ..Link::default()
                 }),
             });
             held.insert(machine.name.clone(), Arc::clone(&link));
@@ -127,11 +162,11 @@ impl Links {
         let Some(held) = held else {
             return Err(no_link("no such machine; see `shed machine ls`"));
         };
-        let control = self.control.clone();
+        let (own, _ends) = machines::alone(&held.machine, &self.control);
+        let alone = matches!(method, Method::Wait | Method::Script);
         let mut value = blocking(move || {
-            if method == Method::Wait && lock(&held.link).state == LinkState::Up {
-                let waiting = machines::connect(&held.machine, &control, false);
-                return match waiting.and_then(|mut c| Ok(c.call(method, &params)?)) {
+            if alone && lock(&held.link).state == LinkState::Up {
+                return match own(method, &params) {
                     Err(Error::Client(shed_client::Error::Rpc(e))) => Err(e),
                     Err(e) => Err(no_link(&e.to_string())),
                     Ok(value) => Ok(value),
@@ -164,13 +199,13 @@ impl Links {
     }
 }
 
-fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &Held) {
+fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) {
     let (mut since, mut failures) = (None, 0);
-    loop {
+    while Arc::strong_count(held) > 1 {
         let pair = machines::connect(machine, control, false)
             .and_then(|calls| Ok((calls, machines::connect(machine, control, false)?)));
         match pair {
-            Ok((calls, mut events)) => {
+            Ok((mut calls, mut events)) => {
                 let params = EventsParams {
                     labels: BTreeMap::new(),
                     since,
@@ -178,8 +213,14 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
                 let beating = events.call::<_, Value>(Method::Heartbeat, &serde_json::json!({}));
                 if beating.is_ok() && events.call::<_, Value>(Method::Events, &params).is_ok() {
                     failures = 0;
+                    held.learn(&mut calls);
+                    crate::proxy::sweep(&lock(registry).path.clone(), &machine.name, &mut calls);
+                    let relay = calls.call(Method::ProxyRelay, &serde_json::json!({})).ok();
                     *lock(&held.calls) = Some(calls);
                     held.set(LinkState::Up, None);
+                    let (to, local) = (Arc::clone(held), crate::proxy::socket(control));
+                    let there = machine.clone();
+                    std::thread::spawn(move || crate::proxy::forward(&to, &there, &local, relay));
                     let (reader, writer) = events.split();
                     reader
                         .get_ref()
@@ -188,13 +229,23 @@ fn hold(registry: &Shared, machine: &Machine, control: &std::path::Path, held: &
                     std::thread::spawn(move || beat(&writer));
                     let socket = reader.get_ref().try_clone();
                     for line in reader.lines().map_while(Result::ok) {
+                        if Arc::strong_count(held) == 1 {
+                            break;
+                        }
                         let Ok(e) = serde_json::from_str::<Event>(&line) else {
                             continue;
                         };
                         since = Some(e.seq);
                         let name = format!("{}/{}", machine.name, e.name);
                         let parent = e.parent.map(|p| format!("{}/{p}", machine.name));
-                        lock(registry).events.push(Event { name, parent, ..e });
+                        let e = Event { name, parent, ..e };
+                        if matches!(
+                            e.kind,
+                            EventKind::Exited { .. } | EventKind::Killed | EventKind::State(_)
+                        ) {
+                            held.watched.send(e.clone()).ok();
+                        }
+                        lock(registry).events.push(e);
                     }
                     socket.and_then(|s| s.shutdown(Shutdown::Both)).ok();
                     *lock(&held.calls) = None;

@@ -13,7 +13,7 @@ pub(super) async fn call(cx: &mut Call<'_>) -> Reply {
         .map_or(Ok(Duration::MAX), Duration::try_from_secs_f64);
     let timeout = timeout.map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))?;
     let cwd = p.cwd.unwrap_or_else(|| PathBuf::from("."));
-    let ran = runner::exec(&p.cmd, &cwd, p.stdin, timeout, proto::REPLY_LIMIT).await;
+    let ran = runner::exec(&p.cmd, &cwd, &p.env, p.stdin, timeout, proto::REPLY_LIMIT).await;
     let (status, stdout, stderr) = ran.map_err(io_error)?;
     crate::files::within_limit(stdout.len() + stderr.len()).map_err(io_error)?;
     let signal = status.signal().map(|s| s.saturating_add(128));

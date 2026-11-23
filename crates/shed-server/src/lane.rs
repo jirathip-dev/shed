@@ -24,11 +24,12 @@ use std::time::Duration;
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use shed_accounts::{Store, choice, env::Injected, session};
 use shed_core::proctree::{self, ProcessInfo, ProcessTable as _};
 pub use shed_proto::Policy;
 use shed_proto::{
-    AcpSession, AcpUsage, ApprovalOption, EventKind, Input, Method, Provider, Reported,
-    StateParams, Tokens,
+    Account, AccountsParams, AcpSession, AcpUsage, ApprovalOption, ErrorCode, EventKind, Input,
+    Method, Provider, Reported, RpcError, StateParams, Tokens,
 };
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncWriteExt as _, BufReader};
 use tokio::process::Child;
@@ -43,6 +44,12 @@ use shed_client::Conn;
 
 /// The states only an ACP lane reports, beside `working`, `done` and `error`.
 pub const LANE_STATES: [&str; 4] = ["running", "waiting-approval", "rate-limited", "hibernated"];
+
+pub(crate) const GO_ON: &str = "Your account hit its usage limit, so shed moved this session to another account. \
+                     Go on where you left off.";
+
+const MOVED: &str = "The owner moved this session to another account, so shed stopped your turn. \
+                     Go on where you left off.";
 
 /// Where the bridge of terminal `name` lends its PTY's master to a server on `socket` that starts again.
 #[must_use]
@@ -100,6 +107,12 @@ pub(crate) enum Stop {
     Yes,
 }
 
+pub(crate) struct Switch {
+    to: String,
+    deliver: Option<Input>,
+    why: &'static str,
+}
+
 #[derive(Default)]
 pub(crate) struct Start {
     pub session: String,
@@ -152,6 +165,8 @@ pub(crate) struct Lane {
     restart: bool,
     sleep_after: Option<Duration>,
     hibernate_set: Option<String>,
+    auto: Option<(String, PathBuf)>,
+    switch: Option<Switch>,
 }
 
 impl Lane {
@@ -185,6 +200,8 @@ impl Lane {
             restart: false,
             sleep_after: None,
             hibernate_set: None,
+            auto: None,
+            switch: None,
         }
     }
 
@@ -223,7 +240,7 @@ impl Lane {
         let cancelled = self.input(Input::Cancel, driver);
         driver.forget();
         if let Some((_, resets)) = self.rules.limit_hit(&why) {
-            self.state("rate-limited", resets);
+            self.limited(resets);
             return cancelled;
         }
         let auth = self.auth(&why);
@@ -233,6 +250,83 @@ impl Lane {
         }
         self.state("error", Some(auth.unwrap_or(why)));
         cancelled
+    }
+
+    fn pick(&self, leave: bool) -> Result<String, RpcError> {
+        let none = || RpcError::new(ErrorCode::NoAccount, "no auto account with session files");
+        let auto = self
+            .auto
+            .as_ref()
+            .filter(|_| !self.rules.session_files.is_empty());
+        let (on, socket) = auto.ok_or_else(none)?;
+        let io = |e: shed_client::Error| RpcError::new(ErrorCode::Io, e.to_string());
+        let params = AccountsParams {
+            provider: Some(self.rules.agent.clone()),
+        };
+        let all: Vec<Account> = (Conn::connect(socket).map_err(io)?)
+            .call(Method::AccountLs, &params)
+            .map_err(io)?;
+        let leave = leave.then_some(on.as_str());
+        choice::pick(&all, leave, shed_core::clock::unix_now())
+    }
+
+    fn limited(&mut self, resets: Option<String>) {
+        self.state("rate-limited", resets);
+        match self.pick(true) {
+            Ok(to) => {
+                let deliver = Some(Input::Prompt(GO_ON.to_owned()));
+                self.switch = Some(Switch {
+                    to,
+                    deliver,
+                    why: "limit",
+                });
+            }
+            Err(e) if e.code == ErrorCode::AccountLimited.code() => {
+                self.state("rate-limited", Some(e.message));
+            }
+            Err(_) => {}
+        }
+    }
+
+    fn moving(&mut self, to: String) {
+        let deliver = if self.last.0 == "rate-limited" {
+            Some(GO_ON)
+        } else {
+            (self.turns > 0).then_some(MOVED)
+        };
+        let deliver = deliver.map(|text| Input::Prompt(text.to_owned()));
+        self.switch = Some(Switch {
+            to,
+            deliver,
+            why: "owner",
+        });
+    }
+
+    fn switched(
+        &mut self,
+        sw: &Switch,
+        (socket, state): (&Path, &Path),
+    ) -> Result<Injected, String> {
+        let (store, rules, to) = (Store::beside(state), &self.rules, sw.to.as_str());
+        let injected = Injected::for_run(&store, rules, to, &BTreeMap::new());
+        let injected = injected.map_err(|e| e.message)?;
+        let was = (self.auto.as_ref()).map_or(shed_accounts::store::DEFAULT, |a| a.0.as_str());
+        let was = was.to_owned();
+        let home = PathBuf::from(crate::config::var("HOME").unwrap_or_default());
+        let from = session::folder(&store, rules, &was, &home);
+        if let (Some(from), Ok(Some(into))) = (from, store.folder(rules, to)) {
+            let copied = session::copy(rules, &self.shown.id, &from, &into);
+            copied.map_err(|e| format!("moving the session to {to}: {e}"))?;
+        }
+        self.auto = Some((to.to_owned(), socket.to_owned()));
+        self.last = ("idle".to_owned(), None);
+        let (account, why) = (to.to_owned(), sw.why.to_owned());
+        self.emit(EventKind::Account {
+            account,
+            was: Some(was),
+            why,
+        });
+        Ok(injected)
     }
 
     fn settle(&mut self) {
@@ -273,6 +367,18 @@ impl Lane {
 
     fn input(&mut self, input: Input, driver: &mut impl Driver) -> Result<(), String> {
         self.heard = shed_core::clock::tokio_now();
+        if matches!(input, Input::Prompt(_))
+            && self.last.0 == "rate-limited"
+            && let Ok(to) = self.pick(false)
+            && self.auto.as_ref().is_some_and(|(on, _)| *on != to)
+        {
+            self.switch = Some(Switch {
+                to,
+                deliver: Some(input),
+                why: "limit",
+            });
+            return Ok(());
+        }
         match input {
             Input::Prompt(text) => {
                 self.reply.clear();
@@ -344,6 +450,7 @@ impl Lane {
                 self.asks.clear();
             }
             Input::Name(name) => return self.send(Out::Name(name)),
+            Input::Account(to) => self.moving(to),
             Input::Model(model) => {
                 if let Stop::Yes = driver.model(&model)? {
                     self.restart = true;
@@ -375,7 +482,7 @@ impl Lane {
                 self.shown.usage = usage;
                 self.show_usage();
             }
-            Heard::Limit(resets) => self.state("rate-limited", resets),
+            Heard::Limit(resets) => self.limited(resets),
             Heard::Ask(ask) => return self.ask(ask, driver),
             Heard::TurnEnd { stop, error, meta } => {
                 self.turns = self.turns.saturating_sub(1);
@@ -404,7 +511,7 @@ impl Lane {
         }
         self.emit(EventKind::Reply { text, stop_reason });
         if let Some(resets) = limited {
-            self.state("rate-limited", resets);
+            self.limited(resets);
         } else {
             (self.ended, self.child) = (Some(stop), self.spawned());
             self.settle();
@@ -546,7 +653,14 @@ impl Lane {
         let gone = driver.gone();
         tokio::pin!(gone);
         loop {
-            if self.restart && self.turns == 0 {
+            let owner = self.switch.as_ref().is_some_and(|s| s.why == "owner");
+            if owner && self.turns > 0 && self.open.is_empty() {
+                self.turns = 0;
+                let text = std::mem::take(&mut self.reply);
+                let stop_reason = "cancelled".to_owned();
+                self.emit(EventKind::Reply { text, stop_reason });
+            }
+            if (self.restart || self.switch.is_some()) && self.turns == 0 {
                 return Ok(true);
             }
             tokio::select! {
@@ -674,6 +788,15 @@ enum Launch {
     Stream(Box<stream::Launch>),
 }
 
+impl Launch {
+    fn set_account(&mut self, account: Injected) {
+        match self {
+            Self::Acp(launch) => launch.account = account,
+            Self::Stream(launch) => launch.account = account,
+        }
+    }
+}
+
 fn run(
     cmd: &[String],
     cwd: &Path,
@@ -716,6 +839,8 @@ fn run(
     runtime.spawn(writer::read_input(typed));
     let mut lane = Lane::new(out, policy, rules, turn_idle_timeout());
     lane.hibernate_set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+    let auto = crate::config::var(crate::drivers::launch::AUTO_ACCOUNT);
+    lane.auto = auto.map(|on| (on, socket.to_owned()));
     if let Some(why) = why {
         lane.say(format!("shed: on ACP: {why}")).ok();
     }
@@ -744,14 +869,32 @@ fn run(
                 return Ok(child.wait().await?.code().unwrap_or(1));
             }
             stop(child);
-            let Some(input) = lane.asleep(&mut inputs).await else {
-                return Ok(0);
-            };
+            let mut deliver = None;
+            if lane.switch.is_none() {
+                match lane.asleep(&mut inputs).await {
+                    Some(Input::Account(to)) => lane.moving(to),
+                    Some(input) => deliver = Some(input),
+                    None => return Ok(0),
+                }
+            }
+            if let Some(sw) = lane.switch.take() {
+                deliver = match lane.switched(&sw, (socket, state)) {
+                    Ok(account) => {
+                        launch.set_account(account);
+                        sw.deliver
+                    }
+                    Err(why) => {
+                        let was = lane.last.0.clone();
+                        lane.state(&was, Some(why));
+                        None
+                    }
+                };
+            }
             let session = lane.shown.id.clone();
             start = Start {
                 session,
                 resumed: true,
-                deliver: Some(input),
+                deliver,
             };
         }
     });

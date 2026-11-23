@@ -4,6 +4,7 @@
 //! Unix socket, one tokio task per connection. `shed_client` is the other end.
 #![forbid(unsafe_code)]
 
+mod accounts;
 pub mod agents;
 mod call;
 mod code;
@@ -20,15 +21,16 @@ pub mod limit;
 mod links;
 pub mod machines;
 pub mod providers;
+mod proxy;
 mod registry;
+pub mod relay;
 mod screen;
+mod script;
 pub mod serve;
 mod stats;
 
 use std::ffi::OsString;
-use std::io::{self, Read as _, Write as _};
-use std::net::Shutdown;
-use std::os::unix::net::UnixStream;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -170,30 +172,6 @@ async fn send(out: &mut tokio::net::unix::OwnedWriteHalf, bytes: &[u8]) -> bool 
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// `shed connect`: carries the protocol between stdin/stdout and the server on `socket` (for
-/// `ssh host shed connect`) until either side closes.
-///
-/// # Errors
-/// [`Error::Io`] when nothing listens on `socket` or the copy fails.
-pub fn relay(socket: &Path) -> Result<(), Error> {
-    let mut stream = UnixStream::connect(socket)?;
-    let mut up = stream.try_clone()?;
-    std::thread::spawn(move || {
-        io::copy(&mut io::stdin().lock(), &mut up).ok();
-        up.shutdown(Shutdown::Write).ok();
-    });
-    let mut out = io::stdout().lock();
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = stream.read(&mut buf)?;
-        if n == 0 {
-            return Ok(());
-        }
-        out.write_all(buf.get(..n).unwrap_or_default())?;
-        out.flush()?;
-    }
 }
 
 #[cfg(test)]

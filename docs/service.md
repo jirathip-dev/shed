@@ -39,8 +39,10 @@ dev.shed.update: written
 ## Linux (systemd)
 
 `shed install` writes `~/.config/systemd/user/dev.shed.serve.service`, `dev.shed.update.service` and
-`dev.shed.update.timer`, and removes the older `shed.service` and `shed-update.*` units. To keep the server
-running while logged out:
+`dev.shed.update.timer`, and removes the older `shed.service` and `shed-update.*` units (on macOS, the
+`shed` and `shed-update` plists). A `shed self-update` pass does the same for an old-named updater: it loads
+`dev.shed.update` first, then drops `shed-update.*`; until then `shed doctor` fails `update` with
+`fix: shed install`. To keep the server running while logged out:
 
 ```sh
 loginctl enable-linger "$USER"

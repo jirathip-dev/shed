@@ -188,6 +188,58 @@ pub struct GrepLine {
     pub length: Option<usize>,
 }
 
+/// `code.find` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FindParams {
+    /// A folder or one file.
+    pub root: PathBuf,
+    /// Words; a file is ranked by how many of them it answers, and where.
+    pub query: String,
+    /// How many files to return: default 10, at most 50.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top: Option<usize>,
+    /// Also dot files and dot folders, never `.git`.
+    #[serde(default)]
+    pub hidden: bool,
+    /// `*.rs` keeps, `!tests/` drops, in `.gitignore` syntax.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub glob: Vec<String>,
+    /// The machine it is on, over its held link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+}
+
+/// `code.find` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct FindResult {
+    /// The best files, best first, ties by path.
+    pub files: Vec<Found>,
+    /// Files that earned anything; `files` is the first `top` of them.
+    pub total: usize,
+    /// Files read.
+    pub searched: usize,
+}
+
+/// One ranked file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Found {
+    /// Relative to `root`, with `/`.
+    pub path: String,
+    /// Its language.
+    pub lang: Lang,
+    /// Its lines.
+    pub lines: usize,
+    /// Its rank's score.
+    pub score: u32,
+    /// What earned it: `name is pattern`, `path has lane`, `lines: wait 89, output 6`, `a test`.
+    pub why: Vec<String>,
+    /// At most 5 symbols whose name holds a word, exact names first.
+    pub symbols: Vec<Symbol>,
+}
+
 /// A span of lines, 1-based and inclusive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]

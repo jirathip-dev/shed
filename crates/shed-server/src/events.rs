@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
+use serde_json::Value;
 use shed_proto::{Event, EventKind, EventsParams, TerminalInfo};
 use tokio::net::unix::OwnedWriteHalf;
 use tokio::sync::watch;
@@ -9,6 +10,7 @@ use crate::{HEARTBEAT, lock, send};
 
 pub(crate) const RING: u64 = 4_096;
 const TEXT_RING: usize = 256;
+const SWEEP: u64 = 256;
 const BEAT: &[u8] = b"{\"jsonrpc\":\"2.0\",\"method\":\"heartbeat\"}\n";
 
 type Labels = BTreeMap<String, String>;
@@ -42,6 +44,27 @@ fn line(event: &Event) -> Line {
     line.into()
 }
 
+fn mask(v: &mut Value) {
+    match v {
+        Value::String(s) => *s = shed_core::redact(s),
+        Value::Array(a) => a.iter_mut().for_each(mask),
+        Value::Object(o) => o.values_mut().for_each(mask),
+        _ => {}
+    }
+}
+
+pub(crate) fn redacted<T: serde::Serialize + serde::de::DeserializeOwned>(t: &T) -> Option<T> {
+    let mut v = serde_json::to_value(t).ok()?;
+    mask(&mut v);
+    serde_json::from_value(v).ok()
+}
+
+fn trim(ring: &mut Ring, floor: u64) {
+    while ring.len() > TEXT_RING && ring.front().is_some_and(|(e, _)| e.seq <= floor) {
+        ring.pop_front();
+    }
+}
+
 fn notice(method: &str, seq: u64) -> Vec<u8> {
     format!("{{\"jsonrpc\":\"2.0\",\"method\":\"{method}\",\"params\":{{\"seq\":{seq}}}}}\n")
         .into_bytes()
@@ -53,6 +76,14 @@ impl Events {
     }
 
     pub(crate) fn emit_as(&mut self, t: &TerminalInfo, kind: EventKind, replay: bool) {
+        let kind = if t.redacted {
+            let Some(kind) = redacted(&kind) else {
+                return;
+            };
+            kind
+        } else {
+            kind
+        };
         self.push(Event {
             seq: 0,
             name: t.name.clone(),
@@ -72,9 +103,6 @@ impl Events {
         log.seq = self.seq;
         if matches!(event.kind, EventKind::Text { .. }) {
             let ring = log.texts.entry(event.name.clone()).or_default();
-            if ring.len() >= TEXT_RING {
-                ring.pop_front();
-            }
             ring.push_back((event, bytes));
         } else {
             if u64::try_from(log.events.len()).unwrap_or(u64::MAX) >= RING
@@ -85,6 +113,10 @@ impl Events {
                 (log.texts).retain(|_, ring| ring.back().is_some_and(|(e, _)| e.seq > evicted));
             }
             log.events.push_back((event, bytes));
+        }
+        if self.seq.is_multiple_of(SWEEP) {
+            let floor = self.seq.saturating_sub(RING);
+            log.texts.values_mut().for_each(|ring| trim(ring, floor));
         }
         self.last.send_replace(self.seq);
     }
@@ -290,11 +322,29 @@ mod tests {
             .collect();
         assert_eq!(kept, state);
         assert!(got.windows(2).all(|w| w[0].seq < w[1].seq), "in seq order");
-        assert_eq!(
-            got.len(),
-            5 + 2 * TEXT_RING,
-            "each lane keeps its last text chunks"
-        );
+        let texts: Vec<u64> = (got.iter().filter(|e| e.name != "a"))
+            .map(|e| e.seq)
+            .collect();
+        let recent: Vec<u64> = (events.seq() - RING + 1..=events.seq())
+            .filter(|seq| !state.contains(seq))
+            .collect();
+        assert!(texts.ends_with(&recent), "every chunk of the last ring");
+        let bound = RING + SWEEP + 2 * u64::try_from(TEXT_RING).expect("small");
+        assert!(u64::try_from(texts.len()).is_ok_and(|n| n <= bound));
+    }
+
+    #[test]
+    fn a_text_ring_stays_bounded_whatever_kind_each_sweep_lands_on() {
+        let mut events = Events::default();
+        for _ in 0..40 {
+            for _ in 1..SWEEP {
+                events.emit(&named("a"), text());
+            }
+            events.emit(&named("a"), EventKind::Killed);
+        }
+        let held = lock(&events.log).texts.get("a").map_or(0, VecDeque::len);
+        let bound = RING + SWEEP + u64::try_from(TEXT_RING).expect("small");
+        assert!(u64::try_from(held).is_ok_and(|n| n <= bound), "{held} held");
     }
 
     #[test]
@@ -355,6 +405,30 @@ mod tests {
         let read = tokio::time::timeout(HEARTBEAT, read).await;
         assert!(read.is_ok(), "only {names:?} arrived");
         assert_eq!(names, ["big", "after"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_live_reader_within_the_ring_gets_every_text_chunk() {
+        let mut events = Events::default();
+        let (server, client) = tokio::net::UnixStream::pair().expect("pair");
+        let (_read, mut out) = server.into_split();
+        let sub = events.subscribe(EventsParams::default());
+        tokio::spawn(async move { sub.stream(&mut out, false).await });
+        let flood = 1_000;
+        for _ in 0..flood {
+            events.emit(&named("a"), text());
+        }
+        events.emit(&named("a"), EventKind::Killed);
+        let mut lines = tokio::io::BufReader::new(client).lines();
+        let mut texts = 0;
+        while let Some(line) = lines.next_line().await.expect("read") {
+            let event: Event = serde_json::from_str(&line).expect("an event");
+            if matches!(event.kind, EventKind::Killed) {
+                break;
+            }
+            texts += 1;
+        }
+        assert_eq!(texts, flood);
     }
 
     #[test]

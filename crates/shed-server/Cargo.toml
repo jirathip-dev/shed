@@ -11,15 +11,17 @@ publish.workspace = true
 [dependencies]
 agent-client-protocol.workspace = true
 futures.workspace = true
+shed-accounts.workspace = true
 shed-core.workspace = true
 shed-pattern.workspace = true
 shed-catalog.workspace = true
 shed-client.workspace = true
 shed-search.workspace = true
+shed-script.workspace = true
 shed-proto = { workspace = true, features = ["schema"] }
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }
-rustix = { workspace = true, features = ["net", "stdio", "termios"] }
+rustix = { workspace = true, features = ["event", "net", "stdio", "termios"] }
 thiserror.workspace = true
 toml.workspace = true
 tokio = { workspace = true, features = [

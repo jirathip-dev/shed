@@ -157,6 +157,17 @@ pub enum EventKind {
     Session(Box<AcpSession>),
     /// ACP: the agent's context window use and cost changed (`usage_update`).
     Usage(AcpUsage),
+    /// The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's
+    /// `account.use`.
+    Account {
+        /// The account it runs on now.
+        account: String,
+        /// The account it ran on before.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        was: Option<String>,
+        /// `start`, `limit` or `owner`.
+        why: String,
+    },
 }
 
 impl EventKind {
@@ -171,6 +182,7 @@ impl EventKind {
                 | Self::Killed
                 | Self::Resources(_)
                 | Self::MemLimit { .. }
+                | Self::Account { .. }
         )
     }
 }

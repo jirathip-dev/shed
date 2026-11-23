@@ -56,9 +56,15 @@ async fn wait(registry: &Mutex<Registry>, p: &WaitParams) -> Result<WaitResult, 
             let done = |t: &shed_core::Terminal| {
                 t.report()
                     .is_some_and(|r| reported(&r.state, r.kind.as_deref()))
-                    || pattern
-                        .as_ref()
-                        .is_some_and(|re| t.screen().lines().any(|l| re.is_match(l)))
+                    || pattern.as_ref().is_some_and(|re| {
+                        let screen = t.screen();
+                        let screen = if info.redacted {
+                            shed_core::redact(&screen)
+                        } else {
+                            screen
+                        };
+                        screen.lines().any(|l| re.is_match(l))
+                    })
             };
             match term
                 .wait_until(done, deadline)
