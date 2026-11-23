@@ -2,16 +2,23 @@
 
 ## Summary
 
-Decision: `shed-cloud` is a new crate and binary in shed's repo that nothing else in shed depends on. It rents VMs from one data file per provider (Boat today), keeps each VM's monthly budget, and by itself, every 5 minutes on the main host, stops a VM that is over budget or has had no live terminal for its idle limit. A lane-host VM is a shed machine exactly while it runs: the helper adds it with its address and pinned host key at each start and removes it at each stop. A CI runner VM is never a shed machine; its setup step registers GitHub runners. drover calls two commands, list and start, and otherwise sees only shed machines.
-Slices: (1) shed's machine list takes a port, a pinned host key and an identity file; (2) the helper: provider records, start, stop, remove, snapshot, spend and budget, list, doctor; (3) the 5-minute pass, idle stop, its job, its release and the import from drover; (4) runner pools. Then drover's own issues (drover#1644). About 1,400 lines added in shed, about 850 leave drover.
-Open questions: (1) #259 put cooee's desks on VM methods in shed's server, which this ADR removes: desks stay in cooee as they are now (recommended), or become a second provider of the helper later? (2) one cap raise of about 1,000 lines in its own cap issue, sized by `drover cap berth` when filed.
+Decision: `shed-cloud` is a new crate and binary in shed's repo that nothing else in shed depends on. It rents VMs from one data file per provider (Boat today) and runs by itself every 5 minutes on the main host. Lane hosts come from a warm pool: drover publishes how many lanes wait for which tags, and the helper creates disposable VMs from a golden snapshot within its own caps (VMs at once, VMs per tag, money per month), adds each as a shed machine with its address and pinned host key, and deletes it after a set number of lanes or an idle timeout. Before it ends a VM it marks the machine draining in shed: shed refuses new terminals there, and the VM goes only when no terminal is left. A VM you name yourself is started and stopped by hand, with its own monthly budget and idle stop. CI runner VMs use the same helper and are never shed machines. drover starts and stops nothing.
+shed's server gets two small changes, neither about VMs: a machine can carry a pinned host key, and a shed can be draining. The link's fault tests use a stand-in for the ssh program, kept in shed's repo; the server gets no fault code.
+Slices: (1) machines: a port, a pinned host key, an identity file; (2) draining; (3) the helper, by hand; (4) the 5-minute pass, its job and its release; (5) pools, demand and the per-VM git token; (6) the golden image; (7) runner groups; (8) the fake link, its fault tests and the soak script. Then drover's own issues (drover#1644, drover#1648). About 2,000 lines added in shed, about 850 leave drover.
+Open questions: (1) the short-lived git token per VM needs a GitHub App you create once (one more secret on the main host; pushes and PRs from a VM then show the App as author): go with it (recommended), or keep today's long-lived token on VMs until you have one? (2) a VM you name yourself: only you start it and demand never does (recommended), or should demand also wake a stopped one, or do named VMs go once the pool works? (3) #259 put cooee's desks on VM methods in shed's server, which this ADR removes: desks stay in cooee as they are (recommended), or become a provider of the helper later? (4) one cap raise of about 1,600 lines in its own cap issue, sized by `drover cap berth` when filed.
 
 **Status:** proposed by the architect lane, 2026-11-23, read on shed `a3a603b` and drover staging `7c0a28c1c`.
-It follows the owner's decision of the same day (drover#1644 and its amendment: cloud VMs leave drover; the
-helper lives in shed's repo as its own optional binary; shed's server core stays VM-free). How the callers read,
-the statecharts, the CLI, the boundaries, the secrets and the slices: [README.md](README.md). Config, provider
-record, log and wire shapes: [shapes.md](shapes.md). Every function of drover's `cloud.rs` and `runners.rs`:
-[port-map.md](port-map.md).
+It follows the owner's decisions of the same day on drover#1644: cloud VMs leave drover for an optional helper
+in shed's repo, and (the amendment) a demand-driven warm pool, drain first, a golden snapshot and a
+fault-injection link. Where each part is written:
+
+| file | holds |
+|---|---|
+| [README.md](README.md) | how the callers read, the statecharts, the CLI, the module boundaries, the secrets, the migration, the issues to file |
+| [pool.md](pool.md) | demand, sizing, a pool VM's life, `draining` in shed, persistent hosts, the golden image, sign-in and the git token |
+| [faults.md](faults.md) | the fake link, its faults, the fault tests and the nightly soak |
+| [shapes.md](shapes.md) | config, provider record, log and wire shapes; the import from drover |
+| [port-map.md](port-map.md) | every function of drover's `cloud.rs` and `runners.rs` |
 
 ## The question
 
@@ -24,9 +31,11 @@ key; drover#1644 records that stop and resume broke lanes on 2026-11-23, and the
 
 The accepted hosts ADR (#259, one day older) moved the VM mechanism into shed's server as `vm.*` methods and
 left budgets, idle stop and runner registration in drover. The owner has since decided otherwise: one optional
-helper owns all of it, and shed's server knows machines only. So: where does the helper live and what may it
-use, what does it keep on disk, how is a provider described, how does a VM that moves stay a shed machine, and
-what is left for drover to call?
+helper owns all of it, shed's server knows machines only, and lane hosts are disposable VMs the helper sizes
+from drover's demand. So: where does the helper live and what may it use, what does it keep on disk, how is a
+provider described, how does a VM stay a shed machine, how does drover ask for capacity without starting a VM,
+how does a VM end without losing a lane's work, what is in the snapshot a VM starts from, and how is the link
+to a machine tested against the faults that broke lanes?
 
 ## Options
 
@@ -75,19 +84,56 @@ what is left for drover to call?
 | N | drover tells the helper which hosts have lanes | the helper would depend on drover running |
 | O | **`machine.stats`: no terminal on the machine in a state other than `exited`** | chosen: a lane is a shed terminal, and so is anything else worth keeping a VM up for |
 
-**The work on a VM before it stops (drover's wip save)**
+**What a VM waits for before it ends**
 
 | | option | verdict |
 |---|---|---|
-| P | drover polls the helper and stops VMs itself | the budget would hold only while drover runs |
-| Q | **A `before_stop` command per VM in the helper's config; a non-zero exit aborts the stop** | chosen: the helper names no lane or worktree, drover sets it to its save command |
+| P | A `before_stop` command per VM that drover sets to its save (this ADR's first draft) | replaced by the owner's drain first: a hook runs once, at a moment the helper picks, while a lane may still be writing |
+| Q | **Drain: no new terminal, then the end at zero terminals. An exited terminal counts until its owner removes it** | chosen: drover saves a lane's work when the lane ends and then removes its terminal; the removal is its "done here", so no call between the two programs is needed |
+
+**Where `draining` lives**
+
+| | option | verdict |
+|---|---|---|
+| R | A flag in the main host's machine list, checked where the main host forwards `run` | `shed --on`, a second main host and a shell on the VM are not checked; a `run` already on its way can land after the helper read zero |
+| S | **A state of the shed server on the machine itself** | chosen: one place refuses, under the lock that creates terminals, so zero stays zero; any machine can be drained by anyone, a persistent host before a reboot included |
+
+**How drover gets capacity**
+
+| | option | verdict |
+|---|---|---|
+| T | drover runs `shed-cloud start` when placement wants a VM (the first draft) | reversed by the owner: drover never starts or stops a VM |
+| U | drover writes a demand file in the helper's state folder | a second writer in the helper's folder, and nothing happens until the next pass, up to 5 minutes later |
+| V | **`shed-cloud demand`: the lanes waiting, by tags, on stdin; the helper sizes at once and answers what it started and what a cap held back** | chosen: one command, checked input, no wait for a pass, and drover's board can say why a lane still waits |
+
+**How the lanes a VM has had are counted**
+
+| | option | verdict |
+|---|---|---|
+| W | drover reports them per machine | the helper would need drover to end a VM |
+| X | **The terminals shed lists on the machine, each name once** | chosen: a lane is a shed terminal; a miss between two passes only lets a VM live one lane longer |
+
+**What rebuilds the golden image**
+
+| | option | verdict |
+|---|---|---|
+| Y | A timer | rebuilds when nothing changed, and is stale in between |
+| Z | **A key: the hash of the build script, of a command's output (lockfiles, toolchain files), of shed's build and of the pool's size** | chosen: the same inputs give the same snapshot name, so "is it current" is a comparison |
+
+**Where the fake link lives**
+
+| | option | verdict |
+|---|---|---|
+| AA | A transport trait in shed's server with a faulty implementation | fault code in the product and under its line cap, behind a switch that must never be on |
+| AB | In drover's tests (drover#1648) | shed's own link tests and the helper's tests need it too; two fakes drift |
+| AC | **A stand-in for the `ssh` program, in shed's repo, shipped with each release** | chosen: the program it starts is already the link layer's one seam, and shed's machine tests already swap it; drover's harness uses the same file |
 
 **Is a runner VM a shed machine?**
 
 | | option | verdict |
 |---|---|---|
-| R | Yes, like a lane host | shed would be installed on a VM that runs pull-request code, with a held link from the main host that can carry the token-proxy forward (#265) |
-| S | **No: it is reached only through the provider's `exec`, and nothing of ours is on it** | chosen: as today, and as drover#1644 words it ("a shed machine or a GitHub runner") |
+| AD | Yes, like a lane host | shed would be installed on a VM that runs pull-request code, with a held link from the main host that can carry the token-proxy forward (#265) |
+| AE | **No: it is reached only through the provider's `exec`, and nothing of ours is on it** | chosen: as today, and as drover#1644 words it ("a shed machine or a GitHub runner") |
 
 ## The decision
 
@@ -98,38 +144,63 @@ what is left for drover to call?
    that fails when `cargo tree -p shed` names it or `cargo tree -p shed-cloud` names the server.
 2. **Providers.** A provider is a record, `crates/shed-cloud/providers/<name>.toml`, built in; the owner's file
    of the same name in the helper's config folder replaces it. Verbs: `create`, `start`, `stop`, `state`,
-   `destroy`, and where it has them `id`, `address`, `ready`, `snapshot`, `create_from`, `exec`. Two records
-   ship: `boat` (the CLI, for lane hosts) and `boat-api` (the HTTP API, for runner VMs), both from drover's
-   recipe. The contract is in [shapes.md](shapes.md). The code names no provider.
-3. **Config and state.** The owner's `config.toml` lists each lane-host VM (`[vm.<name>]`: provider, size,
-   monthly budget, hours a day, idle limit, `before_stop`) and each runner pool (`[runners.<pool>]`). The helper
-   writes one file, `log.jsonl`. A VM's state, its spend this month, its hours today and how long it has been
-   quiet are computed from the log and the config each time.
-4. **Budget.** Spend is the time between a `start` line and the next `stop` line, within the UTC month, times
-   the record's rate for the VM's size. A VM with no `budget_usd_month` does not load. `start` refuses
-   `OVER_BUDGET` at the month's budget or the day's hours; the pass stops a running VM that reaches either.
-5. **Idle stop.** Each pass asks `machine.stats` for the machine, with the samples since the last pass. No
-   terminal outside `exited` in any of them logs `quiet` once; one logs `busy`. A VM quiet for its
-   `idle_stop_minutes` (default 20) is stopped. A machine that does not answer is not quiet.
+   `destroy`, and where it has them `id`, `address`, `ready`, `snapshot`, `snapshot_rm`, `create_from`, `exec`.
+   Two records ship: `boat` (the CLI, for lane hosts) and `boat-api` (the HTTP API, for runner VMs), both from
+   drover's recipe. The contract is in [shapes.md](shapes.md). The code names no provider.
+3. **Config and state.** The owner's `config.toml` has the caps, each pool (`[pool.<name>]`), each named VM
+   (`[vm.<name>]`), each runner group (`[runners.<name>]`) and the git token's record (`[git]`). The helper
+   writes one log, `log.jsonl`, and one small file per demand publisher. A VM's state, its spend, the lanes it
+   has had and how long it has been quiet are computed from the log and the config each time.
+4. **Budget.** Spend is the time a VM is up (from its `start` line to its `stop` or `removed` line), within the
+   UTC month, times the record's rate for its size. A named VM has its own `budget_usd_month` and does not load
+   without one. Pool VMs and image builds share `[caps] budget_usd_month`. At a budget nothing new starts
+   (`OVER_BUDGET`) and what runs is drained.
+5. **Idle.** Each pass asks `machine.stats` for the machine, with the samples since the last pass. No terminal
+   outside `exited` in any of them logs `quiet` once; one logs `busy`. A VM quiet for its idle limit (20 minutes
+   by default) is drained. A machine that does not answer is not quiet.
 6. **The machine link.** After a start the helper reads the record's `address`, pins the key it prints and calls
    `machine.add` with the target `ssh://user@host:port`, the key and the identity file. Each pass reads `address`
    again: a moved address replaces the machine's entry; a changed key replaces nothing and holds the VM as
-   `key_changed` until the owner runs `repin`. A stop, from anyone, removes the machine. So shed never dials an
-   address a stopped VM gave back.
-7. **Runner VMs.** A pool's VM is created, then set up: a registration token from `gh` on the main host, sent on
-   stdin through the record's `exec`, and the runner service restarted. The pass sends a fresh token every 30
-   minutes and reads how many of the VM's runners GitHub lists online. Revive, add and remove are commands.
-   `max_vms` and `usd_day` are hard: only an edit of `config.toml` raises them.
-8. **Secrets.** A provider's key is read from the environment, else from a 0600 file in the helper's config
-   folder; it reaches a verb's shell on stdin. A registration token lives in memory for one command. Neither is
-   in an argument, the log or any output. The rules and their enforcers are in [README.md](README.md).
-9. **The pass, the job, the release.** `shed-cloud tick` is the 5-minute pass; `shed-cloud install` writes its
-   job (`dev.shed.cloud`) through farrier-service, as `shed install` writes shed's. Each release carries
-   `shed-cloud-<target>` beside `shed-<target>` under one `SHA256SUMS`. `shed self-update` keeps any binary of
-   its release that is installed beside `shed` at shed's build, by asset name, so shed's code names no helper.
-10. **drover.** It runs `shed-cloud ls --json` to learn which of its machines are rented, what state each is in
-    and what holds it, and `shed-cloud start <vm>` when placement wants a stopped one. Its board and alerts read
-    the same rows. Everything else it does to a host is a shed call on a machine (drover#1575).
+   `key_changed` until the owner runs `repin`. The end of a VM, by anyone, removes the machine. So shed never
+   dials an address a VM gave back.
+7. **Draining.** `machine.drain` puts the shed server on a machine in a draining state: it refuses `run` with
+   `DRAINING`, ends its warm spares, and says so in `machine.stats`. Everything else works, so lanes finish and
+   work is saved. The helper drains a VM before every stop and every delete, and ends it only when its stats,
+   read after the drain, list no terminal at all. drover reads `draining` from `machine.stats`, places nothing
+   there, and removes a lane's terminal after it saved the lane's work. [pool.md](pool.md).
+8. **The pool.** `shed-cloud demand --by <who>` takes the lanes waiting, by needed tags. The helper gives each
+   entry to the cheapest pool whose tags cover it, subtracts the room that pool already has or is starting,
+   and creates VMs from the pool's image within the pool's `max_vms`, `[caps] max_per_tag`, `[caps] max_vms`
+   and the budget. A pool VM drains after `max_lanes` terminals (2 by default), after `idle_minutes` quiet, at
+   `max_life_hours`, or at the budget, and is deleted at zero terminals. Demand never removes a VM. A
+   persistent host is a plain shed machine the helper does not know. [pool.md](pool.md).
+9. **The golden image.** One saved snapshot per pool, named by its key. The pass rebuilds it when the key
+   changes: a fresh VM, the pool's build script in a shed terminal, a check that none of the record's `never`
+   paths exist, the provider's `snapshot`, the VM deleted. It holds repos, toolchains, shed and a warm
+   dependency build. It never holds a login, a token or a key. [pool.md](pool.md).
+10. **Sign-in and git.** No agent logs in on a VM: a `run` there gets its credentials through shed's token proxy
+    (#265), which the held link already forwards. Git and `gh` on a VM use a token the helper mints on the main
+    host for that VM, sends over the shed link on stdin and replaces every 45 minutes. How it is minted is a
+    record (`crates/shed-cloud/git/<name>.toml`); the one that ships asks a GitHub App for a one-hour token.
+11. **Runner VMs.** A group's VM is created, then set up: a registration token from `gh` on the main host, sent
+    on stdin through the record's `exec`, and the runner service restarted. The pass sends a fresh token every
+    30 minutes and reads how many of the VM's runners GitHub lists online. Revive, add and remove are commands.
+    `max_vms` and `usd_day` are hard: only an edit of `config.toml` raises them.
+12. **Secrets.** A provider's key and the git record's key are read from the environment, else from a 0600 file
+    in the helper's config folder; each reaches a verb's shell on stdin. A registration token and a git token
+    live in memory for one command. None is in an argument, the log or any output. The rules and their enforcers
+    are in [README.md](README.md).
+13. **The pass, the job, the release.** `shed-cloud tick` is the 5-minute pass; `shed-cloud install` writes its
+    job (`dev.shed.cloud`) through farrier-service, as `shed install` writes shed's. Each release carries
+    `shed-cloud-<target>` beside `shed-<target>` under one `SHA256SUMS`. `shed self-update` keeps any binary of
+    its release that is installed beside `shed` at shed's build, by asset name, so shed's code names no helper.
+14. **drover.** It runs `shed-cloud ls --json` to learn which machines are pool VMs, with their tags and slots,
+    and `shed-cloud demand --by drover` with what still waits. It reads `draining` from shed. It runs no
+    `start`, `stop` or `rm`. Everything else it does to a host is a shed call on a machine (drover#1575).
+15. **The fake link and the soak.** `scripts/fakelink.py` stands in for `ssh` in tests: it joins a target to a
+    shed server in a temp folder and applies the faults a file names (latency, stalls, a cut, a hang, host gone,
+    address change, key change). shed's link tests, the helper's tests and drover's harness use it. The nightly
+    soak is `scripts/soak.sh` on real machines; drover's nightly job starts it. [faults.md](faults.md).
 
 What this reverses, said plainly:
 
@@ -137,36 +208,49 @@ What this reverses, said plainly:
   `vms/` records in shed-catalog, no provider key among shed's own secrets. H4's other half (`machine add
   --install`, `machine.setup`) is not about VMs and stands.
 - **#259's split rows "cloud VMs" and "runner VMs".** Budget, spend, idle stop, the start itself, runner
-  registration, tokens and caps leave drover for the helper. drover keeps placement (when to ask for a start),
-  the save command it puts in `before_stop`, its alerts and its board. #259's D6 is replaced by drover#1644.
-- **#259's "shed stops nothing by itself".** Still true of shed's server. The helper stops VMs by itself; that
+  registration, tokens and caps leave drover for the helper. drover keeps placement, the save of a lane's work,
+  its alerts and its board. #259's D6 is replaced by drover#1644.
+- **#259's "shed stops nothing by itself".** Still true of shed's server. The helper ends VMs by itself; that
   is its job.
-- **#259's C5 (cooee's desks on `vm.*`).** There is no `vm.*` to move to: open question 1.
+- **#259's C5 (cooee's desks on `vm.*`).** There is no `vm.*` to move to: open question 3.
 - **drover's runner approvals.** Today an owner's yes lets one `runners add` pass `max_vms` or `usd_day`. The
   helper knows no asks: a cap is a number in its config.
+- **This ADR's first draft.** drover called `shed-cloud start`, and a `before_stop` hook saved work. Both are
+  gone: demand and drain replace them.
+- **"The one core change".** The amendment names `draining` as shed's one core change. There are two: the pinned
+  host key (option K) is the other. Without it a new VM's key would be trusted through the owner's own
+  `~/.ssh/config`, as drover does today.
 
 ## Consequences
 
 - drover and shed's server call no Boat CLI or API. A budget holds while drover is stopped, and while shed's
-  server is down: the pass needs only the provider and the log to stop a VM.
-- shed gains one crate of about 1,300 lines and about 90 lines in the server; the cap needs a raise (question 2).
-- The server's machine entry gains a pinned key and an identity file, and `machine.add` can replace an entry.
-  That raises `PROTOCOL` by one; the helper refuses `SHED_OLD` on a server under it, since an older server
-  would ignore the pin without saying so.
+  server is down: the pass needs only the provider and the log to see that a VM is over.
+- shed gains one crate of about 1,800 lines and about 160 lines in the server and CLI; the cap needs a raise
+  (question 4).
+- `machine.add` can replace an entry, a machine entry can pin a key, and `machine.drain` exists. That raises
+  `PROTOCOL` twice (slices 1 and 2). The helper refuses `SHED_OLD` on a main-host server under the first and on
+  a VM whose shed is under the second, since an older shed would ignore the pin or the drain without saying so.
 - Nothing writes `~/.ssh/config`. The block in `~/.ssh/config.d/herdsman`, its `Include` and
   `~/.ssh/herdsman/*.known` are no longer needed once drover's issue lands.
 - A start trusts the key the record's `address` prints right after it (boat: a key scan of the endpoint Boat's
-  API named), as drover's start does today, and logs the old and new key as `repin`. A key that changes while
-  the VM runs is refused.
-- A stopped VM is not in `machine ls`. drover tells "stopped" from "offline" by `shed-cloud ls`.
-- A `before_stop` that keeps failing keeps a VM up past its budget, as drover's `cloud-abort` does today. The
-  row shows `stop_aborted` with the reason, and drover alerts on it.
+  API named), as drover's start does today, and logs it. A key that changes while the VM runs is refused.
+- A pool VM's name is never used twice (`dev-17`, then `dev-18`), so a machine name always means one disk.
+- The first lane after a quiet time waits for a VM to be created from the image. The pool keeps no VM up
+  without demand.
+- A terminal that never ends, or an exited one nobody removes, keeps a draining VM up, past its budget too.
+  The row shows `drain_stuck` after 60 minutes and drover alerts on it. Only the owner's `--now` ends a VM with
+  terminals on it. The provider's own time limit (twice `max_life_hours`) is the last stop for a pool VM.
+- A stopped named VM stays stopped until the owner starts it. Today drover wakes it; from here the pool answers
+  demand (question 2).
 - An idle stop no longer needs drover's lane list: any live shed terminal on the VM keeps it up, an owner's
   included. A shell over plain ssh does not, as today.
-- A fresh VM gets shed through the record's `exec`: the release asset for its OS and CPU, checked against the
-  sum the main host read. When #259's `machine add --install` lands, that one step calls it instead.
-- Runner VMs keep their two caps and get no monthly budget and no idle stop. `runners retire-local` and
-  removing a stray runner by name are dropped: neither is about a VM ([port-map.md](port-map.md)).
+- A VM made from the image already has shed. When its build differs from the main host's, the helper installs
+  the release asset through the record's `exec`, checked against the sum the main host read; the next image
+  build then carries the new one.
+- A git token is good for an hour at most after its VM is deleted. Nothing revokes it sooner.
+- Runner VMs keep their two caps and get no monthly budget, no idle stop and no drain: `runner rm` drains the
+  runners themselves. `runners retire-local` and removing a stray runner by name are dropped: neither is about a
+  VM ([port-map.md](port-map.md)).
 - The provider key stays a 0600 file, as in drover (#707). When #259's `shed-secrets` crate lands, the helper
   opens the same place through it, which on macOS is the Keychain.
 - The helper is installed on the main host only, and is optional: without it shed and drover work, with no
@@ -174,13 +258,14 @@ What this reverses, said plainly:
 
 ## Hot files
 
-The helper is new code, laid out so its four slices share no file: one file per concern in
+The helper is new code, laid out so its slices share no file: one file per concern in
 `crates/shed-cloud/src/`, one per command in `src/cmd/` (collected by `build/collect.rs`, as `crates/shed`'s
-are), one per provider in `providers/`, one docs file per area in `docs/cloud/`, one gate file. It converts no
-existing hot file. It touches two shared ones: `.drover/arch.toml` (the lines below; the file is at 479 of its
-480 lines) and `.github/workflows/release.yml` (slice 3: build, sign and publish the second asset).
+are), one per provider in `providers/`, one per git record in `git/`, one docs file per area in `docs/cloud/`,
+one gate file. It converts no existing hot file. It touches two shared ones: `.drover/arch.toml` (the lines
+below; the file is at 479 of its 480 lines) and `.github/workflows/release.yml` (slice 4 adds the second
+binary, slice 8 one more asset: they land one after the other).
 
-Slice 2 adds to `.drover/arch.toml`, and raises that file's own `[[size]]` rule from 480 to 540:
+Slice 3 adds to `.drover/arch.toml`, and raises that file's own `[[size]]` rule from 480 to 540:
 
 ```toml
 [[layer]]
@@ -216,16 +301,20 @@ dir = "crates/shed-cloud/providers"
 glob = "*.toml"
 
 [[collect]]
+dir = "crates/shed-cloud/git"
+glob = "*.toml"
+
+[[collect]]
 dir = "docs/cloud"
 glob = "*.md"
 ```
 
 In the same slice two existing bans each gain one `except` entry: `env::var` gains
 `"crates/shed-cloud/src/paths.rs"`, and `.expose()` gains `"crates/shed-cloud/src/exec.rs"` (its `reason` gains
-"or a provider's key and a runner token into a verb's stdin"). No other ban changes: the helper starts processes
-through `shed_core::runner` and reads the time through `shed_core::clock`, like every crate.
+"or a provider's key, a runner token and a git token into a verb's stdin"). No other ban changes: the helper
+starts processes through `shed_core::runner` and reads the time through `shed_core::clock`, like every crate.
 
-Slice 2 also adds the gate `.gatekeeper/gates/cloud-free.toml` (a new file in a collected folder):
+Slice 3 also adds the gate `.gatekeeper/gates/cloud-free.toml` (a new file in a collected folder):
 
 ```toml
 about = "#307: shed and the crates it uses do not depend on shed-cloud, and shed-cloud links no server"
