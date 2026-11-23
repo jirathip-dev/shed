@@ -233,6 +233,71 @@ fn a_changed_host_key_keeps_the_link_down_until_it_is_fixed() {
 }
 
 #[test]
+fn a_pinned_key_that_changes_holds_the_link_until_a_re_pin_with_replace() {
+    let root = temp_dir("fault-pinned");
+    let _servers = linked(&root);
+    let vm = "ssh://user@vm.example:2222";
+    shed_at(&root, "user@vm.example-2222", "remote");
+    let add = |key: &str, more: &[&str]| {
+        let key = format!("ssh-ed25519 {key}");
+        let args = [
+            "machine",
+            "add",
+            "vm",
+            vm,
+            "--host-key",
+            &key,
+            "--identity",
+            "~/.ssh/vm",
+        ];
+        shed_on(&root, &[&args[..], more].concat())
+            .output()
+            .expect("machine add")
+    };
+    assert!(add("AAAAold", &[]).status.success());
+    until("vm's link", CALL_BOUND, || up(&root, "vm"));
+    let listed = ok(&root, &["--json", "machine", "ls"]);
+    assert!(
+        listed.contains(r#""host_key":"ssh-ed25519 AAAAold","identity":"~/.ssh/vm""#),
+        "{listed}"
+    );
+    let log = std::fs::read_to_string(root.join("bin/ssh.log")).expect("ssh.log");
+    let dial = log.lines().find(|l| l.contains(vm)).expect("a dial to vm");
+    for option in [
+        "HostKeyAlias=vm",
+        "StrictHostKeyChecking=yes",
+        "IdentityFile=~/.ssh/vm",
+        "IdentitiesOnly=yes",
+    ] {
+        assert!(
+            dial.contains(&format!("-o {option} ")),
+            "{option} in {dial}"
+        );
+    }
+    let known = dial
+        .split("UserKnownHostsFile=")
+        .nth(1)
+        .and_then(|k| k.split(' ').next());
+    let known = std::fs::read_to_string(known.expect("a known-hosts file")).expect("it is written");
+    assert_eq!(known, "vm ssh-ed25519 AAAAold\n");
+    fault(&root, &format!("{vm} cut\n"));
+    until("vm marked not up", Duration::from_secs(3), || {
+        !up(&root, "vm")
+    });
+    fault(&root, &format!("{vm} rekey AAAAnew\n"));
+    until("the link held over the key", CALL_BOUND, || {
+        link(&root, "vm")["error"]
+            .as_str()
+            .is_some_and(|e| e.starts_with("KEY_CHANGED: vm"))
+    });
+    let (out, _) = within(Duration::from_secs(2), &root, &["--on", "vm", "ls"]);
+    refused(&out, "KEY_CHANGED");
+    refused(&add("AAAAnew", &[]), "--replace");
+    assert!(add("AAAAnew", &["--replace"]).status.success());
+    until("vm up on the new key", CALL_BOUND, || up(&root, "vm"));
+}
+
+#[test]
 #[ignore = "TODO(#309): a finished terminal still holds its name"]
 fn a_finished_terminal_is_not_ambiguous_its_name_runs_again() {
     let root = temp_dir("symptom-finished");

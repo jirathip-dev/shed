@@ -541,6 +541,66 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_pinned_key_holds_the_machine_and_a_re_pin_relinks_it() {
+        let state = crate::temp_dir("flows-machine").join("state.json");
+        let mut runner = Runner::new(&state);
+        let vm = |key: &str| machines::Machine {
+            name: "vm".into(),
+            target: "ssh://user@vm.example:2222".into(),
+            host_key: Some(format!("ssh-ed25519 {key}")),
+            identity: None,
+        };
+        let refused = crate::Error::KeyChanged {
+            machine: "vm".into(),
+        };
+        let link = |state, error: Option<String>| {
+            let link = shed_proto::Link {
+                state,
+                error,
+                ..Default::default()
+            };
+            BTreeMap::from([("vm".to_owned(), link)])
+        };
+        use shed_proto::flow::machine::State as machine_state;
+        let mut o = out(0);
+        for (now, key, links, held) in [
+            (0, "AAAAold", link(LinkState::Up, None), None),
+            (10, "AAAAold", link(LinkState::Down, None), None),
+            (
+                20,
+                "AAAAold",
+                link(LinkState::Down, Some(refused.to_string())),
+                Some(machine_state::KeyChanged),
+            ),
+            (
+                30,
+                "AAAAnew",
+                link(LinkState::Down, None),
+                Some(machine_state::Offline),
+            ),
+        ] {
+            o.now = now;
+            let seen = machine::observe(&[vm(key)], &links, &runner.machine.seen);
+            runner.machine.observe(seen, &mut o);
+            let tracker = &runner.machine.subjects["vm"].tracker;
+            if let Some(held) = held {
+                assert_eq!(tracker.state(), held, "at {now}");
+            }
+        }
+        let fired = &runner.machine.report.fired;
+        for (row, n) in [("M1", 1), ("M4", 1), ("M5", 2), ("M10", 1), ("M8", 1)] {
+            assert_eq!(fired.get(row), Some(&n), "{row} in {fired:?}");
+        }
+        assert!(runner.machine.report.unexpected.is_empty());
+        let links = link(LinkState::Down, Some(refused.to_string()));
+        let seen = link::observe(
+            &links,
+            &BTreeMap::from([("vm".into(), "reconnecting".into())]),
+        );
+        assert_eq!(seen[0].facts, [shed_proto::flow::link::Fact::Refused]);
+    }
+
+    #[test]
     fn a_name_removed_and_run_again_between_two_looks_is_running_again_with_no_line() {
         let state = crate::temp_dir("flows-reborn").join("state.json");
         let info = |state: &str| {

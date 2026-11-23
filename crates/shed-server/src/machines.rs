@@ -6,10 +6,11 @@
 //! ```toml
 //! [machines]
 //! box = "user@box.example"
+//! boat1 = { target = "ssh://user@vm.example:2222", host_key = "ssh-ed25519 AAAA…", identity = "~/.ssh/vm" }
 //! ```
 //!
-//! Names are letters, digits, `-` and `_`; targets are plain strings without quotes, backslashes or
-//! spaces. Anything else is an error that names the line.
+//! Names are letters, digits, `-` and `_`; targets and identities are plain strings without quotes,
+//! backslashes, commas, braces or spaces, a host key two of those. Anything else is an error that names the line.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -28,7 +29,8 @@ use serde_json::Value;
 
 use crate::Error;
 use crate::proto::{
-    BUILD, ErrorCode, ExecParams, ExecResult, MachineStats, Method, RpcError, StatsParams,
+    BUILD, ErrorCode, ExecParams, ExecResult, Link, MachineParams, MachineStats, Method, RpcError,
+    StatsParams,
 };
 use shed_client::Conn;
 use shed_core::runner::Child;
@@ -37,13 +39,21 @@ const CONNECT_TIMEOUT: u32 = 10;
 const HELLO_TIMEOUT: Duration = Duration::from_secs(20);
 static WRITES: AtomicU64 = AtomicU64::new(0);
 
-/// A machine: a name and the `ssh` target it stands for.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Machine {
-    /// The name `--on` takes.
-    pub name: String,
-    /// The `ssh` target, `[user@]host`.
-    pub target: String,
+pub use crate::proto::Machine;
+
+pub(crate) fn entry(m: &Machine) -> String {
+    if m.host_key.is_none() && m.identity.is_none() {
+        return format!("\"{}\"", m.target);
+    }
+    let mut fields = vec![format!("target = \"{}\"", m.target)];
+    fields.extend(m.host_key.iter().map(|k| format!("host_key = \"{k}\"")));
+    let identity = m.identity.iter().map(|i| i.display());
+    fields.extend(identity.map(|i| format!("identity = \"{i}\"")));
+    format!("{{ {} }}", fields.join(", "))
+}
+
+pub(crate) fn key_changed(link: &Link) -> bool {
+    (link.error.as_deref()).is_some_and(|e| e.starts_with("KEY_CHANGED"))
 }
 
 fn bad_name(name: &str) -> bool {
@@ -58,13 +68,56 @@ fn bad_target(target: &str) -> bool {
         || target.starts_with('-')
         || target
             .chars()
-            .any(|c| c.is_whitespace() || c.is_control() || c == '"' || c == '\\')
+            .any(|c| c.is_whitespace() || c.is_control() || "\"\\,{}".contains(c))
+}
+
+fn check(m: &Machine) -> Result<(), Error> {
+    let key = |k: &String| k.split(' ').count() != 2 || k.split(' ').any(bad_target);
+    let identity = m.identity.as_deref().map(Path::to_string_lossy);
+    let bad = if bad_name(&m.name) {
+        format!("machine name {:?}: use letters, digits, - and _", m.name)
+    } else if bad_target(&m.target) {
+        format!(
+            "ssh target {:?}: use [user@]host or ssh://[user@]host[:port]",
+            m.target
+        )
+    } else if let Some(k) = m.host_key.as_ref().filter(|k| key(k)) {
+        format!("host key {k:?}: use `<type> <base64>`")
+    } else if let Some(i) = identity.filter(|i| bad_target(i)) {
+        format!("identity {i:?}: a key file path, no spaces or quotes")
+    } else {
+        return Ok(());
+    };
+    Err(Error::Config(bad))
+}
+
+fn parse(name: &str, value: &str) -> Option<Machine> {
+    let quoted = |v: &str| Some(v.trim().strip_prefix('"')?.strip_suffix('"')?.to_owned());
+    let mut m = Machine {
+        name: name.to_owned(),
+        ..Machine::default()
+    };
+    let Some(fields) = value.strip_prefix('{').and_then(|v| v.strip_suffix('}')) else {
+        m.target = quoted(value)?;
+        return Some(m);
+    };
+    for field in fields.split(',') {
+        let (key, v) = field.split_once('=')?;
+        let v = quoted(v)?;
+        match key.trim() {
+            "target" => m.target = v,
+            "host_key" => m.host_key = Some(v),
+            "identity" => m.identity = Some(v.into()),
+            _ => return None,
+        }
+    }
+    Some(m)
 }
 
 /// The machines in the config file at `path`; none when it does not exist.
 ///
 /// # Errors
-/// [`Error::Config`] on anything but the `[machines]` table of `name = "target"` lines;
+/// [`Error::Config`] on anything but the `[machines]` table of `name = "target"` or `name = { target = … }` lines;
 /// [`Error::Io`] when the file cannot be read.
 pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
     let text = match fs::read_to_string(path) {
@@ -100,13 +153,13 @@ pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
                 "unknown key {name}; put machines under [machines]"
             )));
         }
-        let target = value.strip_prefix('"').and_then(|v| v.strip_suffix('"'));
-        match target {
-            Some(target) if !bad_name(name) && !bad_target(target) => machines.push(Machine {
-                name: name.to_owned(),
-                target: target.to_owned(),
-            }),
-            _ => return Err(fail("expected name = \"ssh-target\"")),
+        match parse(name, value).filter(|m| check(m).is_ok()) {
+            Some(machine) => machines.push(machine),
+            None => {
+                return Err(fail(
+                    "expected name = \"ssh-target\" or name = { target = \"…\" }",
+                ));
+            }
         }
     }
     Ok(machines)
@@ -119,7 +172,7 @@ pub fn load(path: &Path) -> Result<Vec<Machine>, Error> {
 pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     let mut text = String::from("# shed machines; edit with `shed machine add|rm`.\n[machines]\n");
     for m in machines {
-        writeln!(text, "{} = \"{}\"", m.name, m.target).ok();
+        writeln!(text, "{} = {}", m.name, entry(m)).ok();
     }
     let old = fs::read_to_string(path).unwrap_or_default();
     let mut script = false;
@@ -145,36 +198,27 @@ pub fn save(path: &Path, machines: &[Machine]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Adds machine `name` for `target` to the config file at `path`; the same pair again changes nothing.
+/// Adds machine `p.name` to the config file at `path`; the same values again change nothing, other values
+/// replace its line only with `p.replace`.
 ///
 /// # Errors
-/// [`Error::Config`] for a bad name or target, or a name taken by another target; [`load`]'s and [`save`]'s.
-pub fn add(path: &Path, name: &str, target: &str) -> Result<Machine, Error> {
-    if bad_name(name) {
-        return Err(Error::Config(format!(
-            "machine name {name:?}: use letters, digits, - and _"
-        )));
-    }
-    if bad_target(target) {
-        return Err(Error::Config(format!(
-            "ssh target {target:?}: use [user@]host, no spaces or quotes"
-        )));
-    }
+/// [`Error::Config`] for a bad name, target, key or identity, or a name taken by other values without
+/// `replace`; [`load`]'s and [`save`]'s.
+pub fn add(path: &Path, p: &MachineParams) -> Result<Machine, Error> {
+    let machine = p.machine.clone();
+    check(&machine)?;
     let mut machines = load(path)?;
-    let machine = Machine {
-        name: name.to_owned(),
-        target: target.to_owned(),
-    };
-    match machines.iter().find(|m| m.name == name) {
+    match machines.iter_mut().find(|m| m.name == machine.name) {
         Some(m) if *m == machine => return Ok(machine),
+        Some(m) if p.replace => m.clone_from(&machine),
         Some(_) => {
             return Err(Error::Config(format!(
-                "machine {name} exists; `shed machine rm {name}` first"
+                "machine {} exists with other values; `--replace` moves it",
+                machine.name
             )));
         }
-        None => {}
+        None => machines.push(machine.clone()),
     }
-    machines.push(machine.clone());
     save(path, &machines)?;
     Ok(machine)
 }
@@ -291,15 +335,17 @@ fn dial(
         .mode(0o700)
         .create(control_dir)
         .ok();
-    let mut args = vec![];
-    for option in [
+    let options = [
         "BatchMode=yes".to_owned(),
         format!("ConnectTimeout={CONNECT_TIMEOUT}"),
         "ControlMaster=auto".to_owned(),
         format!("ControlPath={}", control_dir.join("ssh-%C").display()),
         "ControlPersist=60".to_owned(),
-    ] {
-        args.extend(["-o".to_owned(), option]);
+    ];
+    let mut args = ssh_options(machine, control_dir, options.into());
+    let log = control_dir.join(format!("{}.ssh.log", machine.name));
+    if machine.host_key.is_some() && fs::write(&log, "").is_ok() {
+        args.extend(["-E".to_owned(), log.display().to_string()]);
     }
     args.extend(["--", &machine.target, "shed", "connect"].map(str::to_owned));
     if autostart {
@@ -329,6 +375,15 @@ fn dial(
                 there,
             })
         }
+        Err(shed_client::Error::Bad(_) | shed_client::Error::Io { .. })
+            if machine.host_key.is_some()
+                && fs::read_to_string(&log)
+                    .is_ok_and(|t| t.contains("Host key verification failed")) =>
+        {
+            Err(Error::KeyChanged {
+                machine: machine.name.clone(),
+            })
+        }
         Err(shed_client::Error::Bad(_) | shed_client::Error::Io { .. }) => {
             Err(Error::Unreachable {
                 machine: machine.name.clone(),
@@ -341,6 +396,32 @@ fn dial(
             Ok((conn, ssh, line))
         }
     }
+}
+
+pub(crate) fn ssh_options(
+    machine: &Machine,
+    control_dir: &Path,
+    mut options: Vec<String>,
+) -> Vec<String> {
+    if let Some(key) = &machine.host_key {
+        let known = control_dir.join(format!("{}.known_hosts", machine.name));
+        fs::write(&known, format!("{} {key}\n", machine.name)).ok();
+        options.extend([
+            format!("HostKeyAlias={}", machine.name),
+            format!("UserKnownHostsFile={}", known.display()),
+            "StrictHostKeyChecking=yes".to_owned(),
+        ]);
+    }
+    if let Some(identity) = &machine.identity {
+        options.extend([
+            format!("IdentityFile={}", identity.display()),
+            "IdentitiesOnly=yes".to_owned(),
+        ]);
+    }
+    options
+        .into_iter()
+        .flat_map(|o| ["-o".to_owned(), o])
+        .collect()
 }
 
 pub(crate) fn facts(calls: &mut Conn) -> [Option<String>; 3] {
@@ -453,6 +534,64 @@ mod tests {
         crate::temp_dir(&format!("machines-{name}"))
     }
 
+    fn plain(name: &str, target: &str) -> MachineParams {
+        let machine = Machine {
+            name: name.into(),
+            target: target.into(),
+            ..Machine::default()
+        };
+        MachineParams {
+            machine,
+            replace: false,
+        }
+    }
+
+    fn keyed(p: MachineParams, key: &str) -> MachineParams {
+        let host_key = Some(key.to_owned());
+        let machine = Machine {
+            host_key,
+            ..p.machine
+        };
+        MachineParams { machine, ..p }
+    }
+
+    #[test]
+    fn a_pinned_machine_is_a_table_line_and_moves_only_with_replace() {
+        let path = dir("pinned").join("config.toml");
+        let mut pinned = keyed(
+            plain("boat1", "ssh://user@vm.example:2222"),
+            "ssh-ed25519 AAAAold",
+        );
+        pinned.machine.identity = Some("~/.ssh/vm".into());
+        add(&path, &plain("box", "user@box.example")).unwrap();
+        add(&path, &pinned).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("box = \"user@box.example\"\nboat1 = { target = \"ssh://user@vm.example:2222\", host_key = \"ssh-ed25519 AAAAold\", identity = \"~/.ssh/vm\" }\n"), "{text}");
+        let boat = find(&path, "boat1").unwrap();
+        assert_eq!(boat.host_key.as_deref(), Some("ssh-ed25519 AAAAold"));
+        assert_eq!(boat.identity, Some(std::path::PathBuf::from("~/.ssh/vm")));
+        add(&path, &pinned).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            text,
+            "the same values twice are one"
+        );
+        let rekeyed = keyed(pinned.clone(), "ssh-ed25519 AAAAnew");
+        assert!(matches!(add(&path, &rekeyed), Err(Error::Config(_))));
+        assert_eq!(fs::read_to_string(&path).unwrap(), text);
+        add(
+            &path,
+            &MachineParams {
+                replace: true,
+                ..rekeyed
+            },
+        )
+        .unwrap();
+        let boat = find(&path, "boat1").unwrap();
+        assert_eq!(boat.host_key.as_deref(), Some("ssh-ed25519 AAAAnew"));
+        assert_eq!(load(&path).unwrap().len(), 2);
+    }
+
     #[test]
     fn the_script_table_is_skipped_and_kept() {
         let path = dir("script").join("config.toml");
@@ -462,7 +601,7 @@ mod tests {
             format!("[machines]\nbox = \"box.example\"\n{script}"),
         )
         .unwrap();
-        add(&path, "b2", "b2.example").unwrap();
+        add(&path, &plain("b2", "b2.example")).unwrap();
         let names: Vec<String> = load(&path).unwrap().into_iter().map(|m| m.name).collect();
         assert_eq!(names, ["box", "b2"]);
         assert!(fs::read_to_string(&path).unwrap().ends_with(script));
@@ -472,13 +611,16 @@ mod tests {
     fn add_ls_rm_round_trip_through_the_file() {
         let path = dir("round").join("config.toml");
         assert_eq!(load(&path).unwrap(), vec![]);
-        add(&path, "box", "user@box.example").unwrap();
-        add(&path, "b2", "b2.example").unwrap();
+        add(&path, &plain("box", "user@box.example")).unwrap();
+        add(&path, &plain("b2", "b2.example")).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("[machines]\nbox = \"user@box.example\"\nb2 = \"b2.example\"\n"));
         assert_eq!(find(&path, "b2").unwrap().target, "b2.example");
-        assert!(matches!(add(&path, "box", "x"), Err(Error::Config(_))));
-        add(&path, "box", "user@box.example").unwrap();
+        assert!(matches!(
+            add(&path, &plain("box", "x")),
+            Err(Error::Config(_))
+        ));
+        add(&path, &plain("box", "user@box.example")).unwrap();
         assert_eq!(
             fs::read_to_string(&path).unwrap(),
             text,
@@ -500,6 +642,7 @@ mod tests {
                         let m = Machine {
                             name: format!("m{t}"),
                             target: format!("h{n}.example"),
+                            ..Machine::default()
                         };
                         save(path, &[m]).unwrap();
                     }
@@ -540,7 +683,14 @@ mod tests {
             ("a", "h\""),
             ("a", "h x"),
         ] {
-            assert!(matches!(add(&path, name, target), Err(Error::Config(_))));
+            assert!(matches!(
+                add(&path, &plain(name, target)),
+                Err(Error::Config(_))
+            ));
+        }
+        for key in ["ssh-ed25519", "ssh-ed25519 AAAA x", "ssh-ed25519 AA,AA"] {
+            let p = keyed(plain("a", "h"), key);
+            assert!(matches!(add(&path, &p), Err(Error::Config(_))), "{key}");
         }
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         for (text, hint) in [
@@ -548,6 +698,14 @@ mod tests {
             ("box = \"h\"\n", "unknown key box"),
             ("[machines]\nbox = h\n", ":2: expected"),
             ("[machines]\nbox\n", ":2: expected"),
+            (
+                "[machines]\nbox = { target = \"h\", port = \"2\" }\n",
+                ":2: expected",
+            ),
+            (
+                "[machines]\nbox = { host_key = \"ssh-ed25519 AAAA\" }\n",
+                ":2: expected",
+            ),
         ] {
             fs::write(&path, text).unwrap();
             let e = load(&path).unwrap_err().to_string();

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """A fake `ssh` that joins a target to a shed in a temp folder and applies the faults a file names (#308).
 
-Put it first on PATH as `ssh`. `ssh [-o K=V]... [-R remote:local] [--] TARGET CMD...` runs CMD with
-HOSTS/TARGET first on PATH (HOSTS is $FAKE_LINK_HOSTS, else the parent of this file's folder), relaying stdin
+Put it first on PATH as `ssh`. `ssh [-o K=V]... [-E LOG] [-R remote:local] [--] TARGET CMD...` runs CMD with
+HOSTS/TARGET first on PATH (`ssh://[user@]host[:port]` as `[user@]host[-port]`) (HOSTS is $FAKE_LINK_HOSTS, else the parent of this file's folder), relaying stdin
 and stdout through the faults. With `-R remote:local` it relays the unix socket `remote` to `local` until
 stdin ends. Each call's arguments but a forward's are appended to `ssh.log` and each byte sent toward a target to
-`sent.bytes`, both beside this file.
+`sent.bytes`, both beside this file. A failure's message goes to LOG with `-E`, else to stderr.
 
 The faults file ($FAKE_LINK_FAULTS, else `faults` beside this file) is read again on every chunk and every
 connect, so a test changes a fault by rewriting it. One fault a line, `TARGET|* FAULT [VALUE]`:
@@ -17,7 +17,8 @@ connect, so a test changes a fault by rewriting it. One fault a line, `TARGET|* 
   cut          open links close and new ones fail at once (exit 255)
   gone         the host is gone: open links hang, new ones fail after ConnectTimeout (or VALUE) seconds
   moved OTHER  the address now reaches OTHER: open links hang, new ones reach OTHER
-  rekey        the host key changed: new links fail (exit 255), open ones go on
+  rekey [KEY]  the host key changed: new links fail (exit 255), open ones go on; with KEY, a link whose
+               UserKnownHostsFile holds KEY connects
 """
 
 import os
@@ -32,6 +33,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOSTS = os.environ.get("FAKE_LINK_HOSTS") or os.path.dirname(HERE)
 FAULTS = os.environ.get("FAKE_LINK_FAULTS") or os.path.join(HERE, "faults")
 POLL = 0.05
+LOG = []
 
 
 def faults(target):
@@ -49,17 +51,25 @@ def faults(target):
 
 def fail(message):
     try:
-        sys.stderr.write(message + "\n")
-        sys.stderr.flush()
+        with open(LOG[0], "a") if LOG else os.fdopen(os.dup(2), "w") as out:
+            out.write(message + "\n")
     finally:
         os._exit(255)
+
+
+def pinned(key, options):
+    try:
+        with open(options.get("UserKnownHostsFile", "")) as f:
+            return bool(key) and key in f.read().split()
+    except OSError:
+        return False
 
 
 def connect(target, options):
     found, _ = faults(target)
     if "cut" in found:
         fail(f"ssh: connect to host {target} port 22: Connection refused")
-    if "rekey" in found:
+    if "rekey" in found and not pinned(found["rekey"], options):
         fail("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@\nHost key verification failed.")
     if "gone" in found:
         time.sleep(float(found["gone"] or options.get("ConnectTimeout", "10")))
@@ -146,10 +156,12 @@ def main():
     args = sys.argv[1:]
     line = " ".join(args) + "\n"
     options, spec = {}, None
-    while args[:1] in (["-o"], ["-R"]):
+    while args[:1] in (["-o"], ["-E"], ["-R"]):
         flag, value, args = args[0], args[1], args[2:]
         if flag == "-o":
             key, _, options[key] = value.partition("=")
+        elif flag == "-E":
+            LOG.append(value)
         else:
             spec = value
     if args[:1] == ["--"]:
@@ -162,7 +174,8 @@ def main():
     threading.Thread(target=watch, args=(target,), daemon=True).start()
     if spec:
         forward(spec, target, reached)
-    path = os.path.join(HOSTS, reached) + os.pathsep + os.environ.get("PATH", "")
+    folder = reached.removeprefix("ssh://").replace(":", "-") if reached.startswith("ssh://") else reached
+    path = os.path.join(HOSTS, folder) + os.pathsep + os.environ.get("PATH", "")
     child = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env={**os.environ, "PATH": path})
 
     def up():

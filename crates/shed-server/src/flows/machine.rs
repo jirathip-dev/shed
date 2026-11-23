@@ -25,17 +25,21 @@ pub(crate) fn observe(
     was: &BTreeMap<String, String>,
 ) -> Vec<Seen<Machine>> {
     let one = |m: &machines::Machine| {
-        let link = links.get(&m.name).map(|l| l.state);
-        let mut facts: Vec<_> = (!was.contains_key(&m.name))
-            .then_some(Fact::Listed)
-            .into_iter()
-            .collect();
-        facts.extend(match link {
-            Some(LinkState::Up) => Some(Fact::LinkUp),
-            Some(LinkState::Down) => Some(Fact::LinkDown),
+        let entry = machines::entry(m);
+        let link = match links.get(&m.name) {
+            Some(l) if machines::key_changed(l) => Some(Fact::KeyMismatch),
+            Some(l) if l.state == LinkState::Up => Some(Fact::LinkUp),
+            Some(l) if l.state == LinkState::Down => Some(Fact::LinkDown),
             _ => None,
-        });
-        Seen::new(m.name.clone(), format!("{link:?}"), facts, "listed", LISTED)
+        };
+        let mut facts = match was.get(&m.name).map(|w| w.split_once('|')) {
+            None => vec![Fact::Listed],
+            Some(Some((_, e))) if e != entry => vec![Fact::Change],
+            Some(_) => vec![],
+        };
+        facts.extend(link);
+        let view = format!("{link:?}|{entry}");
+        Seen::new(m.name.clone(), view, facts, "listed", LISTED)
     };
     listed.iter().map(one).collect()
 }

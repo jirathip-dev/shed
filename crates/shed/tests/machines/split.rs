@@ -5,7 +5,8 @@ use std::process::Command;
 
 use shed_client::{Calls as _, Shed};
 use shed_server::proto::{
-    ErrorCode, ExecParams, FileParams, LinkState, PROTOCOL, Proc, StatsParams,
+    ErrorCode, ExecParams, FileParams, LinkState, Machine, MachineParams, PROTOCOL, Proc,
+    StatsParams,
 };
 
 use crate::common::{self, Server, temp_dir};
@@ -24,10 +25,18 @@ fn machine_add_links_file_mode_exec_env_procs_and_top_then_machine_rm() {
     let _local = Server::with_env(&root.join("local"), "3600", &[("PATH", &path)]);
     let shed = Shed::at(shed_server::Paths::in_dir(&root.join("local")).socket);
 
-    shed.machine_add("box", "user@box.example").expect("add");
-    shed.machine_add("box", "user@box.example")
+    let add = |target: &str| MachineParams {
+        machine: Machine {
+            name: "box".into(),
+            target: target.into(),
+            ..Machine::default()
+        },
+        replace: false,
+    };
+    shed.machine_add(&add("user@box.example")).expect("add");
+    shed.machine_add(&add("user@box.example"))
         .expect("the same pair twice is one machine");
-    let taken = shed.machine_add("box", "other.example").unwrap_err();
+    let taken = shed.machine_add(&add("other.example")).unwrap_err();
     assert_eq!(taken.code(), Some(ErrorCode::InvalidParams), "{taken}");
     common::eventually("the link to box", || {
         shed.links().expect("links")["box"].state == LinkState::Up

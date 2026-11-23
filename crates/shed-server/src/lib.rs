@@ -89,6 +89,15 @@ pub enum Error {
         /// The build of the server on the machine.
         there: String,
     },
+    /// `ssh` refused the machine's host key: it is not the pinned one. Its link is held until a re-pin.
+    #[error(
+        "KEY_CHANGED: {machine} answered with another host key than the pinned one; its link is held \
+         until `shed machine add {machine} <target> --host-key <key> --replace`"
+    )]
+    KeyChanged {
+        /// The machine.
+        machine: String,
+    },
     /// `ssh` or the shed on a machine gave no answer.
     #[error(
         "no answer from shed on {machine}; check that `ssh {target} shed hello` works with key login \

@@ -1,11 +1,11 @@
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
 use serde::Serialize;
 use shed_client::Calls as _;
 use shed_server::machines::{self, Machine};
-use shed_server::proto::{Link, MachineStats, StatsParams};
+use shed_server::proto::{Link, MachineParams, MachineStats, StatsParams};
 use shed_server::runner::ExitCode;
 
 use crate::cx::{Cx, On, links};
@@ -21,6 +21,12 @@ enum Action {
     Add {
         name: String,
         target: String,
+        #[arg(long, value_name = "KEY")]
+        host_key: Option<String>,
+        #[arg(long, value_name = "FILE")]
+        identity: Option<PathBuf>,
+        #[arg(long)]
+        replace: bool,
     },
     Ls,
     Rm {
@@ -42,8 +48,20 @@ pub fn on(args: &Args) -> On {
 pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
     let paths = cx.paths;
     match args.command {
-        Action::Add { name, target } => {
-            let m = machines::add(&paths.config, &name, &target)?;
+        Action::Add {
+            name,
+            target,
+            host_key,
+            identity,
+            replace,
+        } => {
+            let machine = Machine {
+                name,
+                target,
+                host_key,
+                identity,
+            };
+            let m = machines::add(&paths.config, &MachineParams { machine, replace })?;
             links(paths);
             cx.print(&m, || format!("{} added\n", m.name))
         }

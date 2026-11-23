@@ -82,14 +82,32 @@ pub struct StatsParams {
     pub machine: Option<String>,
 }
 
+/// A machine: a name, the `ssh` target it stands for, and the host key and key file it is dialed with.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Machine {
+    /// The machine's name, as `--on` takes it.
+    pub name: String,
+    /// Its `ssh` target, `[user@]host` or `ssh://[user@]host[:port]`.
+    pub target: String,
+    /// The one host key it may answer with, `<type> <base64>`; pinned under the machine's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<String>,
+    /// The one key file to offer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<PathBuf>,
+}
+
 /// `machine.add` params.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct MachineParams {
-    /// The machine's name.
-    pub name: String,
-    /// Its `ssh` target, `[user@]host`.
-    pub target: String,
+    /// The machine.
+    #[serde(flatten)]
+    pub machine: Machine,
+    /// A taken name moves to these values and its link starts again; without it another value is `INVALID_PARAMS`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub replace: bool,
 }
 
 /// One process, as `terminal.procs` and `machine.stats`'s `top` report it.

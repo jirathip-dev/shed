@@ -124,7 +124,7 @@ impl Links {
             return;
         };
         let mut held = lock(&self.held);
-        held.retain(|name, _| machines.iter().any(|m| m.name == *name));
+        held.retain(|_, h| machines.contains(&h.machine));
         for machine in machines {
             if held.contains_key(&machine.name) {
                 continue;
@@ -241,9 +241,9 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
                     let relay = calls.call(Method::ProxyRelay, &serde_json::json!({})).ok();
                     *lock(&held.calls) = Some(calls);
                     held.set(LinkState::Up, None);
-                    let (to, local) = (Arc::clone(held), crate::proxy::socket(control));
+                    let (to, at) = (Arc::clone(held), control.to_owned());
                     let there = machine.clone();
-                    std::thread::spawn(move || crate::proxy::forward(&to, &there, &local, relay));
+                    std::thread::spawn(move || crate::proxy::forward(&to, &there, &at, relay));
                     let (reader, writer) = events.split();
                     reader
                         .get_ref()
@@ -277,9 +277,12 @@ fn hold(registry: &Shared, machine: &Machine, control: &Path, held: &Arc<Held>) 
             }
             Err(e) => {
                 let reconnecting = lock(&held.link).state == LinkState::Reconnecting;
-                let version = matches!(e, Error::MachineVersion { .. });
-                if version || !reconnecting {
+                let key = matches!(e, Error::KeyChanged { .. });
+                if key || matches!(e, Error::MachineVersion { .. }) || !reconnecting {
                     held.set(LinkState::Down, Some(e.to_string()));
+                }
+                if key {
+                    return;
                 }
             }
         }

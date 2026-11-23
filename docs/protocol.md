@@ -2,7 +2,7 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
-Version: `0.0.0`, protocol `5`, oldest served `1`.
+Version: `0.0.0`, protocol `6`, oldest served `1`.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
@@ -245,8 +245,8 @@ Keep the connection alive. Once a connection sends one, the server closes it whe
 The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":5,"product":"shed","protocol":6,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":5,"product":"shed","protocol":6,"version":"0.0.0"}}
 ```
 
 ### `keys`
@@ -278,10 +278,10 @@ List terminals, by name; `labels` keeps those that carry every given label, `par
 
 ### `machine.add`
 
-Add a machine to the config file, as `shed machine add` does, and start holding its link; the same name and target again is the same machine, another target under a taken name `INVALID_PARAMS`.
+Add a machine to the config file, as `shed machine add` does, and start holding its link; the same values again are the same machine, other values under a taken name `INVALID_PARAMS`, or with `replace` its new line and a new link. `target` takes `ssh://[user@]host[:port]`; with `host_key` the link dials only that key, pinned under the machine's name (another key holds the link down with `KEY_CHANGED` until a re-pin); with `identity` it offers only that key file.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"machine.add","params":{"name":"box","target":"user@box.example"}}
+{"jsonrpc":"2.0","id":1,"method":"machine.add","params":{"host_key":"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOTm","identity":"~/.ssh/vm","name":"boat1","replace":true,"target":"ssh://user@vm.example:2222"}}
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
@@ -291,7 +291,7 @@ Each configured machine's held link: `up`, `reconnecting` or `down`, since when,
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":5,"version":"0.0.0"},"home":"/home/user","os":"linux","proxy":41234,"since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":6,"version":"0.0.0"},"home":"/home/user","os":"linux","proxy":41234,"since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
 ```
 
 ### `machine.rm`
@@ -372,7 +372,7 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":5},"openrpc":"1.3.2"}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":6},"openrpc":"1.3.2"}}
 ```
 
 ### `run`
@@ -565,5 +565,5 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32700 | `PARSE` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 6-7 / server 56de739 protocol 4-5; update the server and restart shed serve"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 7-8 / server 56de739 protocol 5-6; update the server and restart shed serve"}}
 ```

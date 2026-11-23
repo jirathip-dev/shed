@@ -228,10 +228,9 @@ pub trait Calls {
         typed(self, Method::MachineLinks, &Map::new())
     }
 
-    /// Adds a machine and holds its link; the same pair twice is one machine.
-    fn machine_add(&self, name: &str, target: &str) -> Result<(), Error> {
-        let (name, target) = (name.to_owned(), target.to_owned());
-        unit(self, Method::MachineAdd, &MachineParams { name, target })
+    /// Adds a machine and holds its link; the same values twice are one machine, other values need `replace`.
+    fn machine_add(&self, params: &MachineParams) -> Result<(), Error> {
+        unit(self, Method::MachineAdd, params)
     }
 
     /// Removes a machine and drops its link.

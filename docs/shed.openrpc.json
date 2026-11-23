@@ -3,7 +3,7 @@
   "info": {
     "title": "shed",
     "version": "0.0.0",
-    "x-protocol": 5
+    "x-protocol": 6
   },
   "methods": [
     {
@@ -1486,7 +1486,7 @@
     },
     {
       "name": "machine.add",
-      "description": "Add a machine to the config file, as `shed machine add` does, and start holding its link; the same name and target again is the same machine, another target under a taken name `INVALID_PARAMS`.",
+      "description": "Add a machine to the config file, as `shed machine add` does, and start holding its link; the same values again are the same machine, other values under a taken name `INVALID_PARAMS`, or with `replace` its new line and a new link. `target` takes `ssh://[user@]host[:port]`; with `host_key` the link dials only that key, pinned under the machine's name (another key holds the link down with `KEY_CHANGED` until a re-pin); with `identity` it offers only that key file.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1502,7 +1502,37 @@
           "required": true,
           "schema": {
             "type": "string",
-            "description": "Its `ssh` target, `[user@]host`."
+            "description": "Its `ssh` target, `[user@]host` or `ssh://[user@]host[:port]`."
+          }
+        },
+        {
+          "name": "host_key",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one host key it may answer with, `<type> <base64>`; pinned under the machine's name."
+          }
+        },
+        {
+          "name": "identity",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The one key file to offer."
+          }
+        },
+        {
+          "name": "replace",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "A taken name moves to these values and its link starts again; without it another value is `INVALID_PARAMS`."
           }
         }
       ],

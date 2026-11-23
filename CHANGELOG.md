@@ -298,6 +298,9 @@ All notable changes to this project are documented here. The format follows
 - The flow tables run in shadow beside today's code: where they disagree, a line goes to `flow-shadow.jsonl`
   beside the state file; `shed flow report` (`flow.report`) shows rows fired, facts never seen, stuck rows and
   the disagreements by class, and `shed doctor` counts the last 24 h's.
+- `shed machine add --host-key --identity --replace` (`machine.add`'s `host_key`, `identity` and `replace`): a
+  machine takes `ssh://user@host:port`, dials only its pinned host key and offers only its key file; another key
+  holds its link down with `KEY_CHANGED` until a re-pin with `--replace`. Protocol 6.
 
 ### Changed
 

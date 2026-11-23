@@ -254,23 +254,22 @@ async fn go_on(links: &Links, terminal: &str) {
 pub(crate) fn forward(
     held: &Held,
     machine: &Machine,
-    local: &Path,
+    control: &Path,
     mut relay: Option<crate::proto::Relay>,
 ) {
     let up = || lock(&held.link).state == LinkState::Up;
     while let Some(r) = relay.take().filter(|_| up()) {
-        let spec = format!("{}:{}", r.socket.display(), local.display());
-        let mut args = vec![];
-        for option in [
+        let spec = format!("{}:{}", r.socket.display(), socket(control).display());
+        let options = [
             "BatchMode=yes",
             "ControlPath=none",
             "ExitOnForwardFailure=yes",
             "ServerAliveInterval=15",
             "StreamLocalBindMask=0177",
-        ] {
-            args.extend(["-o", option]);
-        }
-        args.extend(["-R", &spec, "--", &machine.target, "cat"]);
+        ];
+        let options = options.map(str::to_owned).into();
+        let mut args = crate::machines::ssh_options(machine, control, options);
+        args.extend(["-R", &spec, "--", &machine.target, "cat"].map(str::to_owned));
         let Ok((ours, theirs)) = UnixStream::pair() else {
             return;
         };

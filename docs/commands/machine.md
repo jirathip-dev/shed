@@ -1,4 +1,5 @@
-`shed --on <machine> …` / `shed machine add|ls|rm`
+`shed --on <machine> …` / `shed machine add [--host-key K] [--identity F] [--replace]|ls|rm`
 
 The same commands on another host over SSH (key login only).
 The server holds a link to each machine, so its terminals also show as `<machine>/<name>` in `ls` and `events` and take `get`, `read`, `send`, `keys`, `kill`, `wait`, `approve` and `cancel`, and `--on <machine> run --acp` starts an agent installed there; `machine ls --json` shows each link.
+`machine add box ssh://user@vm.example:2222 --host-key "ssh-ed25519 AAAA…" --identity ~/.ssh/vm` takes a port in the target, dials only that host key (pinned in a known-hosts file of shed's own, under the machine's name, `StrictHostKeyChecking=yes`) and offers only that key file (`IdentitiesOnly=yes`); the config line becomes `box = { target = "…", host_key = "…", identity = "…" }`. Another key from the host holds the link down with `KEY_CHANGED` and stops dialing; the same command with the new key and `--replace` re-pins it. Other values under a taken name need `--replace`, which moves the line and starts its link again.

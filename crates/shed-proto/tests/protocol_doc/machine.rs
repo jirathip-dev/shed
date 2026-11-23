@@ -5,8 +5,8 @@ use serde_json::{Value, json, to_value};
 use shed_proto::flow::{Class, Differs, FlowName, FlowReport, Mode};
 use shed_proto::{
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Hello, Link,
-    LinkState, MachineParams, MachineStats, Method, Proc, Report, ReportParams, Sample, Span,
-    StatsParams,
+    LinkState, Machine, MachineParams, MachineStats, Method, Proc, Report, ReportParams, Sample,
+    Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -162,8 +162,13 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
         ),
         Method::MachineAdd => (
             to_value(MachineParams {
-                name: "box".into(),
-                target: "user@box.example".into(),
+                machine: Machine {
+                    name: "boat1".into(),
+                    target: "ssh://user@vm.example:2222".into(),
+                    host_key: Some("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOTm".into()),
+                    identity: Some("~/.ssh/vm".into()),
+                },
+                replace: true,
             })
             .unwrap(),
             json!({}),

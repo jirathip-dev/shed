@@ -4,6 +4,7 @@ use shed_proto::LinkState;
 use shed_proto::flow::link::{Action, Fact, Link, State};
 
 use super::{Seen, Shadow};
+use crate::machines;
 
 impl Shadow for Link {
     const GONE: Option<Fact> = None;
@@ -15,7 +16,8 @@ pub(crate) fn observe(
     was: &BTreeMap<String, String>,
 ) -> Vec<Seen<Link>> {
     let one = |(id, link): (&String, &shed_proto::Link)| {
-        let dropped = was.get(id).is_some_and(|w| w == "reconnecting");
+        let dropped =
+            was.get(id).is_some_and(|w| w == "reconnecting") || machines::key_changed(link);
         let (fact, code, agrees): (_, _, &'static [State]) = match link.state {
             LinkState::Up => (Fact::Dialed, "up", &[State::Up, State::Slow]),
             LinkState::Reconnecting => (
