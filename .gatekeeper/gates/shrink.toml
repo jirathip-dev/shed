@@ -1,0 +1,11 @@
+about = "removed lines lower .drover/arch-baseline.txt, and a PR whose counted lines fell says the cap to lower to (scripts/shrink.py, against the base, #311); the fixtures prove the check bites"
+fix = "commit the lowered .drover/arch-baseline.txt that scripts/shrink.py wrote"
+budget_secs = 60
+setup = ["rust"]
+paths = ["crates/**", "ci/**", ".drover/arch.toml", ".drover/arch-baseline.txt", "scripts/shrink.py"]
+run = """
+set -eu
+DROVER={tool:drover} scripts/shrink.py {--base}
+! scripts/shrink.py ci/fixtures/shrink-lowered
+scripts/shrink.py ci/fixtures/shrink-grew
+"""

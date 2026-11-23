@@ -1,7 +1,8 @@
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    Account, AccountAdd, AccountName, AccountState, AccountsParams, Login, Method, TokenInfo,
-    Usage, Window,
+    Account, AccountAdd, AccountLogin, AccountMoves, AccountName, AccountState, AccountUse,
+    AccountsParams, KeyId, KeyState, Login, Method, ProxyKey, Relay, Stayed, TokenInfo, Usage,
+    Window,
 };
 
 fn work() -> Account {
@@ -13,6 +14,7 @@ fn work() -> Account {
         state: AccountState::Ready,
         who: Some("dev@example.com".into()),
         line: "signed in · claude.ai (dev@example.com)".into(),
+        drift: None,
         checked_at: Some(1_762_416_000),
         limited_until: None,
         usage: Some(Usage {
@@ -31,6 +33,7 @@ fn work() -> Account {
         setup: Vec::new(),
         runs: 1,
         login: None,
+        preferred: true,
     }
 }
 
@@ -62,7 +65,12 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
             to_value(vec![work()]).unwrap(),
         ),
         Method::AccountLogin => (
-            named(),
+            to_value(AccountLogin {
+                provider: "claude".into(),
+                name: "work".into(),
+                token: true,
+            })
+            .unwrap(),
             to_value(Login {
                 terminal: "login-claude-work".into(),
             })
@@ -70,6 +78,48 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
         ),
         Method::AccountStatus => (named(), to_value(work()).unwrap()),
         Method::AccountRm => (named(), json!({})),
+        Method::ProxyKeys => (
+            json!({}),
+            to_value(vec![ProxyKey {
+                id: "3f9a1c2e".into(),
+                terminal: "box/lane-256-impl".into(),
+                provider: "claude".into(),
+                account: "work".into(),
+                created: 1_762_416_000,
+                state: KeyState::Live,
+            }])
+            .unwrap(),
+        ),
+        Method::ProxyRevoke => (
+            to_value(KeyId {
+                id: "3f9a1c2e".into(),
+            })
+            .unwrap(),
+            json!({}),
+        ),
+        Method::ProxyRelay => (
+            json!({}),
+            to_value(Relay {
+                port: 41_234,
+                socket: "/run/user/1000/up-5e0c9a1f.sock".into(),
+            })
+            .unwrap(),
+        ),
+        Method::AccountUse => (
+            to_value(AccountUse {
+                provider: "claude".into(),
+                name: Some("work".into()),
+            })
+            .unwrap(),
+            to_value(AccountMoves {
+                moved: vec!["lane-1".into()],
+                stayed: vec![Stayed {
+                    terminal: "lane-2".into(),
+                    why: "on named account home".into(),
+                }],
+            })
+            .unwrap(),
+        ),
         _ => return None,
     })
 }

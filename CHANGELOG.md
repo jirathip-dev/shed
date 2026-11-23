@@ -245,6 +245,11 @@ All notable changes to this project are documented here. The format follows
 - The server's `script` method runs a program in shed's JavaScript subset beside the terminals: reads are
   called as they are, and every call that acts is first asked of the guard named in `[script]` of the
   config file (refused when none is named); the reply lists every acting call with its result.
+- `shed script -f <file>` and `shed script -` send a program to the server and print its logs and result;
+  `--check` only parses and compiles it, and `shed --on <machine> script` runs it there over a connection
+  of its own that ends with the run. `shed connect` now ends when whoever reads its output is gone, so a
+  script whose caller dropped the SSH session stops. `skill/script/` is the skill doc, with the methods list
+  generated from the protocol.
 - Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
   process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
   prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys
@@ -267,6 +272,9 @@ All notable changes to this project are documented here. The format follows
   picks, with `runs` and `limited_until`, and reads a stale usage again in the background; accounts with a run
   are read every `usage.fresh` seconds. A run on a limited account is refused `ACCOUNT_LIMITED`; `auto` with
   every account signed out is `ACCOUNT_SIGNED_OUT`.
+- A run on another machine can use an account: shed gives it a key for that one run, never the token, and the
+  token proxy on the main host signs its calls; `shed proxy keys|revoke` list and stop the keys, and
+  `shed account login --token` saves an account's setup token from the login screen.
 - The machine, file and process APIs an orchestrator needs to run work on other machines through shed:
   `file.write` takes a `mode` (set before any byte is written), `exec` an `env` (kept in memory only);
   `machine.links` reports each link's `down_since`, the shed there (`hello`) and the machine's `os`, `arch` and
@@ -277,6 +285,16 @@ All notable changes to this project are documented here. The format follows
 - Client releases: after a green push to main the release workflow tags `client-v<PROTOCOL>.<n>` when
   `shed-proto`, `shed-client` or `shed-catalog` changed since the last such tag, so clients can pin shed's client
   crates by tag (docs/releases.md). Starting the workflow by hand is a dry run that prints the tag it would push.
+- Keychain and credentials-file drift: `account.status`, the status beat (every account, `default` too) and the
+  end of `shed account login` compare the sha256 of an account's keychain item (read from shed serve's own
+  session) with its `.credentials.json`, in memory. When both exist and differ the account is `drifted`: its
+  line names the `shed account login` to run, `shed account ls` and `shed doctor` show it, and `auto` skips it.
+  A keychain that cannot be read leaves drift `unknown`. A provider record's new `[credentials]` table holds the
+  file, the keychain service and its per-folder suffix.
+- `shed account use <provider> <name>` (`account.use`): the owner's switch. It makes a ready named account the
+  one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
+  session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
+  preference, and `account ls` shows it.
 
 ### Changed
 
@@ -329,6 +347,8 @@ All notable changes to this project are documented here. The format follows
   the logs are `~/Library/Logs/dev.shed.serve.log` and `dev.shed.update.log`. `shed uninstall` unloads and
   removes both jobs instead of printing the lines, and `shed install` loads only a job that changed or is
   not loaded. The job templates in `dist/` are gone: their golden copies are farrier's `fixtures/units/`.
+- `shed serve` no longer moves an ACP transcript from the old `acp/` folder to its session on upgrade:
+  servers from before the sessions index (#183) upgrade through a release that has it.
 
 ### Fixed
 
@@ -352,3 +372,6 @@ All notable changes to this project are documented here. The format follows
 - An ACP or stream agent no longer inherits its lane's own variables (`SHED_ACP_HIBERNATE_AFTER`,
   `SHED_ACP_RESUME`, `SHED_ACP_MCP`, `SHED_ACP_META`), so a `shed serve` the agent starts, such as one in its
   tests, no longer picks up the lane's `--no-hibernate`.
+- `shed events` no longer drops agent text chunks for a reader that falls more than 256 chunks behind
+  but stays within the 4,096-event window: every chunk in the last 4,096 events is kept until it is read,
+  and only a reader past that window is dropped, with a `lagged` line.

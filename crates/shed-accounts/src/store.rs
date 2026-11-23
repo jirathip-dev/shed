@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
-use shed_proto::{Account, AccountAdd, AccountState, ErrorCode, Provider, RpcError, Usage};
+use shed_proto::{
+    Account, AccountAdd, AccountState, Drift, ErrorCode, Provider, RpcError, TokenInfo, Usage,
+};
 
 use crate::token::{self, Token};
 
@@ -34,6 +36,15 @@ pub struct Reading {
     /// When its last limit ends.
     #[serde(default)]
     pub limited_until: Option<u64>,
+    /// The `saved_at` of the token the proxy's upstream refused.
+    #[serde(default)]
+    pub rejected: Option<u64>,
+    /// What the last drift check found.
+    #[serde(default)]
+    pub drift: Option<Drift>,
+    /// `auto` picks it first while it is ready.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preferred: bool,
 }
 
 /// The accounts folder beside the state file.
@@ -69,6 +80,18 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 pub fn setup(provider: &Provider, folder: &Path) -> Vec<String> {
     let held = |f: &&String| fs::symlink_metadata(folder.join(f)).is_ok();
     provider.setup_files.iter().filter(held).cloned().collect()
+}
+
+fn line(provider: &Provider, name: &str, drift: Option<Drift>, status: String) -> String {
+    let file = (provider.credentials.as_ref()).map_or("", |c| c.file.as_str());
+    let p = &provider.agent;
+    match drift {
+        Some(Drift::Drifted) => {
+            format!("keychain and {file} disagree: run shed account login {p} {name}")
+        }
+        Some(Drift::Unknown) => "keychain not readable: drift unknown".to_owned(),
+        _ => status,
+    }
 }
 
 /// The login terminal's name.
@@ -171,6 +194,21 @@ impl Store {
         self.account(provider, &p.name)
     }
 
+    /// Saves `token` as the account's setup token (0600).
+    ///
+    /// # Errors
+    /// `NO_ACCOUNT`, or `IO` when the file cannot be written.
+    pub fn save_token(
+        &self,
+        provider: &Provider,
+        name: &str,
+        token: &Token,
+    ) -> Result<(), RpcError> {
+        self.folder(provider, name)?;
+        let path = self.token_file(provider, name);
+        token.save(&path).map_err(io(&path))
+    }
+
     /// The account as shed last read it.
     ///
     /// # Errors
@@ -180,9 +218,14 @@ impl Store {
         let key = format!("{}/{name}", provider.agent);
         let reading = self.readings().remove(&key).unwrap_or_default();
         let days = provider.token.as_ref().map(|t| t.days);
-        let token = token::info(&self.token_file(provider, name), days);
+        let token = token::info(&self.token_file(provider, name), days).map(|t| TokenInfo {
+            rejected: reading.rejected == Some(t.saved_at),
+            ..t
+        });
         let limited_until = (reading.limited_until).filter(|t| *t > shed_core::clock::unix_now());
+        let drifted = reading.drift == Some(Drift::Drifted);
         let state = match reading.state {
+            _ if drifted => AccountState::Drifted,
             _ if limited_until.is_some() => AccountState::Limited,
             AccountState::SignedOut if token.is_some_and(|t| !t.rejected) => AccountState::Ready,
             state => state,
@@ -198,13 +241,15 @@ impl Store {
             folder,
             state,
             who: reading.who,
-            line: reading.line,
+            line: line(provider, name, reading.drift, reading.line),
+            drift: reading.drift,
             checked_at: reading.checked_at,
             limited_until,
             usage: reading.usage,
             token,
             runs: 0,
             login: None,
+            preferred: reading.preferred,
         })
     }
 
@@ -231,6 +276,43 @@ impl Store {
         let key = format!("{}/{name}", provider.agent);
         self.update(|all| {
             all.insert(key, reading);
+        })
+    }
+
+    /// Marks the account's token refused by the proxy's upstream, until a new one is saved; whether it was not
+    /// marked yet.
+    ///
+    /// # Errors
+    /// `IO` when `accounts.json` cannot be written.
+    pub fn reject(&self, provider: &Provider, name: &str) -> Result<bool, RpcError> {
+        let Some(saved_at) =
+            token::info(&self.token_file(provider, name), None).map(|t| t.saved_at)
+        else {
+            return Ok(false);
+        };
+        let key = format!("{}/{name}", provider.agent);
+        let mut fresh = false;
+        self.update(|all| {
+            let reading = all.entry(key).or_default();
+            fresh = reading.rejected != Some(saved_at);
+            reading.rejected = Some(saved_at);
+        })?;
+        Ok(fresh)
+    }
+
+    /// Makes `name` the provider's one preferred account; none drops the preference.
+    ///
+    /// # Errors
+    /// `IO` when `accounts.json` cannot be written.
+    pub fn prefer(&self, provider: &Provider, name: Option<&str>) -> Result<(), RpcError> {
+        let ours = format!("{}/", provider.agent);
+        self.update(|all| {
+            for (key, reading) in all.iter_mut() {
+                reading.preferred &= !key.starts_with(&ours);
+            }
+            if let Some(name) = name {
+                all.entry(format!("{ours}{name}")).or_default().preferred = true;
+            }
         })
     }
 
@@ -334,6 +416,25 @@ pub(crate) mod tests {
         assert_eq!(names, ["default", "work"]);
         assert!(store.add(&p, &add("Work", None)).is_err());
         assert!(store.add(&p, &add("default", None)).is_err());
+    }
+
+    #[test]
+    fn one_account_is_preferred_and_none_clears_it() {
+        let dir = temp("store-prefer");
+        let store = Store::beside(&dir.path().join("state.json"));
+        let p = provider();
+        for name in ["a", "b"] {
+            store.add(&p, &add(name, None)).expect("added");
+        }
+        let preferred = |store: &Store| -> Vec<_> {
+            let held = store.ls(&p).into_iter().filter(|a| a.preferred);
+            held.map(|a| a.name).collect()
+        };
+        store.prefer(&p, Some("a")).expect("a");
+        store.prefer(&p, Some("b")).expect("b");
+        assert_eq!(preferred(&store), ["b"]);
+        store.prefer(&p, None).expect("cleared");
+        assert!(preferred(&store).is_empty());
     }
 
     #[test]

@@ -1,0 +1,9 @@
+about = "a job that names a self-hosted runner gates it on same-repo code (#93, scripts/self-hosted.py); the unguarded fixture proves the check bites"
+fix = "check github.event.pull_request.head.repo.full_name == github.repository in the job's runs-on or if"
+budget_secs = 5
+paths = [".github/workflows/**", "scripts/self-hosted.py", "ci/fixtures/self-hosted-unguarded/**"]
+run = """
+set -eu
+scripts/self-hosted.py
+! scripts/self-hosted.py ci/fixtures/self-hosted-unguarded
+"""

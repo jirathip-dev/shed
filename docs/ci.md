@@ -1,12 +1,14 @@
 # CI
 
-`.github/workflows/ci.yml` runs every gate on Ubuntu (`msrv`, `rules`, `idle-terminals`) and the tests on
-Ubuntu and macOS (`stable`). Each pull-request bench is its own `.github/workflows/bench-<name>.yml`. A new
-push to a PR cancels that PR's older run; pushes to `staging` and `main` are never cancelled.
+`.github/workflows/ci.yml` is one call of gatekeeper's `gates.yml`, pinned by commit (`./.gatekeeper/run pin
+<version>` moves it). It runs the same gates as `./.gatekeeper/run check` (`just check`): the core and rust packs
+and shed's own in `.gatekeeper/gates/`, one job per leg (`core`, `rust`, `local`, `macos`, `bench-acp`,
+`bench-drain`, `bench-fanout`), and `gates / done`, the one check branch protection requires. A new push to a PR
+cancels that PR's older run; pushes to `staging` and `main` are never cancelled.
 
 ## The macOS runner
 
-Hosted macOS jobs share an account-wide queue and can wait hours, so the macOS leg of `stable` runs on
+Hosted macOS jobs share an account-wide queue and can wait hours, so the `macos` leg runs on
 a self-hosted runner on the mini when the repository variable `CI_RUNNER` is set. It holds the runner's
 labels as a JSON list:
 
@@ -17,7 +19,7 @@ gh variable set CI_RUNNER --body '["self-hosted","macOS","shed"]'
 With the variable unset (`gh variable delete CI_RUNNER`), the leg runs on `macos-latest`.
 
 shed is public, so only same-repo code reaches the runner: pushes to `staging`/`main` and PRs whose
-head branch is in this repo. Fork PRs always get `macos-latest`. `just self-hosted` fails any workflow
+head branch is in this repo. Fork PRs always get `macos-latest`. `local/self-hosted` fails any workflow
 job that names a self-hosted runner without that check.
 
 ### Registering it on the mini

@@ -1,0 +1,15 @@
+about = "the fanout bench at the pull request's base and head on one runner (scripts/bench-fanout.sh): fails if the head is more than 10% slower; CI only, where the runner is quiet"
+fix = "the log names the bench and both medians; find what the head made slower"
+budget_secs = 900
+leg = "bench-fanout"
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/bench-fanout.sh"]
+run = """
+set -eu
+set -- {--base}
+if [ -z "${CI:-}" ] || [ $# -lt 2 ]; then echo "bench-fanout: runs in a pull request's CI, base against head"; exit 0; fi
+base="${RUNNER_TEMP:-target}/bench-fanout-base"
+git worktree add --detach "$base" "$2"
+trap 'git worktree remove --force "$base"' EXIT
+BENCH_TARGET="${RUNNER_TEMP:-target}/bench" scripts/bench-fanout.sh "$base" .
+"""

@@ -192,6 +192,9 @@ pub struct Link {
     /// Its `HOME`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home: Option<PathBuf>,
+    /// Its relay port, while the forward to this host's token proxy is up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<u16>,
 }
 
 /// `machine.stats` result: a sample taken now, and the kept ones after `since`.

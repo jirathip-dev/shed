@@ -3,7 +3,6 @@ use super::{
     save::Saved, save::Saver, save::StateFile, save::write_state,
 };
 use crate::events::Events;
-use crate::lane::sessions;
 use crate::stats::Stats;
 use shed_core::proctree::{self, ProcessTable as _};
 use shed_core::{History, Report, Terminal};
@@ -137,7 +136,6 @@ impl Registry {
             }
             info.pid = term.as_ref().map(|t| t.pid());
             let exited_at = (info.state == State::Exited).then(|| exited_at.unwrap_or(now));
-            sessions::carry_over(path, &info, now);
             entries.insert(
                 info.name.clone(),
                 Entry {
@@ -150,16 +148,17 @@ impl Registry {
                 },
             );
         }
-        for dir in ["history", "acp"] {
-            for file in fs::read_dir(path.with_file_name(dir)).into_iter().flatten() {
-                let Ok(file) = file else { continue };
-                let stem = file
-                    .path()
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned());
-                if stem.is_some_and(|s| !entries.contains_key(&s)) {
-                    fs::remove_file(file.path()).ok();
-                }
+        for file in fs::read_dir(path.with_file_name("history"))
+            .into_iter()
+            .flatten()
+        {
+            let Ok(file) = file else { continue };
+            let stem = file
+                .path()
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned());
+            if stem.is_some_and(|s| !entries.contains_key(&s)) {
+                fs::remove_file(file.path()).ok();
             }
         }
         let saver = Saver {
@@ -204,11 +203,10 @@ mod tests {
     use crate::lane::sessions;
 
     use shed_proto::SessionRecord;
-    use shed_proto::{LsParams, ReadParams, Sample};
+    use shed_proto::{LsParams, Sample};
 
     use std::fs;
-    use std::io::Write;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn state_files_of_every_past_release_load() {
@@ -223,7 +221,7 @@ mod tests {
                 "m2",
                 r#","reported":{"state":"done","note":"ok"},"idle_after":30"#,
             ),
-            terminal("m2c", r#","acp":"claude-acp""#),
+            terminal("m2c", r#","acp":"agent-acp""#),
             terminal(
                 "osc",
                 r#","reported":{"state":"blocked","state_source":"jan-osc9999"}"#,
@@ -249,7 +247,7 @@ mod tests {
         assert_eq!(registry.get("m2").unwrap().idle_after, Some(30));
         assert_eq!(
             registry.get("m2c").unwrap().acp.as_deref(),
-            Some("claude-acp")
+            Some("agent-acp")
         );
         let osc = registry.get("osc").unwrap().reported.unwrap();
         assert_eq!(osc.state_source.as_deref(), Some("jan-osc9999"));
@@ -280,7 +278,6 @@ mod tests {
             "sessions/s1.jsonl",
             "history/gone.log",
             "history/gone.log.tmp",
-            "acp/gone.jsonl",
         ];
         for f in files {
             fs::create_dir_all(root.join(f).parent().unwrap()).unwrap();
@@ -288,53 +285,9 @@ mod tests {
         }
         let exists = || files.map(|f| root.join(f).exists());
         let mut registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
-        assert_eq!(exists(), [true, true, false, false, false]);
+        assert_eq!(exists(), [true, true, false, false]);
         registry.rm("kept.1").unwrap().1();
-        assert_eq!(exists(), [false; 5]);
-    }
-
-    #[test]
-    fn a_running_old_bridge_s_transcript_is_carried_to_its_session_and_still_written() {
-        let root = dir("carry");
-        let path = root.join("state.json");
-        let terminal = r#"{"name":"a","labels":{},"cwd":"/work","cmd":["shed"],"keep":false,"state":"running","exit":null,"pid":null,"acp":"fake","session":{"id":"s/1"}}"#;
-        fs::write(
-            &path,
-            format!(r#"{{"version":1,"terminals":[{terminal}]}}"#),
-        )
-        .unwrap();
-        fs::create_dir_all(root.join("acp")).unwrap();
-        let line = |prompt: &str, reply: &str| {
-            let turn = serde_json::json!({"event": "turn", "prompt": prompt});
-            let reply =
-                serde_json::json!({"event": "reply", "text": reply, "stop_reason": "end_turn"});
-            format!("{turn}\n{reply}\n")
-        };
-        fs::write(root.join("acp/a.jsonl"), line("fix it\nplease", "done")).unwrap();
-        let mut bridge = fs::OpenOptions::new()
-            .append(true)
-            .open(root.join("acp/a.jsonl"))
-            .unwrap();
-        let registry = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
-        bridge.write_all(line("more", "again").as_bytes()).unwrap();
-        assert!(!root.join("acp/a.jsonl").exists());
-        assert!(root.join("sessions/s%2F1.jsonl").exists());
-        let params = ReadParams {
-            name: "a".into(),
-            lines: None,
-            history: false,
-            events: false,
-            before: None,
-            n: None,
-            since: None,
-        };
-        let read = registry.read(params).unwrap()().unwrap();
-        assert_eq!(read.text, "> fix it\nplease\ndone\n> more\nagain");
-        let record = sessions::read(&path, "s/1").unwrap();
-        assert_eq!(
-            (record.agent.as_str(), record.cwd),
-            ("fake", PathBuf::from("/work"))
-        );
+        assert_eq!(exists(), [false; 4]);
     }
 
     #[test]

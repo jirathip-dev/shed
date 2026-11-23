@@ -6,5 +6,5 @@ tree() { cargo tree -p shed-proto -e features --locked "$@"; }
 leaks() { grep -E 'serde_json feature "preserve_order"|^.*schemars v' || true; }
 bad=$(tree | leaks)
 test -z "$bad" || { echo "shed-proto default features leak:"; echo "$bad"; exit 1; }
-test -n "$(tree --features schema | leaks)" || { echo "the check found nothing even with --features schema"; exit 1; }
+test -n "$(tree --features schema | leaks)" || { echo "the check found nothing even with --features schema, so it would miss a leak"; exit 1; }
 echo "shed-proto default features: no preserve_order, no schemars"

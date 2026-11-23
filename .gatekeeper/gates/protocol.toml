@@ -1,0 +1,9 @@
+about = "a change that drops or retypes a method, field or type in docs/shed.openrpc.json raises PROTOCOL (scripts/protocol.py, against the base); the fixture proves the check bites"
+fix = "raise PROTOCOL in crates/shed-proto/src/lib.rs, or keep the method, field or type"
+budget_secs = 10
+paths = ["docs/shed.openrpc.json", "crates/shed-proto/**", "scripts/protocol.py", "ci/fixtures/protocol-dropped/**"]
+run = """
+set -eu
+scripts/protocol.py {--base}
+! scripts/protocol.py ci/fixtures/protocol-dropped
+"""

@@ -8,11 +8,11 @@ Closes #
 
 ## Tests
 
-<!-- Exact commands, exit codes and the head sha they ran at. `just check` runs every gate. -->
+<!-- Exact commands, exit codes and the head sha they ran at. `./.gatekeeper/run check` runs every gate. -->
 
 ## Line count
 
-<!-- `scripts/line-cap.sh` before → after; `src/ net +N (budget +M)` and why. -->
+<!-- `core/cap` before → after; `src/ net +N (budget +M)` and why. -->
 
 ## Not verified
 

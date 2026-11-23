@@ -1,0 +1,6 @@
+about = "shed-proto's default features pull in neither serde_json's preserve_order nor schemars (#123); with schema both show (scripts/proto-features.sh)"
+fix = "move the dependency or feature the log names behind shed-proto's schema feature"
+budget_secs = 30
+setup = ["rust"]
+paths = ["crates/*/Cargo.toml", "Cargo.toml", "Cargo.lock", "scripts/proto-features.sh"]
+run = "scripts/proto-features.sh"

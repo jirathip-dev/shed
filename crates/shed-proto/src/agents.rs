@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe};
+use crate::{CredentialsRecord, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe};
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
 /// the same name in `<config>/providers/` (`docs/acp/provider-records.md`).
@@ -47,6 +47,8 @@ pub struct Provider {
     pub model_args: Vec<String>,
     /// The variable that sets the model, where the adapter takes one.
     pub model_env: Option<String>,
+    /// Variables its logins, status checks and runs on an account get.
+    pub env: BTreeMap<String, String>,
     /// The adapter's arguments that set the effort, `{effort}` standing for one of `efforts`.
     pub effort_args: Vec<String>,
     /// The effort levels it takes.
@@ -65,6 +67,8 @@ pub struct Provider {
     pub setup_files: Vec<String>,
     /// A session's files under the config folder, `{session}` standing for its id.
     pub session_files: Vec<String>,
+    /// The CLI's own config folder, `~/` for home: where `default`'s sessions are copied from, never to.
+    pub default_folder: Option<String>,
     /// Variables, besides `cache.api_vars`, a run on an account never inherits.
     pub scrub: Vec<String>,
     /// How the status command's output reads.
@@ -75,6 +79,8 @@ pub struct Provider {
     pub token: Option<TokenSetup>,
     /// The token proxy.
     pub proxy: Option<ProxyRecord>,
+    /// Where the login lives, for the drift check.
+    pub credentials: Option<CredentialsRecord>,
     /// A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.
     pub terminal: Option<Box<TerminalRecord>>,
 }

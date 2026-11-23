@@ -1,0 +1,13 @@
+about = "200 idle terminals start and are listed under a login's default open-file limit, at most 3 serve threads each plus 40, on linux (scripts/bench-idle.sh)"
+fix = "the log names the count of terminals listed or serve's threads; find what holds a descriptor or a thread per terminal"
+budget_secs = 300
+platform = "linux"
+
+setup = ["rust"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/bench-idle.sh"]
+run = """
+set -eu
+cargo build --release --locked -p shed
+ulimit -Sn 256
+scripts/bench-idle.sh "${CARGO_TARGET_DIR:-target}/release/shed" 200
+"""
