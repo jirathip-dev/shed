@@ -19,6 +19,15 @@ glibc floor), then publishes one GitHub release:
 `shed` is the only binary: the server is `shed serve`. `shed --version` prints `<version> (<sha7>)`, the commit it was
 built from; each build job checks that it names the sha the release is tagged with, so an installer can check it too.
 
+### Main behind staging (#338)
+
+A `workflow_run` workflow runs the default branch's (staging's) `release.yml` on a checkout of the built sha, so a
+release of main runs a newer `release.yml` than main's own. It must handle main being behind staging: each file it
+copies or packs that only newer commits have is skipped when absent, with a `::notice::` that names it. Today that is
+`scripts/fake-link.py`, so a release of a sha without it ships no `shed-fake-link.py`. The binaries, `SHA256SUMS` and
+the scripts every release has used (`scripts/release-sign.sh`, `scripts/client-tag.sh`) stay required: without one
+nothing is published, as before. A new file the workflow ships gets the same skip until main has it.
+
 The macOS binary is signed with the owner's Developer ID Application certificate (hardened runtime, secure timestamp,
 identifier `shed`) and notarized with an App Store Connect API key by `scripts/release-sign.sh` (drover's script with
 the identifier changed). It then checks the binary with `codesign -dv`, `codesign -v -R=notarized --check-notarization`
