@@ -275,6 +275,30 @@ reason = "#64: core names no agent or provider; agent specifics are data in crat
 comments = true
 ignore_case = true
 
+[[ban]]
+pattern = "sccache"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
+[[ban]]
+pattern = "pnpm"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
+[[ban]]
+pattern = "CARGO_TARGET_DIR"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
+[[ban]]
+pattern = "RUSTC_WRAPPER"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
 [[size]]
 paths = ["crates/*/tests/**/*.rs"]
 max_file_lines = 100000
@@ -374,7 +398,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 480
+max_file_lines = 505
 
 [[collect]]
 dir = "crates/shed/tests"
