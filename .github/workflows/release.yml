@@ -3,6 +3,8 @@ name: release
 # publish a GitHub release: build-<sha7> on main (kept), build-staging-<sha7> on staging (a prerelease, pruned after 14
 # days), with the fake ssh link for multi-host tests (#308) as shed-fake-link.py. A failed step ends its job green with
 # an ::error:: annotation and publishes nothing (docs/releases.md).
+# #338: this file runs from the default branch (staging) on a checkout of the built sha, which may be behind it: a file
+# only newer commits have (scripts/fake-link.py) is skipped with a ::notice:: when absent; the binaries stay required.
 # #267: on main it also tags client-v<PROTOCOL>.<n> when a client crate changed; started by hand it is a dry run.
 on:
   workflow_run:
@@ -61,7 +63,12 @@ jobs:
             echo "::error::the Linux build (or its --version sha check) failed; nothing is published"
           fi
       - if: steps.build.outputs.ok == 'true'
-        run: cp scripts/fake-link.py shed-fake-link.py
+        run: |
+          if [ -f scripts/fake-link.py ]; then
+            cp scripts/fake-link.py shed-fake-link.py
+          else
+            echo "::notice::scripts/fake-link.py is not at $SHA; the release ships without shed-fake-link.py"
+          fi
       - if: steps.build.outputs.ok == 'true'
         uses: actions/upload-artifact@v4
         with:
@@ -129,9 +136,11 @@ jobs:
         run: |
           s=$(printf %.7s "$SHA")
           if [ "$BRANCH" = main ]; then tag="build-$s" pre=""; else tag="build-$BRANCH-$s" pre=1; fi
-          sha256sum shed-aarch64-apple-darwin shed-x86_64-unknown-linux-gnu shed-fake-link.py > SHA256SUMS
+          assets=(shed-aarch64-apple-darwin shed-x86_64-unknown-linux-gnu)
+          if [ -f shed-fake-link.py ]; then assets+=(shed-fake-link.py); else echo "::notice::no shed-fake-link.py at $SHA"; fi
+          sha256sum "${assets[@]}" > SHA256SUMS
           if ! gh release create "$tag" -R "$REPO" --target "$SHA" --title "$tag" --notes "shed $BRANCH @ $SHA" \
-            ${pre:+"--prerelease"} shed-aarch64-apple-darwin shed-x86_64-unknown-linux-gnu shed-fake-link.py SHA256SUMS; then
+            ${pre:+"--prerelease"} "${assets[@]}" SHA256SUMS; then
             echo "::error::publishing $tag failed"
           fi
       - name: prune staging prereleases over 14 days old
