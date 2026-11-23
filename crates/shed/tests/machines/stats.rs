@@ -6,7 +6,7 @@ use crate::common::{self, Server, temp_dir};
 use crate::{fake_hosts, script, shed_on};
 
 #[test]
-fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
+fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_without_waiting_for_ssh() {
     let root = temp_dir("machine-stats");
     let bin = fake_hosts(&root);
     let ssh = std::fs::read_to_string(bin.join("ssh")).expect("ssh");
