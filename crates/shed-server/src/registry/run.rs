@@ -165,8 +165,6 @@ impl Registry {
         let Injected { set, unset } = account.unwrap_or_default();
         vars.extend(set);
         let sandboxed = self.wrapped(&name, &mut p, &mut vars)?;
-        let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
-        p.idle_after = (p.idle_after).or_else(|| self.terminal_record(agent)?.idle_after);
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
         let cmd = command(&p.cmd, &unset, mem_max_mb);
         let term = spawn(
@@ -179,9 +177,6 @@ impl Registry {
             p.acp.is_some(),
         )
         .map_err(|e| RpcError::new(ErrorCode::SpawnFailed, format!("{name}: {e}")))?;
-        if let Some(agent) = agent {
-            term.set_rules(self.rules(agent));
-        }
         let info = TerminalInfo {
             name: name.clone(),
             labels: p.labels,
@@ -223,8 +218,7 @@ impl Registry {
                 "sandbox takes no keep",
             ));
         }
-        let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
-        let wrap = self.sandbox(name, sandbox, (p.acp.as_ref(), agent), vars)?;
+        let wrap = self.sandbox(name, sandbox, p.acp.as_ref(), vars)?;
         vars.extend(wrap.env.iter().cloned());
         match &p.acp {
             Some(_) => {
@@ -240,15 +234,11 @@ impl Registry {
         &self,
         name: &str,
         sandbox: &Sandbox,
-        (acp, agent): (Option<&String>, Option<&String>),
+        acp: Option<&String>,
         vars: &[(String, String)],
     ) -> Result<Wrap, RpcError> {
         let catalog = crate::providers::Catalog::load(&self.providers).0;
-        let record = match (acp, agent) {
-            (Some(id), _) => catalog.by_id(id),
-            (None, Some(agent)) => catalog.by_agent(agent),
-            (None, None) => None,
-        };
+        let record = acp.and_then(|id| catalog.by_id(id));
         let var = record.and_then(|r| r.config_dir_var.as_ref());
         let set = var.and_then(|v| vars.iter().rev().find(|(k, _)| k == v));
         let home = crate::accounts::home();

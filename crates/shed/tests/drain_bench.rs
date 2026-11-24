@@ -1,7 +1,6 @@
 //! The drain bench (`scripts/bench-drain.sh` runs it at a PR's base and head): `$SHED_DRAIN_MB` (default
 //! 100) MB each of plain text, coloured text with `EL` on every line and full-screen redraw frames
-//! (`drain/fixture.rs`), each `cat` into a terminal of a fresh `shed serve`, labelled `agent=claude` so its
-//! screen rules run, timed until `read` (polled every 2 ms) shows its last line, with serve's peak RSS
+//! (`drain/fixture.rs`), each `cat` into a terminal of a fresh `shed serve`, timed until `read` (polled every 2 ms) shows its last line, with serve's peak RSS
 //! (sampled every 10 ms) and CPU time. The raw-read ceiling is shed-core's `tests/drain_raw.rs`.
 #![cfg(test)]
 
@@ -72,8 +71,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
             file.to_str().expect("utf-8"),
         ];
         let start = shed_server::clock::now();
-        let labels = json!({"agent": "claude"});
-        let run = json!({"name": "t", "cmd": cmd, "cwd": "/", "labels": labels});
+        let run = json!({"name": "t", "cmd": cmd, "cwd": "/"});
         let _: Value = client.call(Method::Run, &run).expect("run");
         let read = json!({"name": "t", "lines": 1});
         while client.call::<_, Value>(Method::Read, &read).expect("read")["text"] != fixture::END {

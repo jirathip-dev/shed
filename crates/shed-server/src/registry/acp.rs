@@ -118,11 +118,9 @@ impl Registry {
         for entry in self.entries.values_mut() {
             let info = &mut entry.info;
             let lane = info.acp.as_deref() == Some(provider.id.as_str());
-            let pty = info.acp.is_none() && info.labels.get("agent") == Some(&provider.agent);
             let on = info.account.clone().unwrap_or_else(|| DEFAULT.to_owned());
             let why = match &entry.term {
-                _ if info.state != State::Running || !(lane || pty) => continue,
-                _ if pty => "not an ACP or stream lane: never switched".to_owned(),
+                _ if info.state != State::Running || !lane => continue,
                 _ if provider.session_files.is_empty() => "no session files to copy".to_owned(),
                 _ if on == to => format!("already on {to}"),
                 _ if on != DEFAULT && !info.auto => format!("on named account {on}"),

@@ -19,7 +19,7 @@ pub(super) async fn call(cx: &mut Call<'_>) -> Reply {
     let (mut cmd, mut env, name) = (p.cmd, p.env, format!("exec-{}", NEXT.fetch_add(1, Relaxed)));
     let state = lock(cx.registry).path.clone();
     if let Some(sandbox) = &p.sandbox {
-        let wrap = lock(cx.registry).sandbox(&name, sandbox, (None, None), &[])?;
+        let wrap = lock(cx.registry).sandbox(&name, sandbox, None, &[])?;
         cmd = wrap.around(&cmd);
         env.extend(wrap.env);
     }

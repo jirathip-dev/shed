@@ -4,7 +4,7 @@ pub mod exit;
 pub mod io;
 pub mod status;
 
-pub use status::{Rule, Wake};
+pub use status::Wake;
 
 use std::ffi::OsStr;
 use std::fs::File;
@@ -28,7 +28,7 @@ use crate::runner::ExitStatus;
 use crate::screen::{Screen, Size, Snapshot};
 use exit::{is_child, reap, runtime};
 use io::{batches, feed_loop, read_loop, stage, write_loop};
-use status::{Rules, Status, bump};
+use status::{Status, bump};
 
 /// A program running on a PTY, in its own session and process group.
 ///
@@ -40,7 +40,6 @@ pub struct Terminal {
     screen: Arc<Mutex<Screen>>,
     outputs: Arc<Outputs>,
     watch: Arc<watch::Sender<Status>>,
-    rules: Mutex<Rules>,
     pid: i32,
     released: AtomicBool,
     stop: Arc<Mutex<Option<UnixStream>>>,
@@ -208,7 +207,6 @@ impl Terminal {
             screen,
             outputs,
             watch,
-            rules: Mutex::default(),
             pid,
             released: AtomicBool::new(false),
             stop,

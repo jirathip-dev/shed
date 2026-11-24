@@ -119,7 +119,6 @@ impl Registry {
                 back.push((name, term));
             }
         }
-        self.set_rules();
         self.saved(back)
     }
 }
