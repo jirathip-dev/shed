@@ -11,3 +11,28 @@ An account becomes `limited` when a lane on it reports `rate-limited`. It stays 
 window in a usage reading taken at once, else now plus the record's `usage.hold`. A later reading whose
 fullest window is under 100 % ends it early. A run on a limited account is refused `ACCOUNT_LIMITED`, and
 `auto` skips it ([choice.md](choice.md)).
+
+## Balance
+
+A provider record may have a `[balance]` table: the API's `url`, the `auth` header (`{token}` stands for the
+key), the keys and indexes down to the answer's `currency` and `total` (a number or a numeric string), and
+`fresh`, the seconds a reading stands. shed's built-in `deepseek` record has one:
+
+```toml
+agent = "deepseek"
+token_var = "DEEPSEEK_API_KEY"
+[balance]
+url = "https://api.deepseek.com/user/balance"
+auth = "Authorization: Bearer {token}"
+currency = ["balance_infos", 0, "currency"]
+total = ["balance_infos", 0, "total_balance"]
+fresh = 600
+```
+
+A record with no `config_dir_var` has accounts that are only a key: `shed account add deepseek work
+--token-file <file>` (0600) saves the key, makes no folder and no `default`, has no login, and the account is
+`ready` while it holds a key. The probe runs with the status check, and `account.ls` reads a stale one again in
+the background: one `curl` whose config, the auth header with the key in it, goes over its stdin, so the key is
+in no argument, output or log. The reading is the account's `balance` (`currency`, `total`, `read_at`) and
+shows in `shed account ls`'s `USAGE` column. A 401 marks the key `rejected`, and the probe sends it no more
+until a new key is saved. What a low balance means (`warn_below`, an alert) is the caller's.

@@ -57,7 +57,7 @@ impl Request {
 
 type Refusal = (u16, String);
 
-fn quoted(v: &str) -> String {
+pub(crate) fn quoted(v: &str) -> String {
     v.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
@@ -109,11 +109,15 @@ async fn refuse(out: &mut (impl AsyncWrite + Unpin), (code, why): Refusal) -> io
     out.write_all((head + &body).as_bytes()).await
 }
 
+pub(crate) fn signed(auth: &str, token: &Token) -> String {
+    format!(
+        "header = \"{}\"\n",
+        quoted(&auth.replace("{token}", token.expose()))
+    )
+}
+
 fn headers(req: &Request, proxy: &ProxyRecord, token: &Token) -> String {
-    let mut conf = format!(
-        "header = \"{}\"\nheader = \"Expect:\"\n",
-        quoted(&proxy.auth.replace("{token}", token.expose()))
-    );
+    let mut conf = signed(&proxy.auth, token) + "header = \"Expect:\"\n";
     let mut kept: Vec<(String, String)> = (req.heads.iter())
         .filter(|h| !dropped(&h.0))
         .cloned()
