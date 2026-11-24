@@ -65,13 +65,10 @@ fn on_a_machine_ssh_cannot_reach_fails_fast_with_the_hint() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("shed runs");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while child.try_wait().expect("try_wait").is_none() {
-        if std::time::Instant::now() > deadline {
-            child.kill().ok();
-            panic!("shed --on hung after ssh exited");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
+    let exited = || child.try_wait().expect("try_wait").is_some();
+    if !shed_server::clock::poll(shed_server::clock::PATIENCE, exited) {
+        child.kill().ok();
+        panic!("shed --on hung after ssh exited");
     }
     let out = child.wait_with_output().expect("output");
     assert!(!out.status.success());

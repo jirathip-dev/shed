@@ -17,7 +17,7 @@ fn a_lane_runs_on_across_a_serve_restart_and_its_client_reattaches() {
         &["wait", "r", "--until", "working", "done", "--timeout", "10"],
     );
     stop(&mut server);
-    std::thread::sleep(std::time::Duration::from_secs(3));
+    shed_server::clock::sleep(std::time::Duration::from_secs(3));
     let _server = Server::start(&dir);
     let after: Value = serde_json::from_str(&ok(&dir, &["get", "r"])).expect("JSON");
     assert_eq!(

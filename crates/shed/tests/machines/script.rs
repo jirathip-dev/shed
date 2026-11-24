@@ -54,7 +54,7 @@ fn ended(dir: &Path) {
             .status();
         !alive.unwrap().success()
     });
-    std::thread::sleep(Duration::from_millis(300));
+    shed_server::clock::sleep(Duration::from_millis(300));
     assert!(!dir.join("marker").exists());
 }
 

@@ -6,7 +6,6 @@
 mod fixture;
 
 use std::io::Read as _;
-use std::time::Instant;
 
 #[test]
 #[ignore = "a timing report: scripts/bench-drain.sh"]
@@ -17,7 +16,7 @@ fn drain_raw() {
         let file = fixture::write(&dir, kind);
         let (pty, pts) = pty_process::blocking::open().expect("pty");
         pty.resize(pty_process::Size::new(50, 200)).expect("size");
-        let start = Instant::now();
+        let start = shed_core::clock::now();
         let mut child = pty_process::blocking::Command::new("cat")
             .arg(&file)
             .spawn(pts)

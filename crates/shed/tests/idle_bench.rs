@@ -6,7 +6,7 @@
 use std::io::BufRead as _;
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use shed_client::Conn;
@@ -44,7 +44,7 @@ fn idle_connections() {
         .expect("shed serve starts");
     let socket = Paths::in_dir(&dir).socket;
     while UnixStream::connect(&socket).is_err() {
-        std::thread::sleep(Duration::from_millis(20));
+        shed_server::clock::sleep(Duration::from_millis(20));
     }
     let mut client = Conn::connect(&socket).expect("connect");
     let run = json!({"name": "t", "cmd": ["sleep", "100"], "cwd": "/"});
@@ -59,7 +59,7 @@ fn idle_connections() {
         })
         .collect();
     let threads = threads(server.id());
-    let start = Instant::now();
+    let start = shed_server::clock::now();
     let state = json!({"name": "t", "state": "working"});
     let _: Value = client.call(Method::State, &state).expect("state");
     for r in &mut readers {

@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use super::tests::t;
 use super::*;
 
@@ -23,7 +21,7 @@ fn fanout() {
                     name: "agent-terminal-1".into(),
                     ..t(&labels)
                 };
-                let start = Instant::now();
+                let start = shed_core::clock::now();
                 for _ in 0..BURST {
                     events.emit(&terminal, EventKind::Started);
                 }

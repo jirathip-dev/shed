@@ -1,11 +1,11 @@
 use std::io::{BufRead as _, BufReader};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use crate::common::{Server, temp_dir};
 use crate::{SHED, shed_in, stdout};
+use shed_server::clock;
 
 #[test]
 fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
@@ -33,9 +33,9 @@ fn a_child_allocating_50_mb_fires_a_resources_event_and_tops_the_list() {
         &[&run[..], &["--", "sh", "-c", script]].concat(),
     ));
     assert_eq!(next()["event"], "started");
-    let deadline = Instant::now() + Duration::from_secs(20);
+    let deadline = clock::now() + clock::PATIENCE;
     loop {
-        assert!(Instant::now() < deadline, "no 50 MB resources event");
+        assert!(clock::now() < deadline, "no 50 MB resources event");
         let event = next();
         assert_eq!(
             (&event["name"], &event["event"]),
@@ -96,7 +96,7 @@ fn timing_report() {
     for args in calls {
         let mut ms: Vec<f64> = (0..CALLS)
             .map(|_| {
-                let start = Instant::now();
+                let start = clock::now();
                 stdout(&shed_in(&dir, args));
                 start.elapsed().as_secs_f64() * 1000.0
             })
@@ -119,7 +119,7 @@ fn timing_report() {
             run.extend(program);
             let steps = [run, vec!["kill", &name], vec!["rm", &name]];
             for (step, args) in ms.iter_mut().zip(&steps) {
-                let start = Instant::now();
+                let start = clock::now();
                 let said = stdout(&shed_in(&dir, args));
                 step.push(start.elapsed().as_secs_f64() * 1000.0);
                 if args[0] == "kill" {

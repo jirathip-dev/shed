@@ -1,11 +1,11 @@
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use shed_server::Paths;
 
 use crate::common::{Server, eventually, temp_dir};
 use crate::{SHED, alive, ok};
+use shed_server::clock;
 
 #[test]
 fn a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over() {
@@ -21,18 +21,17 @@ fn a_second_server_is_refused_and_a_dead_ones_lock_is_taken_over() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("shed serve");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let status = loop {
-        if let Some(status) = second.try_wait().expect("try_wait") {
-            break status;
-        }
-        if Instant::now() > deadline {
-            second.kill().ok();
-            second.wait().ok();
-            panic!("a second server came up beside the first");
-        }
-        std::thread::sleep(Duration::from_millis(20));
+    let mut status = None;
+    let exited = || {
+        status = second.try_wait().expect("try_wait");
+        status.is_some()
     };
+    if !clock::poll(clock::PATIENCE, exited) {
+        second.kill().ok();
+        second.wait().ok();
+        panic!("a second server came up beside the first");
+    }
+    let status = status.expect("exited");
     assert!(!status.success());
     let out = second.wait_with_output().expect("stderr");
     assert!(
