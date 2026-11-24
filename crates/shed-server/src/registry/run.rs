@@ -104,11 +104,10 @@ impl Registry {
 
     pub(crate) fn run(&mut self, mut p: RunParams) -> Result<TerminalInfo, RpcError> {
         let bad = |what: &str| RpcError::new(ErrorCode::InvalidParams, what);
-        if p.warm && (p.acp.is_none() || p.resume.is_some() || !p.env.is_empty()) {
-            return Err(bad("warm needs acp and takes no resume or env"));
-        }
-        if p.sandbox.is_some() && (p.warm || p.keep) {
-            return Err(bad("sandbox takes no warm or keep"));
+        if p.warm
+            && (p.acp.is_none() || p.resume.is_some() || !p.env.is_empty() || p.sandbox.is_some())
+        {
+            return Err(bad("warm needs acp and takes no resume, env or sandbox"));
         }
         if p.acp.is_none() && (p.model.is_some() || p.effort.is_some()) {
             return Err(bad("model and effort need acp"));
@@ -218,6 +217,12 @@ impl Registry {
         let Some(sandbox) = &p.sandbox else {
             return Ok(false);
         };
+        if p.keep {
+            return Err(RpcError::new(
+                ErrorCode::InvalidParams,
+                "sandbox takes no keep",
+            ));
+        }
         let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
         let wrap = self.sandbox(name, sandbox, (p.acp.as_ref(), agent), vars)?;
         vars.extend(wrap.env.iter().cloned());
