@@ -58,7 +58,9 @@ fn table(list: &[Account]) -> String {
     let mut out = String::from("ACCOUNT  STATE  WHO  USAGE  TOKEN  LINE\n");
     for a in list {
         let usage = a.usage.iter().flat_map(|u| &u.windows);
-        let usage: Vec<_> = usage.map(|w| format!("{} {}%", w.id, w.used_pct)).collect();
+        let usage = usage.map(|w| format!("{} {}%", w.id, w.used_pct));
+        let balance = a.balance.iter().map(|b| format!("{} {}", b.total, b.currency));
+        let usage: Vec<_> = usage.chain(balance).collect();
         let token = a.token.map_or("-".to_owned(), |t| match t.expires_at {
             Some(at) => format!("until {at}"),
             None => "saved".to_owned(),

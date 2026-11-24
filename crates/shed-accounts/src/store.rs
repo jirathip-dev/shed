@@ -10,7 +10,8 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use shed_proto::{
-    Account, AccountAdd, AccountState, Drift, ErrorCode, Provider, RpcError, TokenInfo, Usage,
+    Account, AccountAdd, AccountState, Balance, Drift, ErrorCode, Provider, RpcError, TokenInfo,
+    Usage,
 };
 
 use crate::token::{self, Token};
@@ -33,6 +34,9 @@ pub struct Reading {
     pub checked_at: Option<u64>,
     /// The last usage reading.
     pub usage: Option<Usage>,
+    /// The last balance reading.
+    #[serde(default)]
+    pub balance: Option<Balance>,
     /// When its last limit ends.
     #[serde(default)]
     pub limited_until: Option<u64>,
@@ -144,29 +148,43 @@ impl Store {
             .map_err(io(dir))
     }
 
-    /// The account's folder: none for `default`.
+    /// The account's folder: none for `default` or an account that is only a key.
     ///
     /// # Errors
     /// `NO_ACCOUNT` when the provider has no such account.
     pub fn folder(&self, provider: &Provider, name: &str) -> Result<Option<PathBuf>, RpcError> {
-        if name == DEFAULT {
+        let key_only = provider.config_dir_var.is_none();
+        if name == DEFAULT && !key_only {
             return Ok(None);
         }
-        let entry = self.entry(provider, name);
+        let entry = if key_only {
+            self.token_file(provider, name)
+        } else {
+            self.entry(provider, name)
+        };
         if !valid(name) || fs::symlink_metadata(&entry).is_err() {
             let why = format!("{} has no account {name}", provider.agent);
             return Err(RpcError::new(ErrorCode::NoAccount, why));
         }
-        Ok(Some(fs::read_link(&entry).unwrap_or(entry)))
+        Ok(Some(fs::read_link(&entry).unwrap_or(entry)).filter(|_| !key_only))
     }
 
-    /// Makes the account, or adopts `p.folder` by link; the same call twice is one account.
+    /// Makes the account, or adopts `p.folder` by link; the same call twice is one account. A provider with
+    /// no config folder variable has accounts that are only a key: `p.token_file` and no folder.
     ///
     /// # Errors
     /// `INVALID_PARAMS` for a bad name or folder, `ACCOUNT_SETUP` for a folder holding a setup, `IO`.
     pub fn add(&self, provider: &Provider, p: &AccountAdd) -> Result<Account, RpcError> {
         if !valid(&p.name) || p.name == DEFAULT {
             return Err(bad("name must match [a-z0-9-]+ and not be default"));
+        }
+        let key_only = provider.config_dir_var.is_none();
+        if key_only && (p.folder.is_some() || p.token_file.is_none()) {
+            let why = format!(
+                "a {} account is only a key: a token file, no folder",
+                provider.agent
+            );
+            return Err(bad(why));
         }
         let entry = self.entry(provider, &p.name);
         Self::made(entry.parent().unwrap_or(&self.root))?;
@@ -184,7 +202,7 @@ impl Store {
                 return Err(RpcError::new(ErrorCode::AccountSetup, why));
             }
             std::os::unix::fs::symlink(folder, &entry).map_err(io(&entry))?;
-        } else {
+        } else if !key_only {
             Self::made(&entry)?;
         }
         if let Some(file) = &p.token_file {
@@ -246,6 +264,7 @@ impl Store {
             checked_at: reading.checked_at,
             limited_until,
             usage: reading.usage,
+            balance: reading.balance,
             token,
             runs: 0,
             login: None,
@@ -259,10 +278,16 @@ impl Store {
         let dir = self.root.join(&provider.agent);
         let mut names: Vec<String> = (fs::read_dir(dir).into_iter().flatten().flatten())
             .filter_map(|e| e.file_name().into_string().ok())
-            .filter(|n| valid(n))
+            .map(|n| {
+                n.strip_suffix(".token")
+                    .map_or_else(|| n.clone(), str::to_owned)
+            })
+            .filter(|n| valid(n) && n != DEFAULT)
             .collect();
         names.sort();
-        let names = std::iter::once(DEFAULT.to_owned()).chain(names);
+        names.dedup();
+        let default = (provider.config_dir_var.is_some()).then(|| DEFAULT.to_owned());
+        let names = default.into_iter().chain(names);
         names
             .filter_map(|n| self.account(provider, &n).ok())
             .collect()
@@ -335,7 +360,9 @@ impl Store {
         }
         self.folder(provider, name)?;
         let entry = self.entry(provider, name);
-        let gone = if fs::read_link(&entry).is_ok() {
+        let gone = if provider.config_dir_var.is_none() {
+            Ok(())
+        } else if fs::read_link(&entry).is_ok() {
             fs::remove_file(&entry)
         } else {
             fs::remove_dir_all(&entry)
