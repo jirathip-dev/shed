@@ -106,3 +106,29 @@ fn lanes_saved_without_their_protocol_do_not_block_a_handover() {
     ok(&dir, &["kill", "h"]);
     ok(&dir, &["kill", "l"]);
 }
+
+#[test]
+fn a_lane_that_speaks_an_older_protocol_still_blocks_a_handover() {
+    let dir = temp_dir("acp-old-speaks");
+    let mut server = Server::start(&dir);
+    start_fake(&dir, "old", "fake");
+    stop(&mut server);
+    let state = Paths::in_dir(&dir).state;
+    let mut file: Value =
+        serde_json::from_slice(&std::fs::read(&state).expect("state")).expect("JSON");
+    file["terminals"][0]["speaks"] = json!(0);
+    std::fs::write(&state, file.to_string()).expect("state written");
+    let _server = Server::start(&dir);
+    let mut conn = Conn::connect(&Paths::in_dir(&dir).socket).expect("connect");
+    let build = conn.server().build.clone();
+    let refused = conn
+        .call::<_, Handover>(Method::Handover, &json!({ "build": build }))
+        .expect_err("an older bridge is refused");
+    assert!(
+        refused
+            .to_string()
+            .contains("ACP terminal old speaks protocol 0, the binary"),
+        "{refused}"
+    );
+    ok(&dir, &["kill", "old"]);
+}

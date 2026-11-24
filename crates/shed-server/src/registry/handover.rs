@@ -14,6 +14,8 @@ use std::time::Duration;
 
 type Frozen = Vec<(String, Detached)>;
 
+const FIRST_LENDING_PROTOCOL: u32 = 1;
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Handed {
     pub(super) format: u32,
@@ -82,7 +84,12 @@ impl Registry {
     pub(crate) fn bridges(&self) -> impl Iterator<Item = (&str, u32)> {
         let lanes = self.entries.values().filter(|e| e.info.acp.is_some());
         let live = lanes.filter(|e| e.info.state == State::Running);
-        live.map(|e| (e.info.name.as_str(), e.speaks.unwrap_or(0)))
+        live.map(|e| {
+            (
+                e.info.name.as_str(),
+                e.speaks.unwrap_or(FIRST_LENDING_PROTOCOL),
+            )
+        })
     }
 
     pub(crate) fn freeze(&mut self) -> (Frozen, io::Result<()>, Option<Arc<Control>>) {
