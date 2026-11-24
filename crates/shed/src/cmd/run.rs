@@ -34,6 +34,10 @@ pub struct Args {
     acp: Option<String>,
     #[arg(long, requires = "acp", value_parser = policy, default_value = "ask")]
     policy: Policy,
+    #[arg(long, value_name = "CMD", requires = "acp")]
+    judge: Option<String>,
+    #[arg(long, value_name = "S", requires = "judge")]
+    judge_secs: Option<u64>,
     #[arg(long, value_name = "ID", requires = "acp")]
     resume: Option<String>,
     #[arg(long, value_name = "FILE", requires = "acp")]
@@ -101,6 +105,10 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         env: args.env.into_iter().collect(),
         policy: args.acp.is_some().then_some(args.policy),
         acp: args.acp,
+        judge: (args.judge.iter())
+            .flat_map(|j| j.split_whitespace().map(str::to_owned))
+            .collect(),
+        judge_secs: args.judge_secs,
         resume: args.resume,
         mcp_servers,
         meta: args.meta,

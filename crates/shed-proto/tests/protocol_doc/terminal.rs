@@ -95,6 +95,8 @@ pub(crate) fn run_params() -> Value {
         env: BTreeMap::new(),
         acp: None,
         policy: None,
+        judge: Vec::new(),
+        judge_secs: None,
         resume: None,
         mcp_servers: Vec::new(),
         meta: None,

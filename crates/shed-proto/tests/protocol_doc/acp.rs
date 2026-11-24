@@ -120,6 +120,9 @@ pub(crate) fn events() -> Vec<Event> {
         },
         EventKind::Approved {
             option: "allow".into(),
+            by: Some("judge".into()),
+            decision: Some("allow".into()),
+            reason: Some("an edit inside the worktree".into()),
         },
         EventKind::Reply {
             text: "Fixed; all 12 tests pass.".into(),

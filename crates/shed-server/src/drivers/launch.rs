@@ -19,6 +19,10 @@ pub(crate) fn bridge(
         Policy::Allow => "allow",
         Policy::Deny => "deny",
         Policy::Ask => "ask",
+        Policy::Judge if p.judge.is_empty() => {
+            return Err(bad("policy judge needs a judge command"));
+        }
+        Policy::Judge => "judge",
     };
     let installed = crate::agents::list(state).map_err(|e| internal(e.to_string()))?;
     let adapter = installed
@@ -85,8 +89,11 @@ pub(crate) fn bridge(
 
 pub(crate) const AUTO_ACCOUNT: &str = "SHED_ACP_AUTO";
 
-pub(crate) const LANE_ONLY: [&str; 5] = [
+pub(crate) const JUDGE: &str = "SHED_ACP_JUDGE";
+
+pub(crate) const LANE_ONLY: [&str; 6] = [
     AUTO_ACCOUNT,
+    JUDGE,
     "SHED_ACP_RESUME",
     "SHED_ACP_MCP",
     "SHED_ACP_META",
@@ -119,6 +126,10 @@ pub(crate) fn vars(p: &RunParams, name: &str) -> serde_json::Result<Vec<(String,
     }
     if let Some(meta) = &p.meta {
         set("SHED_ACP_META", serde_json::to_string(meta)?);
+    }
+    if p.policy == Some(Policy::Judge) {
+        let judge = serde_json::json!({"cmd": p.judge, "secs": p.judge_secs, "labels": p.labels});
+        set(JUDGE, judge.to_string());
     }
     if p.no_hibernate {
         set("SHED_ACP_HIBERNATE_AFTER", "0".to_owned());
