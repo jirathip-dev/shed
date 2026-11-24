@@ -40,10 +40,10 @@ fn files_holding(dir: &Path, value: &str) -> Vec<String> {
         let path = e.path();
         if path.is_dir() {
             found.extend(files_holding(&path, value));
-        } else if let Ok(bytes) = std::fs::read(&path) {
-            if String::from_utf8_lossy(&bytes).contains(value) {
-                found.push(path.display().to_string());
-            }
+        } else if let Ok(bytes) = std::fs::read(&path)
+            && String::from_utf8_lossy(&bytes).contains(value)
+        {
+            found.push(path.display().to_string());
         }
     }
     found

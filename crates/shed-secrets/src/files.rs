@@ -122,7 +122,7 @@ mod tests {
         assert!(!text.contains(VALUE), "{text}");
         let wide = wide(&d.0.join("secrets"));
         assert_eq!(wide.len(), 1);
-        assert!(!format!("{:?}", wide).contains(VALUE));
+        assert!(!format!("{wide:?}").contains(VALUE));
         set_mode(&f, 0o600);
         assert_eq!(get(&f).unwrap().unwrap().expose(), VALUE);
         assert!(super::wide(&d.0.join("secrets")).is_empty());
