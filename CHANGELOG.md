@@ -314,6 +314,9 @@ All notable changes to this project are documented here. The format follows
   the agent record's new `[sandbox]`, and shed's own denies of home, `~/.ssh`, its state, config and socket). No
   `srt` there is the new `SANDBOX_MISSING`. A sandboxed command reaches only the new inside socket
   (`SHED_SOCKET`), which serves `hello`, `heartbeat`, `state` and `emit` (docs/hosts/sandbox.md).
+- Codex accounts report their usage windows (`5h`, `7d` or `30d`, used % and reset) like Claude's, read from
+  `codex app-server`'s `account/rateLimits/read`; `auto` and the switch on a limit use them. Antigravity has no
+  way to read its windows per account, so it reports none.
 - API-key accounts' tokens and cost this month: each lane's usage on a key-only account adds to the account's
   `spend` (`month`, `tokens`, `cost`) in `account.ls` and `account.status`, priced by the event's own cost,
   else the record's new `[price]` table, else `"unknown"`. The totals survive a restart and start again each

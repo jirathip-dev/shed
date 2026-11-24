@@ -2,6 +2,10 @@
 
 shed reads an account's usage with the record's `[usage]` probe (its command in the account's folder, read by
 the windows' markers) whenever it runs the status command: `account.status`, after a login, and on a beat.
+Claude's probe is `claude -p /usage`; Codex's asks `codex app-server` for `account/rateLimits/read` and names
+each window by its length (`5h`, `7d`, `30d`). Antigravity has none: its ACP server has no quota call, and
+`agy -p /usage` reads agy's own login, not the account's folder.
+
 A reading stands for `usage.fresh` seconds. Every minute shed reads again each signed-in account that has a
 run and a reading older than that; `account.ls` reads a stale account again in the background, so the next
 call shows it. `checked_at` is when it last read one.

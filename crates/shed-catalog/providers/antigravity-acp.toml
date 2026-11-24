@@ -1,6 +1,7 @@
 # Antigravity's ACP server. It has no login command: the login line, given the installed agent's command as
 # its arguments, sends it ACP `initialize` and `authenticate` (Google sign-in in the browser, the link on
 # screen). With file storage forced the token is <GEMINI_HOME>/antigravity-acp/acp_token.json, one per account.
+# It has no [usage]: its ACP server has no quota call, and `agy -p /usage` reads agy's own login, not the account's.
 # A file of the same name in <config>/providers/ overrides keys of this one.
 id = "antigravity-acp"
 agent = "antigravity-acp"
