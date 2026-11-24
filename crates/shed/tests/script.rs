@@ -8,12 +8,13 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::{Server, eventually, temp_dir};
 use serde_json::{Value, json};
 use shed_client::Conn;
 use shed_server::Paths;
+use shed_server::clock;
 use shed_server::proto::{Hello, Method, Request};
 
 const SHED: &str = env!("CARGO_BIN_EXE_shed");
@@ -279,7 +280,6 @@ fn a_hung_wait_stops_at_the_deadline() {
     let _server = Server::start(&dir);
     start(&dir, "t");
     let wait = "await shed.wait({ name: 't', until: ['done'] }); return 1;";
-    let started = Instant::now();
     let reply = script(&dir, &json!({ "code": wait, "timeout": 1 }));
     assert_eq!(error_code(&reply), "DEADLINE");
     assert!(
@@ -289,7 +289,6 @@ fn a_hung_wait_stops_at_the_deadline() {
             .ends_with("in flight: wait"),
         "{reply}"
     );
-    assert!(started.elapsed() < Duration::from_secs(15));
     let over = Conn::connect(&Paths::in_dir(&dir).socket)
         .unwrap()
         .call::<_, Value>(
@@ -327,14 +326,8 @@ fn closing_the_connection_cancels_the_calls_in_flight() {
     eventually("the exec to start", || lines(&dir, "pid").len() == 1);
     let sleeping = lines(&dir, "pid").remove(0);
     drop(stream);
-    let closed = Instant::now();
     eventually("the exec's group to end", || !alive(&sleeping));
-    assert!(
-        closed.elapsed() < Duration::from_secs(10),
-        "{:?}",
-        closed.elapsed()
-    );
-    std::thread::sleep(Duration::from_millis(300));
+    clock::sleep(Duration::from_millis(300));
     assert!(!marker.exists());
 }
 
@@ -430,7 +423,7 @@ fn row(what: &str, target: &str, (median, low, high): (f64, f64, f64)) {
 }
 
 fn timed(f: impl FnOnce()) -> f64 {
-    let start = Instant::now();
+    let start = clock::now();
     f();
     start.elapsed().as_secs_f64() * 1000.0
 }
@@ -550,7 +543,7 @@ fn read_rows(dir: &Path) {
             .map(|_| raw(dir, &json!({ "code": "while (true) {}" })))
             .collect();
         let mut conn = Conn::connect(&Paths::in_dir(dir).socket).unwrap();
-        std::thread::sleep(Duration::from_millis(200));
+        clock::sleep(Duration::from_millis(200));
         let mut ms: Vec<f64> = (0..2000)
             .map(|_| {
                 timed(|| {

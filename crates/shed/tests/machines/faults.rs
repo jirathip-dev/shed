@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::{Output, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use shed_server::clock;
 
 use crate::common::{Server, temp_dir};
 use crate::{SHED, fault, link, linked, ok, script, shed_on};
@@ -8,7 +10,7 @@ use crate::{SHED, fault, link, linked, ok, script, shed_on};
 const CALL_BOUND: Duration = Duration::from_secs(10);
 
 fn within(bound: Duration, root: &Path, args: &[&str]) -> (Output, Duration) {
-    let started = Instant::now();
+    let started = clock::now();
     let mut child = shed_on(root, args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -20,17 +22,17 @@ fn within(bound: Duration, root: &Path, args: &[&str]) -> (Output, Duration) {
             child.wait().ok();
             panic!("shed {args:?} still blocked after {bound:?}");
         }
-        std::thread::sleep(Duration::from_millis(20));
+        clock::sleep(Duration::from_millis(20));
     }
     let took = started.elapsed();
     (child.wait_with_output().expect("shed ends"), took)
 }
 
 fn until(what: &str, bound: Duration, mut check: impl FnMut() -> bool) -> Duration {
-    let started = Instant::now();
+    let started = clock::now();
     while !check() {
         assert!(started.elapsed() < bound, "no {what} within {bound:?}");
-        std::thread::sleep(Duration::from_millis(50));
+        clock::sleep(Duration::from_millis(50));
     }
     started.elapsed()
 }

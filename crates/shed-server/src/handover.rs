@@ -318,7 +318,7 @@ mod tests {
         let term = Arc::clone(lock(&registry).live("sh").expect("still running"));
         assert_eq!(term.pid(), pid);
         term.write(b"echo $((6 * 7))\r").expect("input");
-        let until = shed_core::clock::now().checked_add(Duration::from_secs(10));
+        let until = shed_core::clock::now().checked_add(shed_core::clock::PATIENCE);
         let woke = term.wait_until(|t| t.screen().contains("42"), until).await;
         assert_eq!(woke.expect("wait"), shed_core::Wake::Matched);
         assert!(!DRAINING.load(SeqCst), "requests go on");

@@ -3,7 +3,7 @@
 - Don't leave a clippy warning (pedantic), or add an `allow` past the workspace's 10, or one without a reason (enforced by: rust/clippy, local/allows)
 - Don't `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`, `dbg!`, index or slice, cast with `as`, or `let _ =` a must-use value outside tests, and don't write `unsafe` (enforced by: rust/clippy (`[workspace.lints]`), rust/bans)
 - Don't `print!` or `eprint!` outside crates/shed/src/out.rs (enforced by: rust/clippy (print_stdout, print_stderr), rust/bans)
-- Don't push a failing test, or one whose crate runs past its `test_secs` (enforced by: local/test (scripts/budget.py))
+- Don't push a failing test, or one whose crate uses more CPU seconds than its `test_secs` (enforced by: local/test (scripts/budget.py))
 - Don't let a test leave a temp folder behind, pass or fail (enforced by: local/test (scripts/temp-left.sh after the tests))
 - Don't break the rustdoc build (enforced by: local/doc)
 - Don't add a dependency with a disallowed licence, an advisory or a duplicate version, or one .gatekeeper/deps.toml does not list with its reason (enforced by: rust/deny (deny.toml), core/deps)

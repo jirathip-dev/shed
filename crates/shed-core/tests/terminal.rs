@@ -3,10 +3,10 @@
 
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shed_core::proctree::{self, ProcessTable as _};
-use shed_core::{Size, Terminal};
+use shed_core::{Size, Terminal, clock};
 
 const SIZE: Size = Size { rows: 24, cols: 80 };
 const NO_ENV: [(&str, &str); 0] = [];
@@ -15,12 +15,11 @@ fn sh(script: &str, size: Size) -> Terminal {
     Terminal::spawn(&["sh", "-c", script], Path::new("/"), NO_ENV, size).expect("spawn")
 }
 
-fn eventually(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !check() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+fn eventually(what: &str, check: impl FnMut() -> bool) {
+    assert!(
+        clock::poll(clock::PATIENCE, check),
+        "timed out waiting for {what}"
+    );
 }
 
 fn alive(pid: i32) -> bool {
@@ -103,7 +102,7 @@ fn kill_escalates_to_sigkill_after_the_grace_period() {
         SIZE,
     );
     eventually("ready", || t.screen() == "ready");
-    let start = Instant::now();
+    let start = clock::now();
     let status = t.kill(Duration::from_millis(300)).expect("kill");
     assert!(start.elapsed() >= Duration::from_millis(300));
     assert!(!status.success());

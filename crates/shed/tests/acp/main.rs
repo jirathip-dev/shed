@@ -157,11 +157,11 @@ fn events_until(dir: &Path, run: &str, last: impl Fn(&Value) -> bool) -> Vec<Str
         .get_ref()
         .set_read_timeout(Some(std::time::Duration::from_secs(10)))
         .expect("timeout");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_mins(2);
+    let deadline = shed_server::clock::now() + std::time::Duration::from_mins(2);
     let mut lines = Vec::new();
     for line in reader.lines() {
         assert!(
-            std::time::Instant::now() < deadline,
+            shed_server::clock::now() < deadline,
             "no awaited event in 120 s: {lines:?}"
         );
         let line = line.expect("an event line");

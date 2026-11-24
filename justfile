@@ -14,3 +14,7 @@ script-bench:
 # Build shed and install it to BIN_DIR/shed (default ~/.cargo/bin), signed on macOS with "herdsman-local" (#56).
 install *BIN_DIR:
     scripts/install.sh {{BIN_DIR}}
+
+# Every workspace test, crate by crate within its test_secs of CPU time (scripts/budget.py).
+test:
+    scripts/budget.py

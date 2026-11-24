@@ -358,7 +358,8 @@ mod tests {
     fn an_exited_child_not_yet_reaped_has_no_command() {
         let mut child = crate::runner::detached(std::path::Path::new("sleep"), ["900"]).unwrap();
         let pid = Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
-        assert!(command(pid.as_raw_nonzero().get()).is_some());
+        let execed = || command(pid.as_raw_nonzero().get()).is_some();
+        assert!(crate::clock::poll(crate::clock::PATIENCE, execed));
         kill_process(pid, Signal::KILL).unwrap();
         let exited =
             rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOWAIT;

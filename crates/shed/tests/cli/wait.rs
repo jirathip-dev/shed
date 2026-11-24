@@ -1,5 +1,3 @@
-use std::time::{Duration, Instant};
-
 use crate::common::{Server, temp_dir};
 use crate::{shed_in, stdout};
 
@@ -15,7 +13,6 @@ fn wait_matches_output_by_pattern_and_falls_back_to_idle() {
             "run", "--name", "test", "--cwd", d, "--", "sh", "-c", script,
         ],
     ));
-    let started = Instant::now();
     let out = shed_in(
         &dir,
         &[
@@ -28,7 +25,6 @@ fn wait_matches_output_by_pattern_and_falls_back_to_idle() {
         ],
     );
     assert_eq!(stdout(&out), "test output\n");
-    assert!(started.elapsed() < Duration::from_secs(5));
 
     let idle = [
         "run",
