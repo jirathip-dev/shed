@@ -10,8 +10,8 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
 use shed_proto::{
-    Account, AccountAdd, AccountState, Balance, Drift, ErrorCode, Provider, RpcError, TokenInfo,
-    Usage,
+    Account, AccountAdd, AccountState, Balance, Drift, ErrorCode, Money, Provider, RpcError, Spend,
+    TokenInfo, Tokens, Usage,
 };
 
 use crate::token::{self, Token};
@@ -49,6 +49,9 @@ pub struct Reading {
     /// `auto` picks it first while it is ready.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub preferred: bool,
+    /// Its tokens and cost this month; only `spent` writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend: Option<Spend>,
 }
 
 /// The accounts folder beside the state file.
@@ -265,6 +268,7 @@ impl Store {
             limited_until,
             usage: reading.usage,
             balance: reading.balance,
+            spend: reading.spend,
             token,
             runs: 0,
             login: None,
@@ -300,7 +304,31 @@ impl Store {
     pub fn keep(&self, provider: &Provider, name: &str, reading: Reading) -> Result<(), RpcError> {
         let key = format!("{}/{name}", provider.agent);
         self.update(|all| {
-            all.insert(key, reading);
+            let spend = all.get(&key).and_then(|r| r.spend.clone());
+            all.insert(key, Reading { spend, ..reading });
+        })
+    }
+
+    /// Adds `tokens` costing `cost` to the account's totals for `month`; another month starts them again.
+    ///
+    /// # Errors
+    /// `IO` when `accounts.json` cannot be written.
+    pub fn spent(
+        &self,
+        provider: &Provider,
+        name: &str,
+        month: &str,
+        tokens: Tokens,
+        cost: Option<Money>,
+    ) -> Result<(), RpcError> {
+        self.folder(provider, name)?;
+        let key = format!("{}/{name}", provider.agent);
+        self.update(|all| {
+            let reading = all.entry(key).or_default();
+            reading.spend = Some(match reading.spend.take() {
+                Some(s) => s.plus(month, tokens, cost),
+                None => Spend::new(month, tokens, cost),
+            });
         })
     }
 

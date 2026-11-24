@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    BalanceProbe, CredentialsRecord, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
+    BalanceProbe, CredentialsRecord, Price, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
 };
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
@@ -79,6 +79,8 @@ pub struct Provider {
     pub usage: Option<UsageProbe>,
     /// The balance probe.
     pub balance: Option<Box<BalanceProbe>>,
+    /// The price per million tokens, for an API-key account's cost when the agent reports none.
+    pub price: Option<Box<Price>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
     /// The token proxy.

@@ -1,14 +1,16 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use shed_accounts::{Store, Token, check, choice, store};
-use shed_core::{Wake, clock};
+use shed_core::{Wake, clock, runner};
 
 use crate::call::{Call, blocking};
 use crate::proto::{
-    Account, AccountLogin, ErrorCode, Login, Provider, RpcError, RunParams, State, TerminalInfo,
+    Account, AccountLogin, AcpUsage, ErrorCode, Login, Money, Provider, RpcError, RunParams, State,
+    TerminalInfo, Tokens,
 };
 use crate::registry::Registry;
 use crate::{Shared, lock, providers};
@@ -17,6 +19,82 @@ const LOGIN: Duration = Duration::from_mins(10);
 const BEAT: Duration = Duration::from_mins(1);
 
 static PROBING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+static MONTH: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+
+pub(crate) fn month() -> String {
+    let mut held = lock(&MONTH);
+    let now = clock::now();
+    if let Some((_, month)) = held
+        .as_ref()
+        .filter(|(at, _)| now.duration_since(*at) < BEAT)
+    {
+        return month.clone();
+    }
+    let out = runner::output("date", ["+%Y-%m"], &[]).map(|o| o.stdout);
+    let month = String::from_utf8_lossy(&out.unwrap_or_default())
+        .trim()
+        .to_owned();
+    *held = Some((now, month.clone()));
+    month
+}
+
+fn money(cost: Option<&Value>) -> Option<Money> {
+    let cost = cost?;
+    let currency = cost["currency"].as_str()?.to_owned();
+    Some(Money {
+        amount: cost["amount"].as_f64()?,
+        currency,
+    })
+}
+
+fn tokens_since(was: Tokens, now: Tokens) -> Tokens {
+    let less = |w: u64, n: u64| n < w;
+    let reset = less(was.input, now.input)
+        || less(was.output, now.output)
+        || less(was.cache_read, now.cache_read)
+        || less(was.cache_write, now.cache_write);
+    if reset {
+        return now;
+    }
+    Tokens {
+        input: now.input - was.input,
+        cache_read: now.cache_read - was.cache_read,
+        cache_write: now.cache_write - was.cache_write,
+        output: now.output - was.output,
+    }
+}
+
+fn cost_since(was: Option<Money>, now: Money) -> Money {
+    match was {
+        Some(w) if w.currency == now.currency && w.amount <= now.amount => Money {
+            amount: now.amount - w.amount,
+            ..now
+        },
+        _ => now,
+    }
+}
+
+pub(crate) fn spent(
+    reg: &Registry,
+    (acp, name): (&str, &str),
+    was: Option<&AcpUsage>,
+    now: &AcpUsage,
+    month: &str,
+) -> Result<(), RpcError> {
+    let catalog = providers::Catalog::load(&reg.providers).0;
+    let Some(provider) = catalog.by_id(acp).filter(|p| p.config_dir_var.is_none()) else {
+        return Ok(());
+    };
+    let total = |u: Option<&AcpUsage>| u.and_then(|u| u.total).unwrap_or_default();
+    let tokens = tokens_since(total(was), total(Some(now)));
+    let paid =
+        money(now.cost.as_ref()).map(|c| cost_since(money(was.and_then(|w| w.cost.as_ref())), c));
+    let cost = paid.or_else(|| provider.price.as_ref().map(|p| p.of(tokens)));
+    if tokens == Tokens::default() && cost.as_ref().is_none_or(|c| c.amount <= 0.0) {
+        return Ok(());
+    }
+    Store::beside(&reg.path).spent(provider, name, month, tokens, cost)
+}
 
 pub(crate) async fn open(cx: &Call<'_>, provider: &str) -> Result<(Store, Provider), RpcError> {
     let all = records(cx).await?;
@@ -131,6 +209,7 @@ pub(crate) fn shown(reg: &Registry, id: &str, account: Account) -> Account {
     Account {
         login: login_running(reg, &account.provider, &account.name),
         runs: reg.runs(id, &account.name),
+        spend: account.spend.filter(|s| s.month == month()),
         ..account
     }
 }

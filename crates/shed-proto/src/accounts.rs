@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Provider;
+use crate::{Provider, Tokens};
 
 const DAY: u64 = 86_400;
 
@@ -193,6 +193,121 @@ pub struct Balance {
     pub read_at: u64,
 }
 
+/// What a million tokens of each kind cost, for agents whose usage carries no cost.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct Price {
+    /// Its currency.
+    pub currency: String,
+    /// Input tokens neither read from nor written to the prompt cache.
+    pub input: f64,
+    /// Input tokens read from the prompt cache.
+    pub cache_read: f64,
+    /// Input tokens written to the prompt cache.
+    pub cache_write: f64,
+    /// Output tokens.
+    pub output: f64,
+}
+
+impl Eq for Price {}
+
+impl Price {
+    /// What `tokens` cost.
+    #[must_use]
+    pub fn of(&self, tokens: Tokens) -> Money {
+        let m = |n: u64, per: f64| f64::from(u32::try_from(n).unwrap_or(u32::MAX)) * per / 1e6;
+        let amount = m(tokens.input, self.input)
+            + m(tokens.cache_read, self.cache_read)
+            + m(tokens.cache_write, self.cache_write)
+            + m(tokens.output, self.output);
+        Money {
+            amount,
+            currency: self.currency.clone(),
+        }
+    }
+}
+
+/// An amount in a currency.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Money {
+    /// The amount.
+    pub amount: f64,
+    /// Its currency.
+    pub currency: String,
+}
+
+/// A cost: an amount, or `"unknown"`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(untagged)]
+pub enum Cost {
+    /// What it cost.
+    Known(Money),
+    /// Some usage had neither its own cost nor a price, or the currencies differ.
+    Unknown(Unknown),
+}
+
+/// The `"unknown"` cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum Unknown {
+    /// `"unknown"`.
+    Unknown,
+}
+
+impl Cost {
+    fn of(cost: Option<Money>) -> Self {
+        cost.map_or(Self::Unknown(Unknown::Unknown), Self::Known)
+    }
+}
+
+/// An API-key account's tokens and cost in one calendar month on one machine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Spend {
+    /// `YYYY-MM`, in the machine's local time.
+    pub month: String,
+    /// The tokens its lanes used.
+    pub tokens: Tokens,
+    /// What they cost.
+    pub cost: Cost,
+}
+
+impl Spend {
+    /// `self` with `tokens` costing `cost` added in `month`; another month starts again from them.
+    #[must_use]
+    pub fn plus(self, month: &str, tokens: Tokens, cost: Option<Money>) -> Self {
+        if self.month != month {
+            return Self::new(month, tokens, cost);
+        }
+        let cost = match (self.cost, cost) {
+            (Cost::Known(a), Some(b)) if a.currency == b.currency => Cost::Known(Money {
+                amount: a.amount + b.amount,
+                currency: a.currency,
+            }),
+            _ => Cost::of(None),
+        };
+        Self {
+            tokens: self.tokens.plus(tokens),
+            cost,
+            ..self
+        }
+    }
+
+    /// `tokens` costing `cost` in `month`.
+    #[must_use]
+    pub fn new(month: &str, tokens: Tokens, cost: Option<Money>) -> Self {
+        Self {
+            month: month.to_owned(),
+            tokens,
+            cost: Cost::of(cost),
+        }
+    }
+}
+
 /// An account: a provider's login in a config folder shed keeps, and what shed last read of it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -230,6 +345,9 @@ pub struct Account {
     /// The last balance reading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub balance: Option<Balance>,
+    /// An API-key account's tokens and cost this month on this machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend: Option<Spend>,
     /// Its setup token's dates, never the token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<TokenInfo>,

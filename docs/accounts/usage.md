@@ -36,3 +36,23 @@ the background: one `curl` whose config, the auth header with the key in it, goe
 in no argument, output or log. The reading is the account's `balance` (`currency`, `total`, `read_at`) and
 shows in `shed account ls`'s `USAGE` column. A 401 marks the key `rejected`, and the probe sends it no more
 until a new key is saved. What a low balance means (`warn_below`, an alert) is the caller's.
+
+## Month spend
+
+An API-key account (a record with no `config_dir_var`) adds up what its lanes use: each `usage` event of a
+lane on it adds the change in the session's `total` tokens, and the change in the event's own `cost`, else
+those tokens priced by the record's `[price]` table (per million tokens):
+
+```toml
+[price]
+currency = "USD"
+input = 0.27
+cache_read = 0.07
+cache_write = 0.27
+output = 1.10
+```
+
+With neither, the tokens still count and the month's `cost` is `"unknown"` (also when two currencies meet).
+The totals are the account's `spend` (`month` as `YYYY-MM`, `tokens`, `cost`) in `account.ls` and
+`account.status`, kept in `accounts.json` across restarts and upgrades. They are this machine's only, and start
+again at the first usage of a new month in the machine's local time; a past month's are not shown.
