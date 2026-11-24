@@ -3,11 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use shed_core::clock::unix_now;
+#[cfg(any(not(target_os = "linux"), test))]
 use shed_proto::MemLevel::{self, Critical, Normal, Warn};
 use shed_proto::Sample;
 
 const EVERY: u64 = 60;
 const DAY: u64 = 86_400;
+#[cfg(any(not(target_os = "linux"), test))]
 const LEVELS: [Option<MemLevel>; 5] = [None, Some(Normal), Some(Warn), None, Some(Critical)];
 
 fn stdout<A: AsRef<std::ffi::OsStr>>(program: &str, args: impl IntoIterator<Item = A>) -> String {
