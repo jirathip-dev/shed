@@ -132,7 +132,6 @@ pub struct Sample {
     /// Percent of memory not available.
     pub mem_pressure_pct: u64,
     /// macOS: the kernel's memory pressure level (`kern.memorystatus_vm_pressure_level`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mem_level: Option<MemLevel>,
     /// Memory available without swapping, MiB.
     #[serde(default)]

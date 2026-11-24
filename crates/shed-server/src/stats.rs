@@ -3,10 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use shed_core::clock::unix_now;
-use shed_proto::{MemLevel, Sample};
+use shed_proto::MemLevel::{self, Critical, Normal, Warn};
+use shed_proto::Sample;
 
 const EVERY: u64 = 60;
 const DAY: u64 = 86_400;
+const LEVELS: [Option<MemLevel>; 5] = [None, Some(Normal), Some(Warn), None, Some(Critical)];
 
 fn stdout<A: AsRef<std::ffi::OsStr>>(program: &str, args: impl IntoIterator<Item = A>) -> String {
     shed_core::runner::output(program, args, &[])
@@ -104,19 +106,13 @@ fn parse_sysctl(text: &str, vm_stat: &str, now: u64) -> Sample {
     let swap = after(next(), "used = ", '.');
     let boot = after(next(), "sec = ", ',');
     let total = first::<u64>(next()).unwrap_or(0) >> 20;
-    let level = match first::<u8>(next()) {
-        Some(1) => Some(MemLevel::Normal),
-        Some(2) => Some(MemLevel::Warn),
-        Some(4) => Some(MemLevel::Critical),
-        _ => None,
-    };
     let swap_out = vm_stat
         .lines()
         .find_map(|l| first(l.strip_prefix("Swapouts:")?));
     Sample {
         load_per_cpu: load.unwrap_or(0.0),
         mem_pressure_pct: 100 - free,
-        mem_level: level,
+        mem_level: first(next()).and_then(|i: usize| LEVELS.get(i).copied().flatten()),
         mem_free_mb: total * free / 100,
         mem_total_mb: total,
         swap_used_mb: swap.unwrap_or(0),
