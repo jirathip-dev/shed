@@ -542,6 +542,7 @@ mod tests {
 
     #[test]
     fn a_refused_pinned_key_holds_the_machine_and_a_re_pin_relinks_it() {
+        use shed_proto::flow::machine::State as machine_state;
         let state = crate::temp_dir("flows-machine").join("state.json");
         let mut runner = Runner::new(&state);
         let vm = |key: &str| machines::Machine {
@@ -561,7 +562,6 @@ mod tests {
             };
             BTreeMap::from([("vm".to_owned(), link)])
         };
-        use shed_proto::flow::machine::State as machine_state;
         let mut o = out(0);
         for (now, key, links, held) in [
             (0, "AAAAold", link(LinkState::Up, None), None),

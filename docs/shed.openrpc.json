@@ -1494,7 +1494,7 @@
           "required": true,
           "schema": {
             "type": "string",
-            "description": "The machine's name."
+            "description": "The machine's name, as `--on` takes it."
           }
         },
         {

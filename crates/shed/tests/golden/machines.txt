@@ -5,9 +5,9 @@ box added
 $ shed machine add old old.example
 old added
 $ shed machine add box other.example
-[exit 1] shed: machine box exists with other values; `--replace` moves it, `shed machine rm box` drops it
+[exit 1] shed: machine box exists with other values; `--replace` moves it
 $ shed machine add bad -- -oProxyCommand=x
-[exit 1] shed: ssh target "-oProxyCommand=x": use [user@]host or ssh://[user@]host[:port], no spaces or quotes
+[exit 1] shed: ssh target "-oProxyCommand=x": use [user@]host or ssh://[user@]host[:port]
 $ shed --json machine ls
 [{"name":"box","target":"user@box.example"},{"name":"old","target":"old.example"}]
 $ shed machine ls
