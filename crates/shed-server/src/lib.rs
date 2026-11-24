@@ -15,7 +15,6 @@ mod events;
 mod files;
 mod flows;
 pub mod handover;
-pub mod hooks;
 mod input;
 pub mod install;
 pub mod lane;

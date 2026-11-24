@@ -16,7 +16,7 @@ pub use history::History;
 pub use proctree::Usage;
 pub use redact::redact;
 pub use screen::{Color, Pen, Report, Run, STATES, Screen, Size, Snapshot};
-pub use terminal::{Detached, Rule, Terminal, Wake};
+pub use terminal::{Detached, Terminal, Wake};
 
 /// Errors from shed-core.
 #[derive(Debug, thiserror::Error)]

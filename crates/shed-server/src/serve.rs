@@ -177,7 +177,6 @@ async fn listen(
     loaded.providers = paths.providers();
     let (asked, mut handovers) = tokio::sync::mpsc::unbounded_channel();
     loaded.control = Some(Arc::new(handover::Control { again, asked }));
-    loaded.set_rules();
     let registry = Arc::new(Mutex::new(loaded));
     for (name, term) in lock(&registry).running() {
         watch(&registry, name, term);

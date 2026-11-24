@@ -272,7 +272,7 @@ pub struct Reported {
     /// The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_source: Option<String>,
-    /// Where the state came from: `reported`, `rule:<id>` (a screen rule) or `silence` (`idle_after`).
+    /// Where the state came from: `reported` or `silence` (`idle_after`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     /// OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own.
