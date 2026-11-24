@@ -198,8 +198,28 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
             .unwrap(),
             handover(),
         ),
+        Method::InstallFind => (
+            source(),
+            json!({"tag": "build-1a2b3c4", "assets": {"drover-aarch64-apple-darwin": "9f86d081884c7d65"}}),
+        ),
+        Method::InstallLs | Method::InstallBack => (json!({"dest": DROVER}), install(None)),
+        Method::InstallStage => (
+            json!({"source": source(), "build": "1a2b3c4", "dest": DROVER}),
+            install(Some("drover 0.4.0 (1a2b3c4)")),
+        ),
+        Method::InstallSwap => (json!({"dest": DROVER, "build": "1a2b3c4"}), install(None)),
         _ => return None,
     })
+}
+
+const DROVER: &str = "/home/user/.cargo/bin/drover";
+
+fn source() -> Value {
+    json!({"tool": "drover", "releases": "https://github.com/o/drover/releases/download", "tag": "build-1a2b3c4"})
+}
+
+fn install(staged: Option<&str>) -> Value {
+    json!({"live": "drover 0.4.0 (4254d78)", "staged": staged, "prev": null})
 }
 
 fn handover() -> Value {

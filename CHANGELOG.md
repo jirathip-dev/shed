@@ -298,6 +298,10 @@ All notable changes to this project are documented here. The format follows
 - The flow tables run in shadow beside today's code: where they disagree, a line goes to `flow-shadow.jsonl`
   beside the state file; `shed flow report` (`flow.report`) shows rows fired, facts never seen, stuck rows and
   the disagreements by class, and `shed doctor` counts the last 24 h's.
+- `install.find`, `install.ls`, `install.stage`, `install.swap` and `install.back` move a release of shed's own
+  binary or of the tool the client named at `hello` (`tool`), on the main host, and refuse any other binary with
+  `NOT_OWN_BINARY`; `shed install ls` shows shed's live, staged and previous builds. Self-update runs on the same
+  code, and a deferred pass now keeps the checked `<binary>.new` for the next one.
 
 ### Changed
 

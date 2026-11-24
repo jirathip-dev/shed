@@ -24,6 +24,8 @@ pub mod handover;
 pub use handover::*;
 pub mod input;
 pub use input::*;
+pub mod install;
+pub use install::*;
 pub mod machine;
 pub use machine::*;
 pub mod method;

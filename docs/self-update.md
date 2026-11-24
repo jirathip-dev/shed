@@ -23,10 +23,12 @@ release in [releases.md](releases.md#a-manual-install), followed once by `shed i
 3. Main's head is this binary's build: up to date, or, when serve still runs the build before, it asks serve
    to hand over.
 4. No `SHA256SUMS` on that release yet: it waits (`waiting for build-<sha7>`) and changes nothing.
-5. It downloads `shed-<arch>-<os>` to `<binary>.new`, checks its sha256 against `SHA256SUMS` and that
-   `<binary>.new --version` ends in `(<sha7>)`. A failure removes `<binary>.new` and exits 1 (`rejected`).
+5. It stages the release through [installs](hosts/installs.md): `shed-<arch>-<os>` to `<binary>.new`, its
+   sha256 checked against `SHA256SUMS` and `<binary>.new --version` naming `<sha7>`. A failure removes the
+   download and exits 1 (`rejected`, naming the check).
 6. It asks serve `handover.check` on `<binary>.new`. A refusal (an older serve, a busy one, an ACP session
-   the new build cannot serve) is `deferred`: nothing is swapped, the next pass asks again.
+   the new build cannot serve) is `deferred`: nothing is swapped, `<binary>.new` stays staged and the next
+   pass asks again without fetching it.
 7. It keeps the live binary as `<binary>.prev` (a hard link, for a manual rollback) and renames
    `<binary>.new` over the binary, so a running binary is never written over.
 8. It asks serve to `handover` to the new build: the same process replaces itself, every terminal and ACP
