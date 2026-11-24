@@ -4,7 +4,7 @@ use shed_server::proto::{Children, Span};
 
 pub fn policy(s: &str) -> Result<Policy, String> {
     serde_json::from_value(Value::String(s.to_owned()))
-        .map_err(|_| format!("{s:?}: allow, deny or ask"))
+        .map_err(|_| format!("{s:?}: allow, deny, ask or judge"))
 }
 
 pub fn children(s: &str) -> Result<Children, String> {

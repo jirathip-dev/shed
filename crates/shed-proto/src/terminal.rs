@@ -21,6 +21,8 @@ pub enum Policy {
     Deny,
     /// Report `blocked` and wait for `shed approve`.
     Ask,
+    /// Run `judge` for each request and pick by its `allow` or `deny`; it fails closed.
+    Judge,
 }
 
 /// `run` params.
@@ -59,6 +61,12 @@ pub struct RunParams {
     /// ACP: how the bridge answers permission requests (default `ask`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<Policy>,
+    /// ACP, `policy` `judge`: the judge's program and arguments, a request as JSON on its stdin.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judge: Vec<String>,
+    /// ACP, `policy` `judge`: seconds the judge may take before the request is denied (default 30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_secs: Option<u64>,
     /// ACP: continue this session (`$SHED_ACP_RESUME` to the bridge): shed's transcript of it is replayed, then
     /// the agent loads it (`session/load`).
     #[serde(default, skip_serializing_if = "Option::is_none")]

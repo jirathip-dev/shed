@@ -832,6 +832,27 @@
               "option": {
                 "type": "string",
                 "description": "The chosen option's id."
+              },
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "`judge` when the `judge` policy answered."
+              },
+              "decision": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The judge's `allow` or `deny`."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The judge's reason, or why it failed."
               }
             },
             "required": [
@@ -2099,6 +2120,30 @@
               }
             ],
             "description": "ACP: how the bridge answers permission requests (default `ask`)."
+          }
+        },
+        {
+          "name": "judge",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "ACP, `policy` `judge`: the judge's program and arguments, a request as JSON on its stdin."
+          }
+        },
+        {
+          "name": "judge_secs",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "ACP, `policy` `judge`: seconds the judge may take before the request is denied (default 30)."
           }
         },
         {
@@ -5504,6 +5549,27 @@
               "option": {
                 "type": "string",
                 "description": "The chosen option's id."
+              },
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "`judge` when the `judge` policy answered."
+              },
+              "decision": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The judge's `allow` or `deny`."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The judge's reason, or why it failed."
               }
             },
             "required": [
@@ -6894,6 +6960,27 @@
               "option": {
                 "type": "string",
                 "description": "The chosen option's id."
+              },
+              "by": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "`judge` when the `judge` policy answered."
+              },
+              "decision": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The judge's `allow` or `deny`."
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The judge's reason, or why it failed."
               }
             },
             "required": [
@@ -7002,6 +7089,11 @@
             "type": "string",
             "const": "ask",
             "description": "Report `blocked` and wait for `shed approve`."
+          },
+          {
+            "type": "string",
+            "const": "judge",
+            "description": "Run `judge` for each request and pick by its `allow` or `deny`; it fails closed."
           }
         ],
         "description": "How an ACP bridge answers the agent's permission requests."

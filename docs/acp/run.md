@@ -17,8 +17,10 @@ shed run --acp claude-acp --meta '{"k": 1}'       # with session options (sessio
 shed send t1 "/review src/"                       # a slash command is an ordinary prompt
 ```
 
-`--policy allow|deny|ask` (default `ask`) answers permission requests: `allow` and `deny` pick the first
-allow or reject option at once; `ask` reports `waiting-approval` (note: the tool) until `shed approve`. With a command
+`--policy allow|deny|ask|judge` (default `ask`) answers permission requests: `allow` and `deny` pick the first
+allow or reject option at once; `ask` reports `waiting-approval` (note: the tool) until `shed approve`; `judge` runs
+`--judge "<cmd> <args…>"` (split at whitespace) for each request and denies when it fails, prints no verdict or takes
+over `--judge-secs` (default 30): the `run` method in [protocol.md](../protocol.md) has its input and output. With a command
 after `--`, `run --acp <id> -- <cmd…>` runs that command as the adapter instead of the installed one.
 
 The state is `working` from `send` until the turn ends, and `done` (note: the stop reason, e.g. `end_turn` or

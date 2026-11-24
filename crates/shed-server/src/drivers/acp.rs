@@ -575,11 +575,12 @@ pub(crate) fn close(info: &TerminalInfo) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeSet;
+    use std::path::PathBuf;
     use std::time::Duration;
 
     use serde_json::{Value, json};
     use shed_core::proctree::{self, ProcessTable as _};
-    use shed_proto::{Policy, Provider, Reported};
+    use shed_proto::{EventKind, Policy, Provider, Reported};
 
     use super::*;
     use crate::lane::writer::Out;
@@ -957,5 +958,164 @@ mod tests {
             ]
         );
         assert_eq!(slept, None);
+    }
+
+    async fn asking(stdio: tokio::io::DuplexStream, options: Value) {
+        let (read, mut write) = tokio::io::split(stdio);
+        let mut lines = BufReader::new(read).lines();
+        let mut prompt = Value::Null;
+        while let Ok(Some(line)) = lines.next_line().await {
+            let msg: Value = serde_json::from_str(&line).unwrap();
+            let sent = match msg["method"].as_str() {
+                Some("initialize") => vec![json!({"id": msg["id"], "result": {
+                    "protocolVersion": 1, "agentCapabilities": {}, "authMethods": []}})],
+                Some("session/new") => vec![json!({"id": msg["id"], "result": {"sessionId": "s"}})],
+                Some("session/prompt") => {
+                    prompt = msg["id"].clone();
+                    vec![
+                        json!({"id": 99, "method": "session/request_permission", "params": {
+                        "sessionId": "s", "toolCall": {"toolCallId": "t", "title": "rm notes",
+                        "kind": "delete", "rawInput": {"command": "rm notes"}}, "options": options}}),
+                    ]
+                }
+                None if msg["id"] == 99 => {
+                    let outcome = &msg["result"]["outcome"];
+                    let picked = outcome["optionId"].as_str().unwrap_or("none").to_owned();
+                    vec![
+                        json!({"method": "session/update", "params": {"sessionId": "s", "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": {"type": "text", "text": picked}}}}),
+                        json!({"id": prompt, "result": {"stopReason": "end_turn"}}),
+                    ]
+                }
+                _ => continue,
+            };
+            for mut m in sent {
+                m["jsonrpc"] = json!("2.0");
+                write.write_all(format!("{m}\n").as_bytes()).await.unwrap();
+            }
+        }
+    }
+
+    type Judged = (String, Option<String>, Option<String>, Option<String>);
+
+    async fn judged(script: &str, options: Value) -> (String, Judged) {
+        let (bridge, fake) = tokio::io::duplex(1 << 16);
+        let (_, err_ours) = tokio::io::duplex(1 << 16);
+        tokio::spawn(asking(fake, options));
+        let (read, write) = tokio::io::split(bridge);
+        let (out, mut outs) = unbounded_channel();
+        let (typed, mut inputs) = unbounded_channel();
+        typed.send(Input::Prompt("go".to_owned())).unwrap();
+        let mut launch = Launch::default();
+        let session = talk(write, read, err_ours, None, &mut launch, async |acp| {
+            let mut lane = Lane::new(out, Policy::Judge, Provider::default(), turn_idle_timeout());
+            lane.judge.cmd = ["sh", "-c", script].map(str::to_owned).to_vec();
+            lane.judge.name = "t1".to_owned();
+            lane.judge.labels = [("role".to_owned(), "impl".to_owned())].into();
+            lane.judge.cwd = PathBuf::from("/");
+            lane.drive(acp, &mut inputs, Path::new("/"), Start::default())
+                .await
+        });
+        let ended = async {
+            let mut approved = None;
+            loop {
+                match outs.recv().await {
+                    Some(Out::Emit(EventKind::Approved {
+                        option,
+                        by,
+                        decision,
+                        reason,
+                    })) => approved = Some((option, by, decision, reason)),
+                    Some(Out::Emit(EventKind::Reply { text, .. })) => {
+                        return (text, approved.expect("an approved event first"));
+                    }
+                    Some(_) => {}
+                    None => panic!("the session ended without a reply"),
+                }
+            }
+        };
+        tokio::select! {
+            r = ended => r,
+            e = session => panic!("the session ended first: {:?}", e.err()),
+        }
+    }
+
+    fn offered() -> Value {
+        json!([{"optionId": "always", "name": "Always", "kind": "allow_always"},
+            {"optionId": "once", "name": "Once", "kind": "allow_once"},
+            {"optionId": "no", "name": "No", "kind": "reject_once"},
+            {"optionId": "never", "name": "Never", "kind": "reject_always"}])
+    }
+
+    fn some(s: &str) -> Option<String> {
+        Some(s.to_owned())
+    }
+
+    #[tokio::test]
+    async fn a_judge_reads_the_request_and_its_allow_picks_allow_once_over_allow_always() {
+        let script = r#"r=$(cat); has() { case $r in *"$1"*) ;; *) exit 3 ;; esac; }
+            has '"name":"t1"'; has '"role":"impl"'; has '"cwd":"/"'; has '"title":"rm notes"'
+            has '"kind":"delete"'; has '"command":"rm notes"'; has '"id":"always"'
+            echo '{"decision": "allow", "reason": "a delete inside the worktree"}'"#;
+        let (picked, event) = judged(script, offered()).await;
+        assert_eq!(picked, "once");
+        let reason = some("a delete inside the worktree");
+        assert_eq!(
+            event,
+            ("once".to_owned(), some("judge"), some("allow"), reason)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_judge_allow_takes_allow_always_only_when_it_is_the_one_allow_offered() {
+        let options = json!([{"optionId": "always", "name": "Always", "kind": "allow_always"},
+            {"optionId": "no", "name": "No", "kind": "reject_once"}]);
+        let script = r#"echo '{"decision": "allow"}'"#;
+        assert_eq!(judged(script, options).await.0, "always");
+    }
+
+    #[tokio::test]
+    async fn a_judge_deny_picks_reject_once_with_its_reason() {
+        let script = r#"cat >/dev/null; echo '{"decision": "deny", "reason": "push to main"}'"#;
+        let (picked, event) = judged(script, offered()).await;
+        assert_eq!(picked, "no");
+        let deny = (
+            "no".to_owned(),
+            some("judge"),
+            some("deny"),
+            some("push to main"),
+        );
+        assert_eq!(event, deny);
+    }
+
+    #[tokio::test]
+    async fn a_judge_that_fails_or_prints_no_verdict_denies() {
+        for (script, why) in [
+            (
+                "echo '{\"decision\": \"allow\"}'; exit 2",
+                "the judge failed: exit status: 2",
+            ),
+            ("echo allow", "the judge's answer is not a verdict"),
+            (
+                "echo '{\"decision\": \"maybe\"}'",
+                "the judge's answer is not a verdict",
+            ),
+        ] {
+            let (picked, (_, by, decision, reason)) = judged(script, offered()).await;
+            assert_eq!(
+                (picked.as_str(), by, decision),
+                ("no", some("judge"), some("deny"))
+            );
+            let reason = reason.unwrap_or_default();
+            assert!(reason.starts_with(why), "{script}: {reason}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_judge_past_its_timeout_denies() {
+        let (picked, (_, _, decision, reason)) = judged("exec sleep 600", offered()).await;
+        assert_eq!((picked.as_str(), decision), ("no", some("deny")));
+        assert_eq!(reason, some("the judge took over 30 s"));
     }
 }

@@ -125,8 +125,21 @@ impl Preview {
                     let tool = tool.lines().next().unwrap_or("");
                     put("33", "? ", "  ", &format!("{tool}: {options}"));
                 }
-                Ok(EventKind::Approved { option }) => {
-                    put("2", "", "", &format!("approved {option}"));
+                Ok(EventKind::Approved {
+                    option,
+                    decision,
+                    reason,
+                    ..
+                }) => {
+                    let judged = decision.as_ref().map(|d| {
+                        format!(" (judge: {d}, {})", reason.as_deref().unwrap_or_default())
+                    });
+                    put(
+                        "2",
+                        "",
+                        "",
+                        &format!("approved {option}{}", judged.unwrap_or_default()),
+                    );
                 }
                 Ok(_) => {}
             }
