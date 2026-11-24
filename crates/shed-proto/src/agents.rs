@@ -78,7 +78,7 @@ pub struct Provider {
     /// The usage probe.
     pub usage: Option<UsageProbe>,
     /// The balance probe.
-    pub balance: Option<BalanceProbe>,
+    pub balance: Option<Box<BalanceProbe>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
     /// The token proxy.

@@ -64,13 +64,13 @@ fn record(port: u16) -> Provider {
     Provider {
         agent: "fake".into(),
         token_var: Some("FAKE_API_KEY".into()),
-        balance: Some(BalanceProbe {
+        balance: Some(Box::new(BalanceProbe {
             url: format!("http://127.0.0.1:{port}/user/balance"),
             auth: "Authorization: Bearer {token}".into(),
             currency: vec!["balance_infos".into(), 0.into(), "currency".into()],
             total: vec!["balance_infos".into(), 0.into(), "total_balance".into()],
             fresh: 600,
-        }),
+        })),
         ..Provider::default()
     }
 }

@@ -166,7 +166,7 @@ impl Store {
             let why = format!("{} has no account {name}", provider.agent);
             return Err(RpcError::new(ErrorCode::NoAccount, why));
         }
-        Ok(Some(fs::read_link(&entry).unwrap_or(entry)).filter(|_| !key_only))
+        Ok((!key_only).then_some(fs::read_link(&entry).unwrap_or(entry)))
     }
 
     /// Makes the account, or adopts `p.folder` by link; the same call twice is one account. A provider with
