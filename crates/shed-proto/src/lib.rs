@@ -34,6 +34,8 @@ pub mod screen;
 pub use screen::*;
 pub mod script;
 pub use script::*;
+pub mod secret;
+pub use secret::*;
 pub mod terminal;
 pub use terminal::*;
 

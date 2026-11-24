@@ -78,11 +78,12 @@ Drover, cooee and any other client depend on shed's client crates at a tag inste
 
 ```toml
 shed-client = { git = "https://github.com/jirathip-dev/shed", tag = "client-v4.0" }
+shed-secrets = { git = "https://github.com/jirathip-dev/shed", tag = "client-v4.0" }   # a program's own secrets (docs/hosts/secrets.md)
 ```
 
 The release workflow's `client-tag` job runs after `ci` ends green on a push to main. `scripts/client-tag.sh`
-finds the newest `client-v*` tag reachable from the commit and, when `crates/shed-proto`, `crates/shed-client`
-or `crates/shed-catalog` changed since then (or there is no tag yet), pushes `client-v<PROTOCOL>.<n>` on it:
+finds the newest `client-v*` tag reachable from the commit and, when `crates/shed-proto`, `crates/shed-client`,
+`crates/shed-catalog` or `crates/shed-secrets` changed since then (or there is no tag yet), pushes `client-v<PROTOCOL>.<n>` on it:
 `<PROTOCOL>` is `shed_proto::PROTOCOL` at that commit and `<n>` counts from 0 within each protocol. A run with no
 client change, or a re-run on a tagged commit, pushes nothing. The tag is git only, with no release assets.
 

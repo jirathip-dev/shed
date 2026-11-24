@@ -28,6 +28,7 @@ mod registry;
 pub mod relay;
 mod screen;
 mod script;
+pub mod secrets;
 pub mod serve;
 mod stats;
 
