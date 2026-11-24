@@ -195,6 +195,15 @@ Replace a file with `data`: written to a temp file beside it, then renamed over 
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
+### `flow.report`
+
+Each flow's table as it ran beside today's code (#309): its mode, the subjects it tracks, how often each row fired, the facts it never took, the `never` rows that fired and the `stuck` reasons, all kept in `flow-counts.json` since they were first kept; and the lines of `flow-shadow.jsonl` from `since` on (default the last 7 days), by class: `state` when the table and today's code showed different states for more than 2 s, `action` when the table's row would have acted and today's code did not. `machine` asks that machine, over its held link.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"flow.report","params":{"since":1762000000}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","flows":[{"disagreements":[{"code":"exited","count":1,"first":1762416000,"kind":"action","last":1762416000,"row":"T9","sample":"build","table":"end-tree"}],"fired":{"T1":4,"T4":4,"T9":1},"flow":"terminal","mode":"shadow","never_seen":["replace","expired"],"stuck":{"tree-left":1},"subjects":4,"unexpected":{}}],"since":1762000000}}
+```
+
 ### `get`
 
 One terminal.
