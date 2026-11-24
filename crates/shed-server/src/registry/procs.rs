@@ -11,6 +11,7 @@ fn row(p: &ProcessInfo, depth: u32) -> Proc {
         ppid: p.ppid,
         depth,
         cpu_pct: u64::try_from(cpu).unwrap_or(u64::MAX),
+        cpu_ms: u64::try_from(p.cpu.as_millis()).unwrap_or(u64::MAX),
         rss_mb: p.rss_bytes >> 20,
         elapsed_s: p.elapsed.as_secs(),
         ..Proc::default()

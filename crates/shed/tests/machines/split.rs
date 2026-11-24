@@ -136,6 +136,7 @@ fn procs_and_top(shed: &Shed, root: &Path) {
         s.disk_total_mb >= s.disk_free_mb && s.disk_total_mb > 0,
         "{s:?}"
     );
+    assert_eq!(s.mem_level.is_some(), cfg!(target_os = "macos"), "{s:?}");
     let held = stats.top_mem.iter().find(|p| p.pid == sleep.pid);
     assert_eq!(held.and_then(|p| p.terminal.as_deref()), Some("box/t"));
     assert!(held.is_some_and(|p| p.command.contains("sleep 101")));
@@ -151,4 +152,23 @@ fn procs_and_top(shed: &Shed, root: &Path) {
     assert!(rss.windows(2).all(|w| w[0] >= w[1]), "most first: {rss:?}");
 
     ok(root, &["kill", "box/t"]);
+    busy_cpu_ms(shed, root);
+}
+
+fn busy_cpu_ms(shed: &Shed, root: &Path) {
+    let busy = "i=0; while [ $i -lt 1000000 ]; do i=$((i+1)); done";
+    ok(root, &["run", "--name", "busy", "--", "sh", "-c", busy]);
+    let cpu_ms = || {
+        shed.procs("busy")
+            .expect("procs")
+            .first()
+            .map_or(0, |p| p.cpu_ms)
+    };
+    let mut first = 0;
+    common::eventually("busy uses CPU", || {
+        first = cpu_ms();
+        first > 0
+    });
+    common::eventually("its cpu_ms grows", || cpu_ms() > first);
+    ok(root, &["kill", "busy"]);
 }

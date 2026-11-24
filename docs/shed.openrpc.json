@@ -1551,7 +1551,7 @@
     },
     {
       "name": "machine.stats",
-      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
+      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available, and on macOS the kernel's level `mem_level`: `normal`, `warn` or `critical`), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2460,7 +2460,7 @@
     },
     {
       "name": "terminal.procs",
-      "description": "The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.",
+      "description": "The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life, and `cpu_ms`, its CPU time, whose difference over two reads is a share), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -5894,6 +5894,17 @@
             "minimum": 0,
             "description": "Percent of memory not available."
           },
+          "mem_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "macOS: the kernel's memory pressure level (`kern.memorystatus_vm_pressure_level`)."
+          },
           "mem_free_mb": {
             "type": "integer",
             "format": "uint64",
@@ -5989,6 +6000,26 @@
         ],
         "description": "`machine.stats` result: a sample taken now, and the kept ones after `since`."
       },
+      "MemLevel": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "normal",
+            "description": "No pressure."
+          },
+          {
+            "type": "string",
+            "const": "warn",
+            "description": "The kernel asks processes to free memory."
+          },
+          {
+            "type": "string",
+            "const": "critical",
+            "description": "The kernel is killing processes to free memory."
+          }
+        ],
+        "description": "The kernel's memory pressure level."
+      },
       "Sample": {
         "type": "object",
         "properties": {
@@ -6008,6 +6039,17 @@
             "format": "uint64",
             "minimum": 0,
             "description": "Percent of memory not available."
+          },
+          "mem_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "macOS: the kernel's memory pressure level (`kern.memorystatus_vm_pressure_level`)."
           },
           "mem_free_mb": {
             "type": "integer",
@@ -6107,6 +6149,13 @@
             "format": "uint64",
             "minimum": 0,
             "description": "CPU used over its life, percent of one core."
+          },
+          "cpu_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "CPU time used over its life, ms; a share is the difference of two reads.",
+            "default": 0
           },
           "rss_mb": {
             "type": "integer",
