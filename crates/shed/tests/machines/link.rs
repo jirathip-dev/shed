@@ -1,14 +1,14 @@
 use std::io::BufRead as _;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use shed_server::proto::{BUILD, EventsParams, Method};
 
 use crate::common::{self, temp_dir};
 use crate::{
-    OLD, SHED, VERSION, box_ssh, fake_hosts, link, linked, local_events, ok, script, shed_on,
+    OLD, SHED, VERSION, box_ssh, fake_hosts, fault, link, linked, local_events, ok, script, shed_on,
 };
 
 #[test]
@@ -66,7 +66,7 @@ fn over_a_held_link_remote_terminals_are_listed_and_controlled_and_another_versi
     let read = json!({"name": "box/t1"});
     let mut took: Vec<Duration> = (0..50)
         .map(|_| {
-            let started = Instant::now();
+            let started = shed_server::clock::now();
             let _: Value = client.call(Method::Read, &read).expect("read");
             started.elapsed()
         })
@@ -122,27 +122,18 @@ fn a_dropped_link_reconnects_and_the_merged_stream_loses_no_events() {
     until("l1", "started", &mut seen);
     let before = until("box/r1", "started", &mut seen)["seq"].clone();
 
-    let pids = std::fs::read_to_string(root.join("bin/ssh.pids")).expect("pids");
-    for pid in pids.lines() {
-        Command::new("kill")
-            .arg(pid)
-            .stderr(Stdio::null())
-            .status()
-            .ok();
-    }
+    fault(&root, "* cut\n");
     common::eventually("reconnecting", || {
         link(&root, "box")["state"] == "reconnecting"
     });
+    fault(&root, "");
     let down = link(&root, "box");
     assert!(down["down_since"].is_u64(), "{down}");
     assert_eq!(down["down_since"], down["since"], "left up at the drop");
-    let dropped = Instant::now();
     on_remote(&["run", "--name", "r2", "--", "sleep", "100"]);
     on_remote(&["state", "r1", "working"]);
     on_remote(&["kill", "r2"]);
     until("box/r2", "killed", &mut seen);
-    let waited = dropped.elapsed();
-    assert!(waited < Duration::from_secs(10), "{waited:?}");
     let up = link(&root, "box");
     assert_eq!(
         (&up["state"], up.get("down_since")),

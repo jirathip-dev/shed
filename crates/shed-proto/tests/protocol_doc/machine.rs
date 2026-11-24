@@ -2,9 +2,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::{Value, json, to_value};
+use shed_proto::flow::{Class, Differs, FlowName, FlowReport, Mode};
 use shed_proto::{
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Hello, Link,
-    LinkState, MachineParams, MachineStats, Method, Proc, Sample, Span, StatsParams,
+    LinkState, MachineParams, MachineStats, MemLevel, Method, Proc, Report, ReportParams, Sample,
+    Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -57,6 +59,7 @@ fn proc(pid: i32, terminal: Option<&str>) -> Proc {
         ppid: 4200,
         depth: 1,
         cpu_pct: 85,
+        cpu_ms: 510_000,
         rss_mb: 1_200,
         elapsed_s: 600,
         command: "cargo test --workspace".into(),
@@ -70,6 +73,7 @@ fn sample(at: u64) -> Sample {
         at,
         load_per_cpu: 0.25,
         mem_pressure_pct: 42,
+        mem_level: Some(MemLevel::Normal),
         mem_free_mb: 9_500,
         mem_total_mb: 16_384,
         swap_used_mb: 512,
@@ -82,8 +86,41 @@ fn sample(at: u64) -> Sample {
     }
 }
 
+fn report_example() -> (Value, Value) {
+    let terminal = FlowReport {
+        flow: FlowName::Terminal,
+        mode: Mode::Shadow,
+        subjects: 4,
+        fired: BTreeMap::from([("T1".into(), 4), ("T4".into(), 4), ("T9".into(), 1)]),
+        never_seen: vec!["replace".into(), "expired".into()],
+        unexpected: BTreeMap::new(),
+        stuck: BTreeMap::from([("tree-left".into(), 1)]),
+        disagreements: vec![Class {
+            kind: Differs::Action,
+            row: "T9".into(),
+            table: "end-tree".into(),
+            code: "exited".into(),
+            count: 1,
+            first: 1_762_416_000,
+            last: 1_762_416_000,
+            sample: "build".into(),
+        }],
+    };
+    let params = ReportParams {
+        since: Some(1_762_000_000),
+        machine: None,
+    };
+    let report = Report {
+        build: "4254d78".into(),
+        since: 1_762_000_000,
+        flows: vec![terminal],
+    };
+    (to_value(params).unwrap(), to_value(report).unwrap())
+}
+
 pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
     Some(match method {
+        Method::FlowReport => report_example(),
         Method::MachineStats => stats_example(),
         Method::MachineLinks => links_example(),
         Method::Exec => (
@@ -140,6 +177,7 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
                 ppid: 1,
                 pid: 4200,
                 cpu_pct: 3,
+                cpu_ms: 18_000,
                 rss_mb: 180,
                 command: "node agent.js".into(),
                 own: true,
@@ -163,8 +201,28 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
             .unwrap(),
             handover(),
         ),
+        Method::InstallFind => (
+            source(),
+            json!({"tag": "build-1a2b3c4", "assets": {"drover-aarch64-apple-darwin": "9f86d081884c7d65"}}),
+        ),
+        Method::InstallLs | Method::InstallBack => (json!({"dest": DROVER}), install(None)),
+        Method::InstallStage => (
+            json!({"source": source(), "build": "1a2b3c4", "dest": DROVER}),
+            install(Some("drover 0.4.0 (1a2b3c4)")),
+        ),
+        Method::InstallSwap => (json!({"dest": DROVER, "build": "1a2b3c4"}), install(None)),
         _ => return None,
     })
+}
+
+const DROVER: &str = "/home/user/.cargo/bin/drover";
+
+fn source() -> Value {
+    json!({"tool": "drover", "releases": "https://github.com/o/drover/releases/download", "tag": "build-1a2b3c4"})
+}
+
+fn install(staged: Option<&str>) -> Value {
+    json!({"live": "drover 0.4.0 (4254d78)", "staged": staged, "prev": null})
 }
 
 fn handover() -> Value {

@@ -295,6 +295,20 @@ All notable changes to this project are documented here. The format follows
   one `auto` picks first and moves every live ACP or stream lane on `auto` or `default` to it, copying the
   session and loading it there; a rate-limited or mid-turn lane gets one prompt to go on. `--clear` drops the
   preference, and `account ls` shows it.
+- The flow tables run in shadow beside today's code: where they disagree, a line goes to `flow-shadow.jsonl`
+  beside the state file; `shed flow report` (`flow.report`) shows rows fired, facts never seen, stuck rows and
+  the disagreements by class, and `shed doctor` counts the last 24 h's.
+- `machine.stats` reports macOS's memory pressure level as `mem_level` (`normal`, `warn` or `critical`), now and in
+  `history`, and every process row in it and in `terminal.procs` carries `cpu_ms`, its CPU time, so two reads give a
+  CPU share.
+- The `shed-secrets` crate, one secret store for shed, cooee and drover: Keychain items on macOS (a signed program
+  only, every call limited to 5 s), 0600 files elsewhere (a wider one is not read). `shed secret set|ls|rm` and
+  the `secret.*` methods keep shed's own; no method returns a value. `shed doctor` reports a wide file, a locked
+  Keychain and an unsigned shed. Client tags carry the crate.
+- `install.find`, `install.ls`, `install.stage`, `install.swap` and `install.back` move a release of shed's own
+  binary or of the tool the client named at `hello` (`tool`), on the main host, and refuse any other binary with
+  `NOT_OWN_BINARY`; `shed install ls` shows shed's live, staged and previous builds. Self-update runs on the same
+  code, and a deferred pass now keeps the checked `<binary>.new` for the next one.
 
 ### Changed
 
@@ -375,3 +389,12 @@ All notable changes to this project are documented here. The format follows
 - `shed events` no longer drops agent text chunks for a reader that falls more than 256 chunks behind
   but stays within the 4,096-event window: every chunk in the last 4,096 events is kept until it is read,
   and only a reader past that window is dropped, with a `lagged` line.
+- One hung machine link no longer blocks the server: a quick call over a link (`ls`, `get`, `read`, `kill`,
+  `state`, …) answers or fails `NO_LINK` within 10 s (an `exec` within its own timeout plus 10 s), and a link
+  whose call got no answer is cut, so `machine ls` reads it reconnecting at once. `ls` asks every machine at
+  the same time. A link's handshake gives up after 20 s instead of waiting for ever.
+- `scripts/fake-link.py`, a fake `ssh` with latency, loss, stalls, hangs, cuts, a host gone, an address change
+  and a host-key change, ships with each release as `shed-fake-link.py`; shed's machine tests run over it.
+  `scripts/soak.py` times throwaway terminals on real machines against `ci/soak.toml`, nightly.
+- A release of a main commit that lacks `scripts/fake-link.py` no longer fails: staging's release workflow skips
+  `shed-fake-link.py` with a notice and still publishes the binaries.

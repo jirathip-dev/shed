@@ -127,3 +127,26 @@ fn the_records_carry_the_account_keys() {
     let hit = agy.limit_hit(line).map(|h| h.1);
     assert_eq!(hit, Some(Some("4 hours".to_owned())));
 }
+
+#[test]
+fn deepseek_is_only_a_key_and_its_balance_reads_from_the_answer() {
+    let d = record("deepseek");
+    assert!(d.config_dir_var.is_none() && d.login.is_none());
+    assert_eq!(d.token_var.as_deref(), Some("DEEPSEEK_API_KEY"));
+    let answer = r#"{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"110.00","granted_balance":"10.00","topped_up_balance":"100.00"}]}"#;
+    let read = d.read_balance(answer, 900).expect("a reading");
+    assert_eq!(
+        (read.currency.as_str(), read.total, read.read_at),
+        ("CNY", 110.0, 900)
+    );
+    let number = r#"{"balance_infos":[{"currency":"USD","total_balance":2.5}]}"#;
+    assert_eq!(d.read_balance(number, 1).map(|b| b.total), Some(2.5));
+    for bad in [
+        "",
+        r#"{"balance_infos":[]}"#,
+        r#"{"balance_infos":[{"currency":"USD","total_balance":"n/a"}]}"#,
+    ] {
+        assert_eq!(d.read_balance(bad, 1), None, "{bad}");
+    }
+    assert_eq!(record("claude").read_balance(answer, 1), None);
+}

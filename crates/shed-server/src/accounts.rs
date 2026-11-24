@@ -21,7 +21,7 @@ static PROBING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 pub(crate) async fn open(cx: &Call<'_>, provider: &str) -> Result<(Store, Provider), RpcError> {
     let all = records(cx).await?;
     let found = all.into_iter().find(|p| p.agent == provider);
-    let why = format!("no provider {provider} with a config folder variable");
+    let why = format!("no provider {provider} with a config folder variable or a balance probe");
     let provider = found.ok_or_else(|| RpcError::new(ErrorCode::NoAccount, why))?;
     Ok((store(cx), provider))
 }
@@ -44,7 +44,7 @@ pub(crate) async fn records(cx: &Call<'_>) -> Result<Vec<Provider>, RpcError> {
 pub(crate) fn records_in(dir: &Path) -> Vec<Provider> {
     let catalog = providers::Catalog::load(dir).0;
     let held = catalog.iter().map(|e| &e.provider);
-    let held = held.filter(|p| p.config_dir_var.is_some());
+    let held = held.filter(|p| p.config_dir_var.is_some() || p.balance.is_some());
     held.cloned().collect()
 }
 

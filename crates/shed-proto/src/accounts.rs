@@ -78,6 +78,23 @@ pub struct WindowRead {
     pub resets: String,
 }
 
+/// The balance probe: the API that answers an account's balance for its key, and where the answer holds it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct BalanceProbe {
+    /// The URL.
+    pub url: String,
+    /// The header that carries the key, `{token}` standing for it.
+    pub auth: String,
+    /// The keys and indexes down to the currency.
+    pub currency: Vec<Value>,
+    /// The keys and indexes down to the total, a number or a numeric string.
+    pub total: Vec<Value>,
+    /// Seconds a reading stands.
+    pub fresh: u64,
+}
+
 /// The setup token: the command that makes one, how it starts and how long it lasts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -164,8 +181,20 @@ pub struct Window {
     pub resets_at: Option<u64>,
 }
 
+/// A balance reading.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct Balance {
+    /// Its currency.
+    pub currency: String,
+    /// The total left.
+    pub total: f64,
+    /// When it was read.
+    pub read_at: u64,
+}
+
 /// An account: a provider's login in a config folder shed keeps, and what shed last read of it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
 pub struct Account {
     /// The record's `agent` name.
@@ -198,6 +227,9 @@ pub struct Account {
     /// The last usage reading.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
+    /// The last balance reading.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub balance: Option<Balance>,
     /// Its setup token's dates, never the token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<TokenInfo>,
@@ -453,6 +485,30 @@ impl Provider {
         let windows: Vec<_> = probe.windows.iter().filter_map(window).collect();
         (!windows.is_empty()).then_some(Usage {
             windows,
+            read_at: now,
+        })
+    }
+
+    /// The balance probe's reading of the API's answer `body` at `now`; none without a probe or when it does
+    /// not read.
+    #[must_use]
+    pub fn read_balance(&self, body: &str, now: u64) -> Option<Balance> {
+        let probe = self.balance.as_ref()?;
+        let answer: Value = serde_json::from_str(body).ok()?;
+        let at = |path: &[Value]| {
+            path.iter().try_fold(&answer, |v, step| match step {
+                Value::String(key) => v.get(key),
+                Value::Number(i) => v.get(usize::try_from(i.as_u64()?).ok()?),
+                _ => None,
+            })
+        };
+        let total = match at(&probe.total)? {
+            Value::String(text) => text.trim().parse().ok()?,
+            number => number.as_f64()?,
+        };
+        Some(Balance {
+            currency: at(&probe.currency)?.as_str()?.to_owned(),
+            total,
             read_at: now,
         })
     }

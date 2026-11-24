@@ -11,7 +11,7 @@ mod fixture;
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use shed_client::Conn;
@@ -50,7 +50,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
         .expect("shed serve starts");
     let socket = Paths::in_dir(&state).socket;
     while UnixStream::connect(&socket).is_err() {
-        std::thread::sleep(Duration::from_millis(20));
+        shed_server::clock::sleep(Duration::from_millis(20));
     }
     let mut client = Conn::connect(&socket).expect("connect");
     let done = AtomicBool::new(false);
@@ -61,7 +61,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
             let mut peak = 0;
             while !done.load(Ordering::Relaxed) {
                 peak = peak.max(rss_kb(pid));
-                std::thread::sleep(Duration::from_millis(10));
+                shed_server::clock::sleep(Duration::from_millis(10));
             }
             peak.max(rss_kb(pid))
         });
@@ -71,7 +71,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
             "cat \"$0\"; exec sleep 600",
             file.to_str().expect("utf-8"),
         ];
-        let start = Instant::now();
+        let start = shed_server::clock::now();
         let labels = json!({"agent": "claude"});
         let run = json!({"name": "t", "cmd": cmd, "cwd": "/", "labels": labels});
         let _: Value = client.call(Method::Run, &run).expect("run");
@@ -81,7 +81,7 @@ fn drain(dir: &std::path::Path, kind: &str) {
                 start.elapsed() < Duration::from_mins(2),
                 "{kind} never drained"
             );
-            std::thread::sleep(Duration::from_millis(2));
+            shed_server::clock::sleep(Duration::from_millis(2));
         }
         let secs = start.elapsed().as_secs_f64();
         done.store(true, Ordering::Relaxed);

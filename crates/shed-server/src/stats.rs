@@ -3,10 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use shed_core::clock::unix_now;
+#[cfg(any(not(target_os = "linux"), test))]
+use shed_proto::MemLevel::{self, Critical, Normal, Warn};
 use shed_proto::Sample;
 
 const EVERY: u64 = 60;
 const DAY: u64 = 86_400;
+#[cfg(any(not(target_os = "linux"), test))]
+const LEVELS: [Option<MemLevel>; 5] = [None, Some(Normal), Some(Warn), None, Some(Critical)];
 
 fn stdout<A: AsRef<std::ffi::OsStr>>(program: &str, args: impl IntoIterator<Item = A>) -> String {
     shed_core::runner::output(program, args, &[])
@@ -79,6 +83,7 @@ fn probe() -> Sample {
         "vm.swapusage",
         "kern.boottime",
         "hw.memsize",
+        "kern.memorystatus_vm_pressure_level",
     ];
     parse_sysctl(
         &stdout("/usr/sbin/sysctl", std::iter::once("-n").chain(keys)),
@@ -109,6 +114,7 @@ fn parse_sysctl(text: &str, vm_stat: &str, now: u64) -> Sample {
     Sample {
         load_per_cpu: load.unwrap_or(0.0),
         mem_pressure_pct: 100 - free,
+        mem_level: first(next()).and_then(|i: usize| LEVELS.get(i).copied().flatten()),
         mem_free_mb: total * free / 100,
         mem_total_mb: total,
         swap_used_mb: swap.unwrap_or(0),
@@ -212,5 +218,21 @@ mod tests {
         };
         assert_eq!(parse_sysctl(text, vm_stat, 1_762_003_600), sample);
         assert_eq!(parse_sysctl("", "", 5), Sample::default());
+        for (value, level) in [
+            ("1", Some(MemLevel::Normal)),
+            ("2", Some(MemLevel::Warn)),
+            ("4", Some(MemLevel::Critical)),
+            ("3", None),
+        ] {
+            let text = format!("{text}{value}\n");
+            let parsed = parse_sysctl(&text, vm_stat, 1_762_003_600);
+            assert_eq!(
+                parsed,
+                Sample {
+                    mem_level: level,
+                    ..sample.clone()
+                }
+            );
+        }
     }
 }

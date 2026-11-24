@@ -2,7 +2,6 @@ use std::io::Write as _;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -52,14 +51,14 @@ fn exec_and_files(root: &Path, on: &[&str]) {
     );
 
     let returned = dir.join(format!("returned{}", on.len()));
-    let script = format!("sleep 60 & echo $! > '{}'", returned.display());
-    let started = Instant::now();
+    let script = format!("sleep 600 & echo $! > '{}'", returned.display());
+    let started = shed_server::clock::now();
     assert!(
         shed(&["exec", "--", "sh", "-c", &script], b"")
             .status
             .success()
     );
-    assert!(started.elapsed() < Duration::from_secs(10));
+    assert!(started.elapsed() < shed_server::clock::PATIENCE);
     gone(&returned);
     let timed_out = dir.join(format!("timed-out{}", on.len()));
     let script = format!("sleep 60 & echo $! > '{}'; wait", timed_out.display());

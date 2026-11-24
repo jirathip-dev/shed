@@ -11,6 +11,7 @@ fn row(p: &ProcessInfo, depth: u32) -> Proc {
         ppid: p.ppid,
         depth,
         cpu_pct: u64::try_from(cpu).unwrap_or(u64::MAX),
+        cpu_ms: u64::try_from(p.cpu.as_millis()).unwrap_or(u64::MAX),
         rss_mb: p.rss_bytes >> 20,
         elapsed_s: p.elapsed.as_secs(),
         ..Proc::default()
@@ -41,6 +42,11 @@ impl Entry {
 }
 
 impl Registry {
+    pub(crate) fn leaders(&self) -> BTreeMap<String, i32> {
+        let leader = |(n, e): (&String, &Entry)| Some((n.clone(), e.term.as_ref()?.pid()));
+        self.entries.iter().filter_map(leader).collect()
+    }
+
     pub(crate) fn procs(&self, name: &str, procs: &[ProcessInfo]) -> Result<Vec<Proc>, RpcError> {
         let entry = self.entry(name)?;
         let tree = entry.tree(procs);

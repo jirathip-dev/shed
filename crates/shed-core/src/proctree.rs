@@ -141,7 +141,7 @@ fn parse_cpu_time(s: &str) -> Option<Duration> {
     Some(Duration::from_secs(days * 86_400 + secs) + Duration::from_millis(centis * 10))
 }
 
-/// The command line of process `pid` and how long it has run; `None` once it is gone.
+/// The command line of process `pid` and how long it has run; `None` once it has exited, reaped or not.
 #[cfg(target_os = "linux")]
 #[must_use]
 pub fn command(pid: i32) -> Option<(String, Duration)> {
@@ -154,18 +154,23 @@ pub fn command(pid: i32) -> Option<(String, Duration)> {
     let up = uptime.split_once('.')?.0.parse::<u64>().ok()?;
     let ticks = rustix::param::clock_ticks_per_second().max(1);
     let age = Duration::from_secs(up.saturating_sub(started / ticks));
-    Some((args.trim().to_owned(), age))
+    let args = args.trim();
+    (!args.is_empty()).then(|| (args.to_owned(), age))
 }
 
-/// The command line of process `pid` and how long it has run; `None` once it is gone.
+/// The command line of process `pid` and how long it has run; `None` once it has exited, reaped or not.
 #[cfg(not(target_os = "linux"))]
 #[must_use]
 pub fn command(pid: i32) -> Option<(String, Duration)> {
     let pid = pid.to_string();
-    let args = ["-o", "etime=,args=", "-p", &pid];
+    let args = ["-o", "stat=,etime=,args=", "-p", &pid];
     let out = crate::runner::output("ps", args, &[("LC_ALL", "C")]).ok()?;
     let out = String::from_utf8_lossy(&out.stdout);
-    let (age, args) = out.trim().split_once(' ')?;
+    let (stat, rest) = out.trim().split_once(' ')?;
+    let (age, args) = rest.trim_start().split_once(' ')?;
+    if stat.starts_with('Z') {
+        return None;
+    }
     Some((args.trim().to_owned(), parse_cpu_time(age)?))
 }
 
@@ -347,6 +352,20 @@ mod tests {
                 cpu: Duration::from_millis(20)
             }
         );
+    }
+
+    #[test]
+    fn an_exited_child_not_yet_reaped_has_no_command() {
+        let mut child = crate::runner::detached(std::path::Path::new("sleep"), ["900"]).unwrap();
+        let pid = Pid::from_raw(i32::try_from(child.id()).unwrap()).unwrap();
+        let execed = || command(pid.as_raw_nonzero().get()).is_some();
+        assert!(crate::clock::poll(crate::clock::PATIENCE, execed));
+        kill_process(pid, Signal::KILL).unwrap();
+        let exited =
+            rustix::process::WaitIdOptions::EXITED | rustix::process::WaitIdOptions::NOWAIT;
+        rustix::process::waitid(rustix::process::WaitId::Pid(pid), exited).unwrap();
+        assert_eq!(command(pid.as_raw_nonzero().get()), None);
+        child.wait().unwrap();
     }
 
     #[test]

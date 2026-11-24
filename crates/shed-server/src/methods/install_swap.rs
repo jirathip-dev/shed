@@ -1,0 +1,9 @@
+use crate::call::{Call, Reply, blocking, json};
+use crate::install;
+use crate::proto::Swap;
+
+pub(super) async fn call(cx: &mut Call<'_>) -> Reply {
+    let p: Swap = cx.params()?;
+    install::own(cx.session.tool.as_ref(), None, Some(&p.dest))?;
+    json(&blocking(move || install::swap(&p)).await??)
+}

@@ -11,7 +11,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use shed_accounts::session;
 use shed_proto::Provider;
@@ -43,14 +42,11 @@ fn claude(folder: &Path, cwd: &Path, args: &[&str]) -> String {
 fn a_session_copied_between_two_account_folders_loads() {
     let folder = |var| PathBuf::from(std::env::var(var).expect("SHED_LIVE_FROM and SHED_LIVE_TO"));
     let (from, to) = (folder("SHED_LIVE_FROM"), folder("SHED_LIVE_TO"));
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("time")
-        .as_nanos();
+    let secs = shed_core::clock::unix_now();
     let session = format!(
         "{:08x}-0000-4000-8000-{:012x}",
         std::process::id(),
-        nanos % (1 << 48)
+        secs % (1 << 48)
     );
     let cwd = std::env::temp_dir().join(format!("shed-live-session-{}", std::process::id()));
     fs::create_dir_all(&cwd).expect("cwd");

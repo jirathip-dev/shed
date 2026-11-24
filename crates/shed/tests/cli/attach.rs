@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shed_core::{Size, Terminal};
 
@@ -31,16 +31,12 @@ fn attach_types_resizes_and_detaches_in_a_pty() {
             cols: 100,
         })
         .expect("resize");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !outer.screen().contains("30 100") {
-        assert!(
-            Instant::now() < deadline,
-            "resize not forwarded: {}",
-            outer.screen()
-        );
+    let forwarded = shed_server::clock::poll(shed_server::clock::PATIENCE, || {
         outer.write(b"stty size\r").expect("type");
-        std::thread::sleep(Duration::from_millis(300));
-    }
+        shed_server::clock::sleep(Duration::from_millis(300));
+        outer.screen().contains("30 100")
+    });
+    assert!(forwarded, "resize not forwarded: {}", outer.screen());
 
     outer.write(&[0x1c]).expect("Ctrl+\\");
     eventually("detach", || matches!(outer.try_wait(), Ok(Some(_))));

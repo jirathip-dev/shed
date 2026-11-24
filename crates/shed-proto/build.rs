@@ -1,7 +1,9 @@
-//! Stamps the build with its git commit (`SHED_BUILD`), and writes `Method` and `ErrorCode` from `methods/*.md` and `errors/*.md`, one file a row.
+//! Stamps the build with its git commit (`SHED_BUILD`), writes `Method` and `ErrorCode` from `methods/*.md` and `errors/*.md`, one file a row, and each flow's `State`, `Fact`, `Action` and `row()` from `flows/*.md`, refusing a gap.
 
 #[path = "../../build/collect.rs"]
 mod collect;
+#[path = "../../build/flows.rs"]
+mod flows;
 
 use std::collections::BTreeSet;
 use std::process::Command;
@@ -248,5 +250,9 @@ impl ErrorCode {{
 fn main() -> Result<(), String> {
     stamp();
     collect::write("methods.rs", &methods()?).map_err(|e| e.to_string())?;
-    collect::write("errors.rs", &errors()?).map_err(|e| e.to_string())
+    collect::write("errors.rs", &errors()?).map_err(|e| e.to_string())?;
+    collect::rows("flows", "md").map_err(|e| format!("flows: {e}"))?;
+    let tables = flows::load(std::path::Path::new("flows"))?;
+    let modules: Vec<String> = tables.iter().map(flows::module).collect();
+    collect::write("flows.rs", &modules.concat()).map_err(|e| e.to_string())
 }

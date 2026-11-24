@@ -26,7 +26,7 @@ use crate::Error;
 use crate::history::{History, Log};
 use crate::runner::ExitStatus;
 use crate::screen::{Screen, Size, Snapshot};
-use exit::{reap, runtime};
+use exit::{is_child, reap, runtime};
 use io::{batches, feed_loop, read_loop, stage, write_loop};
 use status::{Rules, Status, bump};
 
@@ -120,7 +120,7 @@ impl Terminal {
     /// which leads its session. The screen starts from `history` as in [`spawn_with`](Self::spawn_with).
     /// Not being its parent, the terminal learns of the program's end when the PTY closes, as exit 0. With
     /// `repaint`, it picks up a [`detach`](Self::detach)ed terminal of this process instead: the log tail,
-    /// then `repaint`, and it waits on `pid` as its child.
+    /// then `repaint`, and it waits on `pid` when that is its child.
     ///
     /// # Errors
     /// [`Error::Io`] when the PTY's size or the log cannot be read.
@@ -139,7 +139,8 @@ impl Terminal {
         screen.take_replies();
         screen.take_reports();
         let log = Log::open(history)?;
-        Self::start(master.into(), pid, repaint.is_some(), screen, log)
+        let child = repaint.is_some() && is_child(pid);
+        Self::start(master.into(), pid, child, screen, log)
     }
 
     fn start(

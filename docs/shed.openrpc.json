@@ -1210,6 +1210,43 @@
       }
     },
     {
+      "name": "flow.report",
+      "description": "Each flow's table as it ran beside today's code (#309): its mode, the subjects it tracks, how often each row fired, the facts it never took, the `never` rows that fired and the `stuck` reasons, all kept in `flow-counts.json` since they were first kept; and the lines of `flow-shadow.jsonl` from `since` on (default the last 7 days), by class: `state` when the table and today's code showed different states for more than 2 s, `action` when the table's row would have acted and today's code did not. `machine` asks that machine, over its held link.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "since",
+          "required": false,
+          "schema": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Disagreements from this time on, unix seconds; default the last 7 days."
+          }
+        },
+        {
+          "name": "machine",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Ask this machine, over its held link."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Report"
+        }
+      }
+    },
+    {
       "name": "get",
       "description": "One terminal.",
       "paramStructure": "by-name",
@@ -1346,12 +1383,172 @@
             "minimum": 0,
             "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
           }
+        },
+        {
+          "name": "tool",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A client's own tool, which the `install` methods may move besides shed."
+          }
         }
       ],
       "result": {
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/Hello"
+        }
+      }
+    },
+    {
+      "name": "install.back",
+      "description": "Renames `<dest>.prev` over the live binary, once `<dest>.prev --version` answers; else `UNSTAGED` and nothing moves. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
+        }
+      }
+    },
+    {
+      "name": "install.find",
+      "description": "A release's `SHA256SUMS`, read on the main host; none there yet is `NO_RELEASE`. `tool` must be `shed` or the tool the client named at `hello`, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "tool",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`shed` or the caller's [`Tool`] name."
+          }
+        },
+        {
+          "name": "releases",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The releases URL."
+          }
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The release tag, the caller's choice."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Release"
+        }
+      }
+    },
+    {
+      "name": "install.ls",
+      "description": "The `--version` line of `<dest>`, `<dest>.new` and `<dest>.prev`. `dest` must be shed's own binary or the tool's the client named at `hello`, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
+        }
+      }
+    },
+    {
+      "name": "install.stage",
+      "description": "Downloads `<tool>-<arch>-<os>` to `<dest>.new.part`, checks its sha256 against `SHA256SUMS`, makes it 755, checks that its `--version` contains `build` and renames it to `<dest>.new`; the live binary is untouched. A failed check removes the file and is `UNSTAGED`, naming it (`asset`, `download`, `checksum`, `version`); `build` already staged fetches nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Source",
+            "description": "The release."
+          }
+        },
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "What `<dest>.new --version` must contain."
+          }
+        },
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
+        }
+      }
+    },
+    {
+      "name": "install.swap",
+      "description": "Keeps the live binary as `<dest>.prev` (a hard link) and renames `<dest>.new` over it, once `<dest>.new --version` answers with `build`; else `UNSTAGED` and nothing moves. Live already `build`: nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        },
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The build `<dest>.new` must be."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
         }
       }
     },
@@ -1514,7 +1711,7 @@
     },
     {
       "name": "machine.stats",
-      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
+      "description": "The machine's health now: load per CPU, memory pressure (percent of memory not available, and on macOS the kernel's level `mem_level`: `normal`, `warn` or `critical`), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2143,6 +2340,71 @@
       }
     },
     {
+      "name": "secret.ls",
+      "description": "shed's own secrets by name, with when each was saved; never a value.",
+      "paramStructure": "by-name",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/SavedSecret"
+          }
+        }
+      }
+    },
+    {
+      "name": "secret.rm",
+      "description": "Removes one of shed's own secrets; twice is once.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The secret's name."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
+      "name": "secret.set",
+      "description": "Saves one of shed's own secrets (a VM provider's key) on the main host: a Keychain item on macOS, a 0600 file elsewhere. The value is never logged, saved in the state file or returned.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`[A-Za-z0-9._-]`, 1 to 128, not starting with a dot."
+          }
+        },
+        {
+          "name": "value",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "1 to 8,192 bytes; never logged, saved in the state file or echoed in an error."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "send",
       "description": "Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.",
       "paramStructure": "by-name",
@@ -2423,7 +2685,7 @@
     },
     {
       "name": "terminal.procs",
-      "description": "The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.",
+      "description": "The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life, and `cpu_ms`, its CPU time, whose difference over two reads is a share), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2681,6 +2943,17 @@
             ],
             "description": "The last usage reading."
           },
+          "balance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Balance"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last balance reading."
+          },
           "token": {
             "anyOf": [
               {
@@ -2822,6 +3095,32 @@
           "used_pct"
         ],
         "description": "One usage window."
+      },
+      "Balance": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "Its currency."
+          },
+          "total": {
+            "type": "number",
+            "format": "double",
+            "description": "The total left."
+          },
+          "read_at": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was read."
+          }
+        },
+        "required": [
+          "currency",
+          "total",
+          "read_at"
+        ],
+        "description": "A balance reading."
       },
       "TokenInfo": {
         "type": "object",
@@ -3226,6 +3525,18 @@
               }
             ],
             "description": "The usage probe.",
+            "default": null
+          },
+          "balance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BalanceProbe"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The balance probe.",
             "default": null
           },
           "token": {
@@ -3688,6 +3999,44 @@
           "resets"
         ],
         "description": "How one usage window's line reads."
+      },
+      "BalanceProbe": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL."
+          },
+          "auth": {
+            "type": "string",
+            "description": "The header that carries the key, `{token}` standing for it."
+          },
+          "currency": {
+            "type": "array",
+            "items": true,
+            "description": "The keys and indexes down to the currency."
+          },
+          "total": {
+            "type": "array",
+            "items": true,
+            "description": "The keys and indexes down to the total, a number or a numeric string."
+          },
+          "fresh": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds a reading stands."
+          }
+        },
+        "required": [
+          "url",
+          "auth",
+          "currency",
+          "total",
+          "fresh"
+        ],
+        "description": "The balance probe: the API that answers an account's balance for its key, and where the answer holds it."
       },
       "TokenSetup": {
         "type": "object",
@@ -5457,6 +5806,224 @@
         ],
         "description": "A span of lines, 1-based and inclusive."
       },
+      "Report": {
+        "type": "object",
+        "properties": {
+          "build": {
+            "type": "string",
+            "description": "The build that answered."
+          },
+          "since": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Disagreements from this time on, unix seconds."
+          },
+          "flows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowReport"
+            },
+            "description": "One entry a flow."
+          }
+        },
+        "required": [
+          "build",
+          "since",
+          "flows"
+        ],
+        "description": "`flow.report` result."
+      },
+      "FlowReport": {
+        "type": "object",
+        "properties": {
+          "flow": {
+            "$ref": "#/components/schemas/FlowName",
+            "description": "The flow."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode",
+            "description": "Shadow or drive."
+          },
+          "subjects": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The subjects it tracks now."
+          },
+          "fired": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "Row id to times it fired."
+          },
+          "never_seen": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Facts it never took, besides `gave_up`."
+          },
+          "unexpected": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "`never` rows that fired, to times."
+          },
+          "stuck": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0
+            },
+            "description": "`stuck` reasons, to times."
+          },
+          "disagreements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Class"
+            },
+            "description": "The shadow lines, by class.",
+            "default": []
+          }
+        },
+        "required": [
+          "flow",
+          "mode",
+          "subjects",
+          "fired",
+          "never_seen",
+          "unexpected",
+          "stuck"
+        ],
+        "description": "One flow in a [`Report`]: its counts since they were first kept, and its disagreements since `since`."
+      },
+      "FlowName": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "terminal",
+            "description": "A terminal name on one shed."
+          },
+          {
+            "type": "string",
+            "const": "link",
+            "description": "The held link to one machine."
+          },
+          {
+            "type": "string",
+            "const": "machine",
+            "description": "A machine in the main host's list."
+          },
+          {
+            "type": "string",
+            "const": "drain",
+            "description": "This shed's own drain."
+          },
+          {
+            "type": "string",
+            "const": "account",
+            "description": "One account of one provider."
+          },
+          {
+            "type": "string",
+            "const": "key",
+            "description": "One proxy key."
+          }
+        ],
+        "description": "The flows, as events and reports name them."
+      },
+      "Mode": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "shadow",
+            "description": "Facts step the table, no action runs, and today's code is compared."
+          },
+          {
+            "type": "string",
+            "const": "drive",
+            "description": "The table's actions run."
+          }
+        ],
+        "description": "Whether a flow's table only watches today's code or drives."
+      },
+      "Class": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/Differs",
+            "description": "How they differ."
+          },
+          "row": {
+            "type": "string",
+            "description": "The table's row."
+          },
+          "table": {
+            "type": "string",
+            "description": "The table's state or action."
+          },
+          "code": {
+            "type": "string",
+            "description": "What today's code showed or did."
+          },
+          "count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "How many lines."
+          },
+          "first": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The first line's time."
+          },
+          "last": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "The last line's time."
+          },
+          "sample": {
+            "type": "string",
+            "description": "One subject it was seen on."
+          }
+        },
+        "required": [
+          "kind",
+          "row",
+          "table",
+          "code",
+          "count",
+          "first",
+          "last",
+          "sample"
+        ],
+        "description": "Shadow lines that differ the same way."
+      },
+      "Differs": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "state",
+            "description": "They showed different states for more than 2 s."
+          },
+          {
+            "type": "string",
+            "const": "action",
+            "description": "The table's row would have acted and today's code did not."
+          }
+        ],
+        "description": "How the table and today's code differ."
+      },
       "Handover": {
         "type": "object",
         "properties": {
@@ -5481,6 +6048,24 @@
           "terminals"
         ],
         "description": "The answer to `handover.check` and `handover`."
+      },
+      "Tool": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name, as its release assets start (`drover`); the last part of `exe`."
+          },
+          "exe": {
+            "type": "string",
+            "description": "Its live binary's absolute path."
+          }
+        },
+        "required": [
+          "name",
+          "exe"
+        ],
+        "description": "The calling tool, named at `hello`: the one binary besides shed's own the `install` methods move."
       },
       "Hello": {
         "type": "object",
@@ -5514,12 +6099,94 @@
             "format": "uint32",
             "minimum": 0,
             "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A client's own tool, which the `install` methods may move besides shed."
           }
         },
         "required": [
           "version"
         ],
         "description": "`hello` params and result: the sender's product, version, build and protocol range."
+      },
+      "Install": {
+        "type": "object",
+        "properties": {
+          "live": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`<dest>`."
+          },
+          "staged": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`<dest>.new`."
+          },
+          "prev": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`<dest>.prev`."
+          }
+        },
+        "description": "An install's three files, each by its `--version` line; none when missing or not answering."
+      },
+      "Release": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string",
+            "description": "The tag."
+          },
+          "assets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each asset's sha256, from `SHA256SUMS`."
+          }
+        },
+        "required": [
+          "tag",
+          "assets"
+        ],
+        "description": "`install.find` result: a release's assets."
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "`shed` or the caller's [`Tool`] name."
+          },
+          "releases": {
+            "type": "string",
+            "description": "The releases URL."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The release tag, the caller's choice."
+          }
+        },
+        "required": [
+          "tool",
+          "releases",
+          "tag"
+        ],
+        "description": "Where a release is: `<releases>/<tag>/SHA256SUMS` and `<releases>/<tag>/<tool>-<arch>-<os>`."
       },
       "Link": {
         "type": "object",
@@ -5639,6 +6306,17 @@
             "minimum": 0,
             "description": "Percent of memory not available."
           },
+          "mem_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "macOS: the kernel's memory pressure level (`kern.memorystatus_vm_pressure_level`)."
+          },
           "mem_free_mb": {
             "type": "integer",
             "format": "uint64",
@@ -5734,6 +6412,26 @@
         ],
         "description": "`machine.stats` result: a sample taken now, and the kept ones after `since`."
       },
+      "MemLevel": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "normal",
+            "description": "No pressure."
+          },
+          {
+            "type": "string",
+            "const": "warn",
+            "description": "The kernel asks processes to free memory."
+          },
+          {
+            "type": "string",
+            "const": "critical",
+            "description": "The kernel is killing processes to free memory."
+          }
+        ],
+        "description": "The kernel's memory pressure level."
+      },
       "Sample": {
         "type": "object",
         "properties": {
@@ -5753,6 +6451,17 @@
             "format": "uint64",
             "minimum": 0,
             "description": "Percent of memory not available."
+          },
+          "mem_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MemLevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "macOS: the kernel's memory pressure level (`kern.memorystatus_vm_pressure_level`)."
           },
           "mem_free_mb": {
             "type": "integer",
@@ -5852,6 +6561,13 @@
             "format": "uint64",
             "minimum": 0,
             "description": "CPU used over its life, percent of one core."
+          },
+          "cpu_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "CPU time used over its life, ms; a share is the difference of two reads.",
+            "default": 0
           },
           "rss_mb": {
             "type": "integer",
@@ -6782,6 +7498,28 @@
         ],
         "description": "Why an acting call came to nothing."
       },
+      "SavedSecret": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The secret's name."
+          },
+          "saved_at": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0,
+            "description": "When it was saved, when the store says."
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "description": "One of shed's own secrets in `secret.ls`: its name, never its value."
+      },
       "Children": {
         "oneOf": [
           {
@@ -6961,6 +7699,22 @@
       "NO_PROXY": {
         "code": -32018,
         "message": "NO_PROXY"
+      },
+      "NOT_OWN_BINARY": {
+        "code": -32019,
+        "message": "NOT_OWN_BINARY"
+      },
+      "NO_RELEASE": {
+        "code": -32020,
+        "message": "NO_RELEASE"
+      },
+      "UNSTAGED": {
+        "code": -32021,
+        "message": "UNSTAGED"
+      },
+      "SECRET_STORE": {
+        "code": -32022,
+        "message": "SECRET_STORE"
       },
       "INVALID_REQUEST": {
         "code": -32600,

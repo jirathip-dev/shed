@@ -1,9 +1,7 @@
 //! Bounded history under load.
 
-use std::time::Instant;
-
 use shed_core::history::{BYTES, LINES};
-use shed_core::{History, Screen, Size, Terminal};
+use shed_core::{History, Screen, Size, Terminal, clock};
 
 #[test]
 fn throughput_report_with_full_scrollback() {
@@ -15,7 +13,7 @@ fn throughput_report_with_full_scrollback() {
         screen.feed(line.as_bytes());
     }
     let total = 16usize << 20;
-    let start = Instant::now();
+    let start = clock::now();
     let mut fed = 0;
     while fed < total {
         screen.feed(chunk.as_bytes());
@@ -53,14 +51,15 @@ fn a_terminal_starts_from_its_log() {
         None,
     )
     .expect("spawn");
-    let deadline = Instant::now() + std::time::Duration::from_secs(10);
-    while !std::fs::read_to_string(&log)
-        .expect("read")
-        .ends_with("after\r\n")
-    {
-        assert!(Instant::now() < deadline, "the log never got the output");
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
+    let logged = || {
+        std::fs::read_to_string(&log)
+            .expect("read")
+            .ends_with("after\r\n")
+    };
+    assert!(
+        clock::poll(clock::PATIENCE, logged),
+        "the log never got the output"
+    );
     assert_eq!(t.with_screen(|s| s.history(usize::MAX)), "before\n\nafter");
     std::fs::remove_dir_all(dir).expect("clean");
 }

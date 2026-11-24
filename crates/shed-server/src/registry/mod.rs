@@ -267,7 +267,7 @@ mod tests {
             };
             let lane = run(&format!("lane{n}"), serde_json::json!({ "agent": agent }));
             let plain = run(&format!("plain{n}"), serde_json::json!({}));
-            let deadline = shed_core::clock::now() + Duration::from_secs(10);
+            let deadline = shed_core::clock::now() + shed_core::clock::PATIENCE;
             let from = Some(format!("rule:{}", rule.id));
             let matched =
                 lane.wait_until(|t| t.report().and_then(|r| r.from) == from, Some(deadline));

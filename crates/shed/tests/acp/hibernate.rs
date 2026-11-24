@@ -35,7 +35,16 @@ fn processes(dir: &Path, name: &str) -> usize {
 }
 
 fn past_the_delay() {
-    std::thread::sleep(std::time::Duration::from_millis(4500));
+    shed_server::clock::sleep(std::time::Duration::from_millis(4500));
+}
+
+fn settles_at(dir: &Path, name: &str, count: usize) {
+    let settled = || processes(dir, name) == count;
+    let within = shed_server::clock::PATIENCE;
+    assert!(
+        shed_server::clock::poll(within, settled),
+        "{name}: never {count} processes"
+    );
 }
 
 #[test]
@@ -46,7 +55,7 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
     start_with_history(&dir, "h", &history, &[]);
     first_turn(&dir, "h");
     until(&dir, "h", "hibernated");
-    assert_eq!(processes(&dir, "h"), 1, "the agent is gone");
+    settles_at(&dir, "h", 1);
     assert_eq!(
         reported(&dir, "h"),
         json!({"state": "hibernated", "from": "reported"})
@@ -59,18 +68,18 @@ fn an_idle_agent_hibernates_but_not_mid_turn_or_while_a_request_waits() {
     ok(&dir, &["send", "h", "slow"]);
     past_the_delay();
     assert_eq!(reported(&dir, "h")["state"], "working");
-    assert_eq!(processes(&dir, "h"), 2);
+    settles_at(&dir, "h", 2);
     ok(&dir, &["cancel", "h"]);
     until(&dir, "h", "done");
     ok(&dir, &["send", "h", "tool"]);
     until(&dir, "h", "waiting-approval");
     past_the_delay();
     assert_eq!(reported(&dir, "h")["state"], "waiting-approval");
-    assert_eq!(processes(&dir, "h"), 2);
+    settles_at(&dir, "h", 2);
     ok(&dir, &["approve", "h", "allow-once"]);
     until(&dir, "h", "done");
     until(&dir, "h", "hibernated");
-    assert_eq!(processes(&dir, "h"), 1);
+    settles_at(&dir, "h", 1);
 }
 
 #[test]

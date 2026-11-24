@@ -104,6 +104,9 @@ pub struct Proc {
     pub depth: u32,
     /// CPU used over its life, percent of one core.
     pub cpu_pct: u64,
+    /// CPU time used over its life, ms; a share is the difference of two reads.
+    #[serde(default)]
+    pub cpu_ms: u64,
     /// Resident memory, MiB.
     pub rss_mb: u64,
     /// Seconds since it started.
@@ -128,6 +131,8 @@ pub struct Sample {
     pub load_per_cpu: f64,
     /// Percent of memory not available.
     pub mem_pressure_pct: u64,
+    /// macOS: the kernel's memory pressure level (`kern.memorystatus_vm_pressure_level`).
+    pub mem_level: Option<MemLevel>,
     /// Memory available without swapping, MiB.
     #[serde(default)]
     pub mem_free_mb: u64,
@@ -150,6 +155,19 @@ pub struct Sample {
     pub uptime_s: u64,
     /// Terminals by state: the reported state while running, else `running`; `exited`.
     pub terminals: BTreeMap<String, u64>,
+}
+
+/// The kernel's memory pressure level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MemLevel {
+    /// No pressure.
+    Normal,
+    /// The kernel asks processes to free memory.
+    Warn,
+    /// The kernel is killing processes to free memory.
+    Critical,
 }
 
 /// A held link's state.

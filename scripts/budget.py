@@ -2,18 +2,26 @@
 """The test time budget (`just budget`): each crate's tests within `[package.metadata.gate] test_secs`.
 
 Builds every test binary of the workspace under ROOT (default .), then runs them crate by crate from the
-crate's folder, as `cargo test` does, timing each crate. Fails when a test fails, a crate under
-ROOT/crates states no budget, or a crate's tests take longer than it. The budget scales with the host's
-load per CPU (1-minute average, the higher of before and after the crate), never below itself.
+crate's folder, as `cargo test` does. Fails when a test fails, a crate under ROOT/crates states no
+budget, or a crate's tests use more CPU seconds (user and system, of the test binaries and the processes
+they wait for) than it. CPU time, not wall time: a busy host slows a test but does not make it use more
+CPU, so load cannot fail the budget (#310).
 """
 
 import glob
 import json
 import os
 import re
+import resource
 import subprocess
 import sys
 import time
+
+
+def cpu():
+    used = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return used.ru_utime + used.ru_stime
+
 
 BUDGET = re.compile(r"^\[package\.metadata\.gate\]\n(?:[^\[\n].*\n|\n)*?test_secs *= *([0-9.]+)", re.M)
 
@@ -36,16 +44,14 @@ for manifest in sorted(glob.glob(os.path.join(root, "crates/*/Cargo.toml"))):
     if not found:
         failed.append(f"{name}: no [package.metadata.gate] test_secs")
         continue
-    load, started = os.getloadavg()[0], time.monotonic()
+    started, cpu_started = time.monotonic(), cpu()
     for exe in binaries.get(crate, []):
         if subprocess.run([exe], cwd=crate).returncode != 0:
             failed.append(f"{name}: {os.path.basename(exe)} failed")
-    took = time.monotonic() - started
-    scale = max(1.0, max(load, os.getloadavg()[0]) / (os.cpu_count() or 1))
-    limit = float(found.group(1)) * scale
-    print(f"budget: {name}: {took:.1f} s of {limit:.1f} s (test_secs {found.group(1)} at load x{scale:.1f})")
-    if took > limit:
-        failed.append(f"{name}: the tests took {took:.1f} s, over test_secs = {found.group(1)} at load x{scale:.1f}")
+    used, took, limit = cpu() - cpu_started, time.monotonic() - started, float(found.group(1))
+    print(f"budget: {name}: {used:.1f} CPU s of {limit:g} ({took:.1f} s wall, reported only)")
+    if used > limit:
+        failed.append(f"{name}: the tests used {used:.1f} CPU s, over test_secs = {found.group(1)}")
 
 for line in failed:
     print(f"budget: {line}")

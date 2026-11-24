@@ -5,7 +5,7 @@ use std::os::unix::process::ExitStatusExt as _;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use rustix::process::{Pid, WaitOptions, waitpid};
+use rustix::process::{Pid, WaitId, WaitIdOptions, WaitOptions, waitid, waitpid};
 use tokio::runtime::{Builder, Handle, Runtime, RuntimeFlavor::MultiThread};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
@@ -75,6 +75,11 @@ pub(super) fn runtime() -> Result<Handle, Error> {
         .filter(|h| h.runtime_flavor() == MultiThread);
     let runtime = pooled.or_else(|| own().cloned());
     runtime.ok_or_else(|| Error::Io(std::io::Error::other("no runtime")))
+}
+
+pub(super) fn is_child(pid: i32) -> bool {
+    let options = WaitIdOptions::EXITED | WaitIdOptions::NOHANG | WaitIdOptions::NOWAIT;
+    Pid::from_raw(pid).is_some_and(|pid| waitid(WaitId::Pid(pid), options).is_ok())
 }
 
 fn wait_pid(pid: Pid, options: WaitOptions) -> std::io::Result<Option<ExitStatus>> {

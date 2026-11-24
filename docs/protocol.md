@@ -102,7 +102,7 @@ Each agent shed has a provider record for or has installed, by id, as `shed agen
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
-{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"env":{},"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"terminal":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"balance":null,"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"env":{},"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"terminal":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
 ```
 
 ### `agents.match`
@@ -195,6 +195,15 @@ Replace a file with `data`: written to a temp file beside it, then renamed over 
 {"jsonrpc":"2.0","id":1,"result":{}}
 ```
 
+### `flow.report`
+
+Each flow's table as it ran beside today's code (#309): its mode, the subjects it tracks, how often each row fired, the facts it never took, the `never` rows that fired and the `stuck` reasons, all kept in `flow-counts.json` since they were first kept; and the lines of `flow-shadow.jsonl` from `since` on (default the last 7 days), by class: `state` when the table and today's code showed different states for more than 2 s, `action` when the table's row would have acted and today's code did not. `machine` asks that machine, over its held link.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"flow.report","params":{"since":1762000000}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","flows":[{"disagreements":[{"code":"exited","count":1,"first":1762416000,"kind":"action","last":1762416000,"row":"T9","sample":"build","table":"end-tree"}],"fired":{"T1":4,"T4":4,"T9":1},"flow":"terminal","mode":"shadow","never_seen":["replace","expired"],"stuck":{"tree-left":1},"subjects":4,"unexpected":{}}],"since":1762000000}}
+```
+
 ### `get`
 
 One terminal.
@@ -238,6 +247,51 @@ The handshake; must come first on every connection. Another product, or a protoc
 ```json
 {"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
 {"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
+```
+
+### `install.back`
+
+Renames `<dest>.prev` over the live binary, once `<dest>.prev --version` answers; else `UNSTAGED` and nothing moves. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.back","params":{"dest":"/home/user/.cargo/bin/drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":null}}
+```
+
+### `install.find`
+
+A release's `SHA256SUMS`, read on the main host; none there yet is `NO_RELEASE`. `tool` must be `shed` or the tool the client named at `hello`, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.find","params":{"releases":"https://github.com/o/drover/releases/download","tag":"build-1a2b3c4","tool":"drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"assets":{"drover-aarch64-apple-darwin":"9f86d081884c7d65"},"tag":"build-1a2b3c4"}}
+```
+
+### `install.ls`
+
+The `--version` line of `<dest>`, `<dest>.new` and `<dest>.prev`. `dest` must be shed's own binary or the tool's the client named at `hello`, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.ls","params":{"dest":"/home/user/.cargo/bin/drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":null}}
+```
+
+### `install.stage`
+
+Downloads `<tool>-<arch>-<os>` to `<dest>.new.part`, checks its sha256 against `SHA256SUMS`, makes it 755, checks that its `--version` contains `build` and renames it to `<dest>.new`; the live binary is untouched. A failed check removes the file and is `UNSTAGED`, naming it (`asset`, `download`, `checksum`, `version`); `build` already staged fetches nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.stage","params":{"build":"1a2b3c4","dest":"/home/user/.cargo/bin/drover","source":{"releases":"https://github.com/o/drover/releases/download","tag":"build-1a2b3c4","tool":"drover"}}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":"drover 0.4.0 (1a2b3c4)"}}
+```
+
+### `install.swap`
+
+Keeps the live binary as `<dest>.prev` (a hard link) and renames `<dest>.new` over it, once `<dest>.new --version` answers with `build`; else `UNSTAGED` and nothing moves. Live already `build`: nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.swap","params":{"build":"1a2b3c4","dest":"/home/user/.cargo/bin/drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":null}}
 ```
 
 ### `keys`
@@ -296,11 +350,11 @@ Remove a machine from the config file, as `shed machine rm` does, and drop its h
 
 ### `machine.stats`
 
-The machine's health now: load per CPU, memory pressure (percent of memory not available), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.
+The machine's health now: load per CPU, memory pressure (percent of memory not available, and on macOS the kernel's level `mem_level`: `normal`, `warn` or `critical`), free and total memory, swap used and pages swapped out since boot, free and total space on the volume of the state file, CPUs, uptime and the terminals by state (the reported state while running, else `running`; `exited`). The server keeps one sample a minute for 24 h; `since` (unix seconds) adds those after it as `history`. `top` adds that many processes using the most CPU (`top_cpu`) and the most memory (`top_mem`), each naming the terminal whose tree holds it; `machine` asks that machine, over its held link.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.stats","params":{"since":1762416000,"top":1}}
-{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_free_mb":9500,"mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"top_cpu":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"top_mem":[{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"uptime_s":86400}}
+{"jsonrpc":"2.0","id":1,"result":{"at":1762416090,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"history":[{"at":1762416060,"cpus":8,"disk_free_mb":120000,"disk_total_mb":460000,"load_per_cpu":0.25,"mem_free_mb":9500,"mem_level":"normal","mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"uptime_s":86400}],"load_per_cpu":0.25,"mem_free_mb":9500,"mem_level":"normal","mem_pressure_pct":42,"mem_total_mb":16384,"swap_out_pages":12000,"swap_used_mb":512,"terminals":{"exited":1,"working":2},"top_cpu":[{"command":"cargo test --workspace","cpu_ms":510000,"cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"top_mem":[{"command":"cargo test --workspace","cpu_ms":510000,"cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200,"terminal":"box/lane-1"}],"uptime_s":86400}}
 ```
 
 ### `proxy.keys`
@@ -393,6 +447,33 @@ Run a program in shed's JavaScript subset (the body of an async function, at mos
 {"jsonrpc":"2.0","id":1,"result":{"acting":[{"error":{"code":"GUARD_REFUSED","message":"kill refused by the guard: lanes are stopped with drover kill"},"method":"kill","params":{"name":"impl-190"}}],"calls":1,"error":{"code":"GUARD_REFUSED","column":12,"line":1,"message":"kill refused by the guard: lanes are stopped with drover kill","method":"kill","name":"GuardError"},"logs":[],"ms":21}}
 ```
 
+### `secret.ls`
+
+shed's own secrets by name, with when each was saved; never a value.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"secret.ls","params":{}}
+{"jsonrpc":"2.0","id":1,"result":[{"name":"BOAT_API_KEY","saved_at":1762416000}]}
+```
+
+### `secret.rm`
+
+Removes one of shed's own secrets; twice is once.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"secret.rm","params":{"name":"BOAT_API_KEY"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `secret.set`
+
+Saves one of shed's own secrets (a VM provider's key) on the main host: a Keychain item on macOS, a 0600 file elsewhere. The value is never logged, saved in the state file or returned.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"secret.set","params":{"name":"BOAT_API_KEY","value":"bk_0123456789abcdef"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
 ### `send`
 
 Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
@@ -431,11 +512,11 @@ Press keys by name as a person, as `keys`; `ctrl-x` is `ctrl+x`. Like `terminal.
 
 ### `terminal.procs`
 
-The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.
+The terminal's live process tree, parents first, each with its `depth` below the terminal's own process, its CPU (percent of one core over its life, and `cpu_ms`, its CPU time, whose difference over two reads is a share), memory, age and command line; `own` marks the agent's own processes, not work it started. A terminal that is not running has none.
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"terminal.procs","params":{"name":"lane-1"}}
-{"jsonrpc":"2.0","id":1,"result":[{"command":"node agent.js","cpu_pct":3,"depth":0,"elapsed_s":600,"own":true,"pid":4200,"ppid":1,"rss_mb":180},{"command":"cargo test --workspace","cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200}]}
+{"jsonrpc":"2.0","id":1,"result":[{"command":"node agent.js","cpu_ms":18000,"cpu_pct":3,"depth":0,"elapsed_s":600,"own":true,"pid":4200,"ppid":1,"rss_mb":180},{"command":"cargo test --workspace","cpu_ms":510000,"cpu_pct":85,"depth":1,"elapsed_s":600,"own":false,"pid":4242,"ppid":4200,"rss_mb":1200}]}
 ```
 
 ### `terminal.readonly`
@@ -549,6 +630,10 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32016 | `NOT_DELIVERED` |
 | -32017 | `ACCOUNT_LOCAL_ONLY` |
 | -32018 | `NO_PROXY` |
+| -32019 | `NOT_OWN_BINARY` |
+| -32020 | `NO_RELEASE` |
+| -32021 | `UNSTAGED` |
+| -32022 | `SECRET_STORE` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

@@ -120,7 +120,7 @@ pub enum Access {
     Read,
     /// The guard is asked first.
     Guarded,
-    /// `NOT_IN_SCRIPT`: it streams, belongs to a person's keyboard or the connection, or replaces the server.
+    /// `NOT_IN_SCRIPT`: it streams, belongs to a person's keyboard or the connection, carries a secret's value, or replaces the server.
     Refused,
 }
 
@@ -147,6 +147,7 @@ impl Method {
             | Self::Wait
             | Self::MachineStats
             | Self::MachineLinks
+            | Self::FlowReport
             | Self::Agents
             | Self::AgentsMatch
             | Self::Discover
@@ -173,7 +174,9 @@ impl Method {
             | Self::AccountStatus
             | Self::AccountUse
             | Self::ProxyKeys
-            | Self::ProxyRevoke => Access::Guarded,
+            | Self::ProxyRevoke
+            | Self::SecretLs
+            | Self::SecretRm => Access::Guarded,
             Self::Hello
             | Self::Events
             | Self::Attach
@@ -187,7 +190,13 @@ impl Method {
             | Self::Emit
             | Self::HandoverCheck
             | Self::Handover
+            | Self::InstallFind
+            | Self::InstallLs
+            | Self::InstallStage
+            | Self::InstallSwap
+            | Self::InstallBack
             | Self::ProxyRelay
+            | Self::SecretSet
             | Self::Script => Access::Refused,
         }
     }

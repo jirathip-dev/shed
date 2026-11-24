@@ -7,7 +7,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{CredentialsRecord, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe};
+use crate::{
+    BalanceProbe, CredentialsRecord, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
+};
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
 /// the same name in `<config>/providers/` (`docs/acp/provider-records.md`).
@@ -75,6 +77,8 @@ pub struct Provider {
     pub status_read: Option<StatusRead>,
     /// The usage probe.
     pub usage: Option<UsageProbe>,
+    /// The balance probe.
+    pub balance: Option<Box<BalanceProbe>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
     /// The token proxy.

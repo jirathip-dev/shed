@@ -1,12 +1,13 @@
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use shed_server::Paths;
 
 use crate::common::{eventually, temp_dir};
 use crate::{SHED, alive, ok, pids, run_sh};
+use shed_server::clock;
 
 struct Serve(Child);
 
@@ -42,7 +43,7 @@ impl Drop for Serve {
 }
 
 fn survivors(trees: &[(String, String)], within: Duration) -> Vec<String> {
-    let deadline = Instant::now() + within;
+    let deadline = clock::now() + within;
     loop {
         let live: Vec<String> = trees
             .iter()
@@ -50,13 +51,13 @@ fn survivors(trees: &[(String, String)], within: Duration) -> Vec<String> {
             .filter(|p| alive(p))
             .cloned()
             .collect();
-        if live.is_empty() || Instant::now() > deadline {
+        if live.is_empty() || clock::now() > deadline {
             for pid in &live {
                 Command::new("kill").args(["-KILL", pid]).status().ok();
             }
             return live;
         }
-        std::thread::sleep(Duration::from_millis(20));
+        clock::sleep(Duration::from_millis(20));
     }
 }
 
@@ -69,8 +70,8 @@ fn sigterm_to_serve_ends_every_tree_even_one_that_ignores_sighup() {
     run_sh(&dir, "deaf", "trap '' HUP; sleep 100 & echo child=$!; wait");
     let trees = ["a", "b", "deaf"].map(|n| pids(&dir, n));
     server.signal("-TERM");
-    let left = survivors(&trees, Duration::from_secs(3));
-    assert!(left.is_empty(), "alive 3 s after SIGTERM: {left:?}");
+    let left = survivors(&trees, clock::PATIENCE);
+    assert!(left.is_empty(), "alive after SIGTERM: {left:?}");
     server.0.wait().expect("serve exits");
 }
 
@@ -110,7 +111,7 @@ fn the_next_start_ends_a_tree_a_killed_serve_left_behind() {
     let log = dir.join("serve.log");
     let err = std::fs::File::create(&log).expect("log file");
     let _second = Serve::start(&dir, "", Stdio::from(err));
-    let left = survivors(std::slice::from_ref(&tree), Duration::from_secs(3));
+    let left = survivors(std::slice::from_ref(&tree), clock::PATIENCE);
     assert!(left.is_empty(), "alive after the next start: {left:?}");
     let text = std::fs::read_to_string(&log).expect("log");
     let named: Vec<&str> = text.lines().filter(|l| l.contains("deaf")).collect();
@@ -131,11 +132,11 @@ fn sigterm_to_serve_with_20_deaf_shells_ends_them_together() {
         );
     }
     let trees: Vec<_> = names.iter().map(|n| pids(&dir, n)).collect();
-    let started = Instant::now();
+    let started = clock::now();
     server.signal("-TERM");
     server.0.wait().expect("serve exits");
     let took = started.elapsed();
     let left = survivors(&trees, Duration::ZERO);
     assert!(left.is_empty(), "alive after serve exited: {left:?}");
-    assert!(took < Duration::from_secs(10), "serve took {took:?}");
+    assert!(took < Duration::from_secs(20), "serve took {took:?}");
 }

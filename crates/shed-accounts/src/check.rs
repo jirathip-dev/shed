@@ -9,10 +9,14 @@ use std::time::Duration;
 
 use sha2::{Digest as _, Sha256};
 use shed_core::{clock, redact, runner};
-use shed_proto::{Account, AccountState, CredentialsRecord, Drift, Provider, RpcError, Usage};
+use shed_proto::{
+    Account, AccountState, Balance, CredentialsRecord, Drift, Provider, RpcError, Usage,
+};
 
 use crate::choice::fullest;
+use crate::proxy::{quoted, signed};
 use crate::store::{Reading, Store};
+use crate::token::Token;
 
 const HOLD: u64 = 3600;
 const TIMEOUT: Duration = Duration::from_mins(2);
@@ -65,6 +69,32 @@ async fn usage(provider: &Provider, folder: Option<&Path>, now: u64) -> Option<U
     ))
     .await;
     provider.read_usage(&out, now)
+}
+
+async fn balance(store: &Store, provider: &Provider, name: &str, now: u64) -> Option<Balance> {
+    let probe = provider.balance.as_ref()?;
+    let account = store.account(provider, name).ok()?;
+    account.token.filter(|t| !t.rejected)?;
+    let token = Token::read(&store.token_file(provider, name)).ok()?;
+    let conf = format!("url = \"{}\"\n", quoted(&probe.url)) + &signed(&probe.auth, &token);
+    drop(token);
+    let cmd = ["curl", "-sS", "-K", "-", "-w", "\n%{http_code}"].map(str::to_owned);
+    let env = BTreeMap::new();
+    let ran = runner::exec(
+        &cmd,
+        Path::new("/"),
+        &env,
+        conf.into_bytes(),
+        TIMEOUT,
+        LIMIT,
+    )
+    .await;
+    let out = String::from_utf8_lossy(&ran.ok()?.1).into_owned();
+    let (body, code) = out.rsplit_once('\n')?;
+    if code == "401" {
+        store.reject(provider, name).ok();
+    }
+    provider.read_balance(body, now)
 }
 
 fn service(record: &CredentialsRecord, folder: Option<&Path>) -> String {
@@ -130,8 +160,8 @@ pub async fn drift(
     Ok(Some(drift))
 }
 
-/// Runs the record's status command, drift check and usage probe for the account now, and keeps what they say;
-/// `home` holds the default config folder.
+/// Runs the record's status command, drift check, usage probe and balance probe for the account now, and keeps
+/// what they say; `home` holds the default config folder.
 ///
 /// # Errors
 /// `NO_ACCOUNT`, or `IO` when the reading cannot be kept.
@@ -141,12 +171,16 @@ pub async fn status(
     name: &str,
     home: &Path,
 ) -> Result<Account, RpcError> {
-    let folder = store.folder(provider, name)?;
+    let (folder, now) = (store.folder(provider, name)?, clock::unix_now());
+    let read = balance(store, provider, name, now).await;
     let mut reading = store.reading(provider, name);
+    if provider.balance.is_some() {
+        (reading.balance, reading.checked_at) = (read.or(reading.balance), Some(now));
+    }
     if let Some(record) = &provider.credentials {
         reading.drift = Some(compare(record, folder.as_deref(), home).await);
     }
-    let (none, now) = (BTreeMap::new(), clock::unix_now());
+    let none = BTreeMap::new();
     if let Some(line) = &provider.status {
         let (ok, out, err) = run(&command(provider, folder.as_deref(), line, &none, &[])).await;
         let status = provider.read_status(ok, &out, &err);
@@ -205,13 +239,17 @@ pub async fn limit(
     store.account(provider, name)
 }
 
-/// Whether the account's reading is older than the record's `usage.fresh`; never for a provider without a
-/// probe or an account signed out.
+/// Whether the account's reading is older than the record's `usage.fresh` or `balance.fresh`; never for a
+/// provider without a probe or an account signed out.
 #[must_use]
 pub fn stale(provider: &Provider, account: &Account, now: u64) -> bool {
     let read = |fresh| account.checked_at.is_none_or(|t| t + fresh <= now);
     let signed_in = account.state != AccountState::SignedOut;
-    signed_in && provider.usage.as_ref().is_some_and(|u| read(u.fresh))
+    let usage = provider.usage.as_ref().map(|u| u.fresh);
+    let fresh = usage
+        .into_iter()
+        .chain(provider.balance.as_ref().map(|b| b.fresh));
+    signed_in && fresh.min().is_some_and(read)
 }
 
 /// Runs the record's logout for the account, whatever it answers.

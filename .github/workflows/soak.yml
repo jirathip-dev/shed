@@ -1,0 +1,57 @@
+name: soak
+# #308: nightly on the self-hosted runner, scripts/soak.py times throwaway terminals on this machine and on each
+# machine in the repository variable SOAK_MACHINES (`label=ssh-target …`) against ci/soak.toml, with the shed on
+# the runner's PATH. The numbers are the run's summary and its `soak` artifact; each missed target files one issue
+# a night.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ fromJSON(vars.CI_RUNNER) }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOAK_MACHINES: ${{ vars.SOAK_MACHINES }}
+      OUT: soak-out
+    steps:
+      - uses: actions/checkout@v4
+      - name: soak
+        run: |
+          # shellcheck disable=SC2086
+          PATH="$HOME/.cargo/bin:$PATH" scripts/soak.py --out "$OUT" main $SOAK_MACHINES
+      - if: always()
+        run: cat "$OUT/soak.md" >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak
+          path: soak-out
+      - name: file one issue per missed target
+        if: failure()
+        run: |
+          day=$(date -u +%F)
+          cut -d' ' -f2 "$OUT/misses.txt" | sort -u | while read -r target; do
+            title="soak: $target missed on $day"
+            if gh issue list -R "$GITHUB_REPOSITORY" --state all --search "in:title \"$title\"" --json title \
+              --jq '.[].title' | grep -qxF "$title"; then
+              continue
+            fi
+            {
+              echo "Root cause: new"
+              echo
+              echo "The nightly soak missed \`$target\` ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID):"
+              echo
+              grep " $target " "$OUT/misses.txt" | sed 's/^/- /'
+            } > "$RUNNER_TEMP/issue.md"
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body-file "$RUNNER_TEMP/issue.md"
+          done

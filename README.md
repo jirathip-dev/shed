@@ -53,6 +53,7 @@ The v0.1 commands:
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
 | `shed exec [--on M] [--cwd D] [--timeout S] [-i] -- CMD…` / `shed file read\|write [--on M] PATH` | Run a program without a terminal and get exactly the bytes it wrote to stdout and stderr and its exit code; nothing it started outlives it. `-i` feeds it stdin. `file read` prints a file, `file write` replaces it with stdin (temp file and rename, mode kept). A reply over 8 MiB is an error, never cut. |
+| `shed flow report [--since 7d]` | Each flow's table as it runs beside today's code (#309): rows fired, facts never seen, `never` rows that fired, `stuck` reasons, and the shadow disagreements since `--since` by class; `--on <machine>` asks that machine, `shed doctor` shows the last 24 h's count. |
 | `shed get <t>` | One terminal as JSON. |
 | `shed install [--force]` / `shed uninstall` / `shed doctor` | Write that job's file and (re)start the server under it, so the running server is this binary (uninstall prints how to unload it); check the job, socket, log, and that the server runs this binary's build. |
 | `shed kill <t>` / `shed rm <t>` | End the process tree; remove a finished terminal. |
@@ -63,6 +64,7 @@ The v0.1 commands:
 | `shed read <t> [--lines N] [--screen\|--history]` | The current screen, or scrollback, as plain text. |
 | `shed run [--name N] [--label k=v…] [--cwd D] [--keep] [--size RxC] [--mem-max SIZE] -- <cmd…>` | Start a terminal. `--keep`: a lost program is replaced by a shell. `--size`: rows by columns, default `$SHED_SIZE` of `shed serve`, else 50x200. `--mem-max` (`200M`, `4G`; default `$SHED_MEM_MAX` of `shed serve`, else none): on Linux with a user systemd that has the memory controller the program gets its own scope with `MemoryMax`; elsewhere the sampler ends the largest process the agent started after two samples over, a guard against sustained use that a fast allocation can pass between samples. Either is a `mem-limit` event; `shed doctor` says which. |
 | `shed script [--on M] (-f FILE \| -) [--check] [--timeout S] [--role R]` | Run a program in shed's JavaScript subset on the server, so many dependent calls and a filter are one round trip (skill/script/SKILL.md). It prints the program's logs, then what it returned; an error prints its name, line and column and exits 1. `--check` only parses and compiles: nothing runs and no call is made. A call that acts goes through the guard in the server's `[script]` config, and is refused without one. |
+| `shed secret set\|ls\|rm` | shed's own secrets on the main host (a VM provider's key): `set <NAME>` saves the value it reads from stdin, never from an argument; `ls` lists them by name with when each was saved, never a value; `rm <NAME>` removes one, and twice is once (docs/hosts/secrets.md). |
 | `shed send <t> <text> [--no-paste] [--no-enter] [--draft-wait S]` / `shed keys <t> enter esc ctrl+c…` | Paste text then press enter (bracketed when the program asks for it), or press keys. Sends go in whole, one at a time, and wait while a person attached has an unsent line (60 s by default, then the send fails and writes nothing). |
 | `shed serve` | The per-user server (launchd/systemd user job). Owns the PTYs, the state and the socket. |
 | `shed state <t> working\|blocked\|done\|error [--note TEXT]` | Report state (also via `$SHED` + OSC 7501-compatible escape). |
@@ -93,6 +95,10 @@ Also out of scope:
 - No TUI layouts, tabs, splits, themes or plugins.
 - No agent-brand detection. Programs report their state; a screen-text fallback is optional and per-harness.
 - No Windows in v0.1.
+- No host setup. A shed machine is only a place shed can run an agent: the link, processes, and their CPU and
+  memory. shed installs no toolchain, manages no build cache (sccache, pnpm's store, cargo targets) and cleans no
+  disk beyond its own state folder, where its pruning of exited terminals and ACP sessions stays. Host setup is
+  shed-cloud's recipe; a lane's cache env is drover's.
 
 ## Constraints
 

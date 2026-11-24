@@ -3,6 +3,7 @@ generated = [
     "CHANGELOG.md",
     "docs/protocol.md",
     "docs/shed.openrpc.json",
+    "docs/flows.md",
     "crates/shed-script/tests/perf/counts.json",
     "skill/script/methods.md",
     "Cargo.lock",
@@ -83,13 +84,19 @@ may_use = ["proto", "pattern"]
 name = "server"
 paths = ["crates/shed-server/src/**"]
 mods = ["shed_server"]
-may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script", "accounts"]
+may_use = ["core", "proto", "client", "catalog", "pattern", "search", "script", "accounts", "secrets"]
 
 [[layer]]
 name = "accounts"
 paths = ["crates/shed-accounts/src/**"]
 mods = ["shed_accounts"]
 may_use = ["core", "proto"]
+
+[[layer]]
+name = "secrets"
+paths = ["crates/shed-secrets/src/**"]
+mods = ["shed_secrets"]
+may_use = []
 
 [[layer]]
 name = "cli"
@@ -121,9 +128,9 @@ reason = "process types and calls come from shed_core::runner"
 
 [[ban]]
 pattern = "thread::sleep"
-paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/clock.rs"]
-reason = "sleep through shed_core::clock"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/shed-core/src/clock.rs", "crates/shed-script/tests/perf.rs"]
+reason = "sleep through shed_core::clock; tests wait on events through clock::poll, not sleeps (#310); perf.rs's ignored speed reports time the engine, which has no shed-core (its gate counts steps)"
 
 [[ban]]
 pattern = "env::var"
@@ -133,15 +140,15 @@ reason = "read the environment through shed_server::config"
 
 [[ban]]
 pattern = "SystemTime::now"
-paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/clock.rs"]
-reason = "read the time through shed_core::clock"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/shed-core/src/clock.rs", "crates/shed-script/tests/perf.rs"]
+reason = "read the time through shed_core::clock; tests wait on events through clock::poll, not sleeps (#310); perf.rs's ignored speed reports time the engine, which has no shed-core (its gate counts steps)"
 
 [[ban]]
 pattern = "Instant::now"
-paths = ["crates/*/src/**"]
-except = ["crates/shed-core/src/clock.rs"]
-reason = "read the time through shed_core::clock"
+paths = ["crates/*/src/**", "crates/*/tests/**"]
+except = ["crates/shed-core/src/clock.rs", "crates/shed-script/tests/perf.rs"]
+reason = "read the time through shed_core::clock; tests wait on events through clock::poll, not sleeps (#310); perf.rs's ignored speed reports time the engine, which has no shed-core (its gate counts steps)"
 
 [[ban]]
 pattern = "std::fs"
@@ -206,8 +213,13 @@ reason = "search and patterns open no socket"
 [[ban]]
 pattern = ".expose()"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-accounts/src/env.rs", "crates/shed-accounts/src/proxy.rs"]
-reason = "a token leaves its type only into a main-host run's environment or the proxy's upstream header"
+except = [
+    "crates/shed-accounts/src/env.rs",
+    "crates/shed-accounts/src/proxy.rs",
+    "crates/shed-secrets/src/keychain.rs",
+    "crates/shed-secrets/src/files.rs",
+]
+reason = "a token leaves its type only into a main-host run's environment or the proxy's upstream header, or a secret into its store"
 
 [[ban]]
 pattern = "TcpListener"
@@ -275,6 +287,30 @@ reason = "#64: core names no agent or provider; agent specifics are data in crat
 comments = true
 ignore_case = true
 
+[[ban]]
+pattern = "sccache"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
+[[ban]]
+pattern = "pnpm"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
+[[ban]]
+pattern = "CARGO_TARGET_DIR"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
+[[ban]]
+pattern = "RUSTC_WRAPPER"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-cloud/**"]
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+
 [[size]]
 paths = ["crates/*/tests/**/*.rs"]
 max_file_lines = 100000
@@ -294,6 +330,14 @@ glob = "*.md"
 
 [[collect]]
 dir = "crates/shed-accounts/src"
+glob = "*.rs"
+
+[[collect]]
+dir = "docs/hosts"
+glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-secrets/src"
 glob = "*.rs"
 
 [[collect]]
@@ -361,11 +405,7 @@ paths = ["crates/shed-server/src/providers.rs", "crates/shed-proto/tests/protoco
 max_file_lines = 230
 
 [[size]]
-paths = ["crates/shed-server/src/links.rs"]
-max_file_lines = 300
-
-[[size]]
-paths = ["crates/shed-proto/tests/protocol_doc/acp.rs"]
+paths = ["crates/shed-server/src/links.rs", "crates/shed-proto/tests/protocol_doc/acp.rs"]
 max_file_lines = 300
 
 [[size]]
@@ -374,7 +414,7 @@ max_file_lines = 340
 
 [[size]]
 paths = [".drover/arch.toml"]
-max_file_lines = 480
+max_file_lines = 535
 
 [[collect]]
 dir = "crates/shed/tests"
@@ -477,3 +517,17 @@ pattern = "out::"
 paths = ["crates/shed/src/doctor/**"]
 except = []
 reason = "a doctor row returns its rows; cmd/doctor.rs prints them"
+
+[[collect]]
+dir = "crates/shed-proto/flows"
+glob = "*.md"
+
+[[collect]]
+dir = "crates/shed-server/src/flows"
+glob = "*.rs"
+
+[[ban]]
+pattern = "Tracker"
+paths = ["crates/*/src/**"]
+except = ["crates/shed-proto/src/flow.rs", "crates/shed-server/src/flows.rs"]
+reason = "only the runner steps a flow: give it a fact"

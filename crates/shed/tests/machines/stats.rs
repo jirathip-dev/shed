@@ -1,18 +1,14 @@
 use std::process::Stdio;
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
 use crate::common::{self, Server, temp_dir};
-use crate::{fake_hosts, script, shed_on};
+use crate::{fake_hosts, fault, shed_on};
 
 #[test]
-fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
+fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_without_waiting_for_ssh() {
     let root = temp_dir("machine-stats");
-    let bin = fake_hosts(&root);
-    let ssh = std::fs::read_to_string(bin.join("ssh")).expect("ssh");
-    let hang = "[ -e \"$(dirname \"$0\")/down\" ] && exec sleep 30\n";
-    script(&bin.join("ssh"), &ssh.replacen("#!/bin/sh\n", hang, 1));
+    fake_hosts(&root);
     let _local = Server::start(&root.join("local"));
     let _remote = Server::start(&root.join("remote"));
     let shed = |args: &[&str]| {
@@ -66,8 +62,8 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
     assert_eq!(there["terminals"], json!({}));
     let seen = std::fs::read_to_string(root.join("local/seen/box")).expect("seen");
 
-    std::fs::write(bin.join("down"), "").expect("down");
-    let started = Instant::now();
+    fault(&root, "* gone 600\n");
+    let started = shed_server::clock::now();
     let (code, offline) = shed(&["--json", "--on", "box", "machine", "stats"]);
     let took = started.elapsed();
     assert_eq!(code, Some(1));
@@ -77,7 +73,7 @@ fn machine_stats_here_and_on_a_machine_and_an_offline_one_answers_within_5_s() {
         json!({"machine": "box", "online": false, "last_seen": last_seen})
     );
     assert!(
-        took < Duration::from_millis(5_500),
+        took < shed_server::clock::PATIENCE,
         "answered after {took:?}"
     );
     let text = shed_on(&root, &["--on", "box", "machine", "stats"])
