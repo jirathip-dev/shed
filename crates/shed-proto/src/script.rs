@@ -190,6 +190,11 @@ impl Method {
             | Self::Emit
             | Self::HandoverCheck
             | Self::Handover
+            | Self::InstallFind
+            | Self::InstallLs
+            | Self::InstallStage
+            | Self::InstallSwap
+            | Self::InstallBack
             | Self::ProxyRelay
             | Self::SecretSet
             | Self::Script => Access::Refused,

@@ -305,6 +305,10 @@ All notable changes to this project are documented here. The format follows
   only, every call limited to 5 s), 0600 files elsewhere (a wider one is not read). `shed secret set|ls|rm` and
   the `secret.*` methods keep shed's own; no method returns a value. `shed doctor` reports a wide file, a locked
   Keychain and an unsigned shed. Client tags carry the crate.
+- `install.find`, `install.ls`, `install.stage`, `install.swap` and `install.back` move a release of shed's own
+  binary or of the tool the client named at `hello` (`tool`), on the main host, and refuse any other binary with
+  `NOT_OWN_BINARY`; `shed install ls` shows shed's live, staged and previous builds. Self-update runs on the same
+  code, and a deferred pass now keeps the checked `<binary>.new` for the next one.
 
 ### Changed
 

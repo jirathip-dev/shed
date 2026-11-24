@@ -17,12 +17,12 @@ use serde_json::{Map, Value};
 pub use shed_proto as proto;
 use shed_proto::{
     Account, AccountAdd, AccountLogin, AccountMoves, AccountName, AccountUse, AccountsParams,
-    AcpSession, AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
-    HandoverCheckParams, HandoverParams, Input, KeyId, KeysParams, Link, Login, LsParams,
-    MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ProxyKey,
-    ReadParams, ReadResult, Report, ReportParams, Reported, ResizeParams, RunParams, SavedSecret,
-    SecretName, SecretSet, SendParams, StateParams, StatsParams, Target, TerminalInfo, WaitParams,
-    WaitResult, frame,
+    AcpSession, AgentInfo, Dest, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams,
+    Handover, HandoverCheckParams, HandoverParams, Input, Install, KeyId, KeysParams, Link, Login,
+    LsParams, MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams, Proc,
+    ProxyKey, ReadParams, ReadResult, Release, Report, ReportParams, Reported, ResizeParams,
+    RunParams, SavedSecret, SecretName, SecretSet, SendParams, Source, Stage, StateParams,
+    StatsParams, Swap, Target, TerminalInfo, WaitParams, WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -360,6 +360,31 @@ pub trait Calls {
     /// Hands the server over to its own binary.
     fn handover(&self, params: &HandoverParams) -> Result<Handover, Error> {
         typed(self, Method::Handover, params)
+    }
+
+    /// A release of shed or of the tool this connection named at hello.
+    fn install_find(&self, params: &Source) -> Result<Release, Error> {
+        typed(self, Method::InstallFind, params)
+    }
+
+    /// An install's live, staged and previous builds.
+    fn install_ls(&self, params: &Dest) -> Result<Install, Error> {
+        typed(self, Method::InstallLs, params)
+    }
+
+    /// Fetches and checks a release beside the live binary.
+    fn install_stage(&self, params: &Stage) -> Result<Install, Error> {
+        typed(self, Method::InstallStage, params)
+    }
+
+    /// Puts the staged binary live, keeping the old one.
+    fn install_swap(&self, params: &Swap) -> Result<Install, Error> {
+        typed(self, Method::InstallSwap, params)
+    }
+
+    /// Puts the previous binary back.
+    fn install_back(&self, params: &Dest) -> Result<Install, Error> {
+        typed(self, Method::InstallBack, params)
     }
 }
 
