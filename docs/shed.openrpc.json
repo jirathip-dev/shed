@@ -2999,6 +2999,17 @@
             ],
             "description": "The last balance reading."
           },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Spend"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An API-key account's tokens and cost this month on this machine."
+          },
           "token": {
             "anyOf": [
               {
@@ -3166,6 +3177,107 @@
           "read_at"
         ],
         "description": "A balance reading."
+      },
+      "Spend": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "description": "`YYYY-MM`, in the machine's local time."
+          },
+          "tokens": {
+            "$ref": "#/components/schemas/Tokens",
+            "description": "The tokens its lanes used."
+          },
+          "cost": {
+            "$ref": "#/components/schemas/Cost",
+            "description": "What they cost."
+          }
+        },
+        "required": [
+          "month",
+          "tokens",
+          "cost"
+        ],
+        "description": "An API-key account's tokens and cost in one calendar month on one machine."
+      },
+      "Tokens": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens neither read from nor written to the prompt cache."
+          },
+          "cache_read": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens read from the prompt cache."
+          },
+          "cache_write": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Input tokens written to the prompt cache."
+          },
+          "output": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Output tokens."
+          }
+        },
+        "required": [
+          "input",
+          "cache_read",
+          "cache_write",
+          "output"
+        ],
+        "description": "Tokens a turn or a session spent, as the agent's prompt responses report them."
+      },
+      "Cost": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/Money",
+            "description": "What it cost."
+          },
+          {
+            "$ref": "#/components/schemas/Unknown",
+            "description": "Some usage had neither its own cost nor a price, or the currencies differ."
+          }
+        ],
+        "description": "A cost: an amount, or `\"unknown\"`."
+      },
+      "Money": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "format": "double",
+            "description": "The amount."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Its currency."
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "description": "An amount in a currency."
+      },
+      "Unknown": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "unknown",
+            "description": "`\"unknown\"`."
+          }
+        ],
+        "description": "The `\"unknown\"` cost."
       },
       "TokenInfo": {
         "type": "object",
@@ -3582,6 +3694,18 @@
               }
             ],
             "description": "The balance probe.",
+            "default": null
+          },
+          "price": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Price"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The price per million tokens, for an API-key account's cost when the agent reports none.",
             "default": null
           },
           "token": {
@@ -4082,6 +4206,44 @@
           "fresh"
         ],
         "description": "The balance probe: the API that answers an account's balance for its key, and where the answer holds it."
+      },
+      "Price": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "Its currency."
+          },
+          "input": {
+            "type": "number",
+            "format": "double",
+            "description": "Input tokens neither read from nor written to the prompt cache."
+          },
+          "cache_read": {
+            "type": "number",
+            "format": "double",
+            "description": "Input tokens read from the prompt cache."
+          },
+          "cache_write": {
+            "type": "number",
+            "format": "double",
+            "description": "Input tokens written to the prompt cache."
+          },
+          "output": {
+            "type": "number",
+            "format": "double",
+            "description": "Output tokens."
+          }
+        },
+        "required": [
+          "currency",
+          "input",
+          "cache_read",
+          "cache_write",
+          "output"
+        ],
+        "description": "What a million tokens of each kind cost, for agents whose usage carries no cost."
       },
       "TokenSetup": {
         "type": "object",
@@ -4920,42 +5082,6 @@
           "size"
         ],
         "description": "An ACP session's context window use and cost, as the agent last reported it."
-      },
-      "Tokens": {
-        "type": "object",
-        "properties": {
-          "input": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0,
-            "description": "Input tokens neither read from nor written to the prompt cache."
-          },
-          "cache_read": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0,
-            "description": "Input tokens read from the prompt cache."
-          },
-          "cache_write": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0,
-            "description": "Input tokens written to the prompt cache."
-          },
-          "output": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0,
-            "description": "Output tokens."
-          }
-        },
-        "required": [
-          "input",
-          "cache_read",
-          "cache_write",
-          "output"
-        ],
-        "description": "Tokens a turn or a session spent, as the agent's prompt responses report them."
       },
       "Parent": {
         "type": "object",
