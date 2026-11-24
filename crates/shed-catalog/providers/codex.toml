@@ -10,3 +10,51 @@ config_dir_var = "CODEX_HOME"
 install = "npm install -g @openai/codex"
 effort_args = ["-c", "model_reasoning_effort={effort}"]
 efforts = ["low", "medium", "high", "xhigh"]
+
+# The usage: the app server's `account/rateLimits/read`, each window named by its length (300 min: 5h).
+[usage]
+command = '''
+d=$(mktemp -d) || exit 1
+trap 'rm -rf "$d"' EXIT
+mkfifo "$d/in" || exit 1
+codex app-server < "$d/in" > "$d/out" 2>/dev/null &
+exec 3> "$d/in"
+printf '%s\n' '{"id":1,"method":"initialize","params":{"clientInfo":{"name":"shed","version":"0"}}}' \
+  '{"method":"initialized"}' '{"id":2,"method":"account/rateLimits/read"}' >&3
+while kill -0 $! 2>/dev/null && ! grep -q '^{"id":2,' "$d/out"; do sleep 1; done
+kill $! 2>/dev/null
+awk '
+function num(s, k) {
+  if (!match(s, "\"" k "\":[0-9]+")) return ""
+  return substr(s, RSTART + length(k) + 3, RLENGTH - length(k) - 3)
+}
+function win(s, k,  w, m) {
+  if (!match(s, "\"" k "\":[{][^}]*[}]")) return
+  w = substr(s, RSTART, RLENGTH)
+  m = num(w, "windowDurationMins")
+  if (m == "") return
+  printf "%s window: %s%% used, resets %s\n", m % 1440 ? m % 60 ? m "m" : m / 60 "h" : m / 1440 "d", num(w, "usedPercent"), num(w, "resetsAt")
+}
+/^[{]"id":2,/ { sub(/"rateLimitsByLimitId".*/, ""); win($0, "primary"); win($0, "secondary") }
+' "$d/out"
+'''
+fresh = 300
+hold = 3600
+
+[[usage.windows]]
+id = "5h"
+line = "5h window:"
+used = "% used"
+resets = "resets "
+
+[[usage.windows]]
+id = "7d"
+line = "7d window:"
+used = "% used"
+resets = "resets "
+
+[[usage.windows]]
+id = "30d"
+line = "30d window:"
+used = "% used"
+resets = "resets "
