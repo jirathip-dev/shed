@@ -117,14 +117,6 @@ impl Entry {
 }
 
 impl Registry {
-    pub(crate) fn set_rules(&self) {
-        for e in self.entries.values().filter(|e| e.info.acp.is_none()) {
-            if let (Some(term), Some(agent)) = (&e.term, e.info.labels.get("agent")) {
-                term.set_rules(self.rules(agent));
-            }
-        }
-    }
-
     fn entry(&self, name: &str) -> Result<&Entry, RpcError> {
         self.entries.get(name).ok_or_else(|| not_found(name))
     }
@@ -161,41 +153,6 @@ impl Registry {
         [history(&self.path, name).log, lent]
     }
 
-    fn rules(&self, agent: &str) -> Vec<shed_core::Rule> {
-        let catalog = crate::providers::Catalog::load(&self.providers).0;
-        let rules = catalog
-            .by_agent(agent)
-            .map(|p| p.rules.clone())
-            .unwrap_or_default();
-        let rule = |r: crate::proto::Rule| shed_core::Rule {
-            id: r.id,
-            state: r.state,
-            kind: r.kind,
-            priority: r.priority,
-            region: r.region,
-            any: r.any,
-        };
-        rules.into_iter().map(rule).collect()
-    }
-
-    fn terminal_record(&self, agent: Option<&String>) -> Option<shed_proto::TerminalRecord> {
-        let catalog = crate::providers::Catalog::load(&self.providers).0;
-        catalog.by_agent(agent?)?.terminal.as_deref().cloned()
-    }
-
-    pub(crate) fn wizard(&self, name: &str) -> Option<impl Future<Output = ()> + Send + use<>> {
-        let entry = self.entries.get(name).filter(|e| e.info.acp.is_none())?;
-        let term = Arc::clone(entry.term.as_ref()?);
-        let record = self.terminal_record(entry.info.labels.get("agent"))?;
-        let held = entry.draft.hold()?;
-        Some(crate::input::dismiss(
-            term,
-            record.wizard?,
-            record.ready,
-            held,
-        ))
-    }
-
     pub(crate) fn ls(&self, p: &LsParams) -> Vec<TerminalInfo> {
         self.entries
             .values()
@@ -227,7 +184,6 @@ mod tests {
 
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::time::Duration;
 
     pub(super) fn dir(name: &str) -> PathBuf {
         crate::temp_dir(&format!("registry-{name}"))
@@ -241,53 +197,5 @@ mod tests {
 
     pub(super) fn saved(path: &Path) -> serde_json::Value {
         serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
-    }
-
-    #[tokio::test]
-    async fn each_shipped_rule_matches_its_golden_screen_and_unlabelled_terminals_never_check() {
-        let path = dir("rules").join("state.json");
-        let mut reg = Registry::load(&path, Path::new("shed.sock"), Vec::new()).unwrap();
-        let screens = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
-        let catalog = crate::providers::Catalog::load(&reg.providers).0;
-        let rules = (catalog.iter().map(|e| &e.provider))
-            .flat_map(|p| p.rules.iter().map(|r| (&p.agent, r)));
-        let mut shipped = 0;
-        for (n, (agent, rule)) in rules.enumerate() {
-            assert!(!rule.version.is_empty(), "{}", rule.id);
-            let golden = screens.join(format!("{agent}-{}.txt", rule.id));
-            assert!(golden.exists(), "{}", golden.display());
-            let mut run = |name: &str, labels: serde_json::Value| {
-                let golden = golden.to_str().unwrap();
-                let p = serde_json::json!({
-                    "name": name, "cwd": "/", "labels": labels,
-                    "cmd": ["sh", "-c", "cat \"$0\"; exec sleep 60", golden],
-                });
-                reg.run(serde_json::from_value(p).unwrap()).unwrap();
-                Arc::clone(reg.live(name).unwrap())
-            };
-            let lane = run(&format!("lane{n}"), serde_json::json!({ "agent": agent }));
-            let plain = run(&format!("plain{n}"), serde_json::json!({}));
-            let deadline = shed_core::clock::now() + shed_core::clock::PATIENCE;
-            let from = Some(format!("rule:{}", rule.id));
-            let matched =
-                lane.wait_until(|t| t.report().and_then(|r| r.from) == from, Some(deadline));
-            assert_eq!(
-                matched.await.unwrap(),
-                shed_core::Wake::Matched,
-                "{}",
-                golden.display()
-            );
-            assert_eq!(lane.report().map(|r| r.state), Some(rule.state.clone()));
-            let shown = plain.wait_until(|t| t.screen().contains(&rule.any[0]), Some(deadline));
-            assert_eq!(shown.await.unwrap(), shed_core::Wake::Matched);
-            assert_eq!(plain.report(), None);
-            assert!(lane.rule_checks() > 0);
-            assert_eq!(plain.rule_checks(), 0);
-            for t in [lane, plain] {
-                t.kill(Duration::ZERO).unwrap();
-            }
-            shipped += 1;
-        }
-        assert!(shipped > 0);
     }
 }

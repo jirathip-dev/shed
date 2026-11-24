@@ -4,7 +4,3 @@ agent = "fake"
 auth_failures = ["fake: login gone"]
 limit = ["fake: limit hit"]
 resets = ["back at "]
-
-[hooks]
-file = ".fake/settings.json"
-events = [["Prompt", "working"], ["Stop", "done"]]
