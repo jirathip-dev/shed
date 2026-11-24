@@ -151,6 +151,41 @@ mod tests {
         assert_eq!(default.unset.last().map(String::as_str), Some("FAKE_HOME"));
     }
 
+    fn keyed(dir: &std::path::Path) -> (Store, Provider) {
+        let store = Store::beside(&dir.join("state.json"));
+        let provider = Provider {
+            agent: "keyed".into(),
+            token_var: Some("KEYED_API_KEY".into()),
+            scrub: vec!["KEYED_SCRUB".into()],
+            ..Provider::default()
+        };
+        let file = dir.join("k.token");
+        fs::write(&file, "sk-key-0123456789abcdef").expect("write");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).expect("chmod");
+        let add = AccountAdd {
+            provider: "keyed".into(),
+            name: "api".into(),
+            token_file: Some(file),
+            ..AccountAdd::default()
+        };
+        store.add(&provider, &add).expect("added");
+        (store, provider)
+    }
+
+    #[test]
+    fn a_run_on_a_key_only_account_gets_its_key_and_no_folder() {
+        let dir = temp("env-keyed");
+        let (store, provider) = keyed(dir.path());
+        let none = BTreeMap::new();
+        let run = Injected::for_run(&store, &provider, "api", &none).expect("injected");
+        assert_eq!(
+            run.set.get("KEYED_API_KEY").map(String::as_str),
+            Some("sk-key-0123456789abcdef")
+        );
+        assert_eq!(run.set.len(), 1);
+        assert_eq!(run.unset, ["KEYED_SCRUB"]);
+    }
+
     #[test]
     fn a_caller_env_that_sets_an_account_variable_or_a_setup_folder_is_refused() {
         let dir = temp("env-refused");
