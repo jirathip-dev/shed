@@ -19,6 +19,7 @@ shed-core = { path = "crates/shed-core" }
 shed-pattern = { path = "crates/shed-pattern" }
 shed-search = { path = "crates/shed-search" }
 shed-script = { path = "crates/shed-script" }
+shed-secrets = { path = "crates/shed-secrets" }
 shed-server = { path = "crates/shed-server" }
 agent-client-protocol = "=5.0.0"
 farrier-service = { git = "https://github.com/jirathip-dev/farrier", rev = "d34a7bb8388ef183c981dc01483634a87f0d3495" }
@@ -29,6 +30,7 @@ pty-process = "=0.5.4"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["raw_value"] }
 schemars = "=1.2.3"
+security-framework = { version = "=3.7.0", default-features = false, features = ["OSX_10_14"] }
 sha2 = { version = "=0.11.1", default-features = false }
 rustix = { version = "=1.1.6", features = ["param", "process"] }
 thiserror = "=2.0.21"

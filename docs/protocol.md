@@ -402,6 +402,33 @@ Run a program in shed's JavaScript subset (the body of an async function, at mos
 {"jsonrpc":"2.0","id":1,"result":{"acting":[{"error":{"code":"GUARD_REFUSED","message":"kill refused by the guard: lanes are stopped with drover kill"},"method":"kill","params":{"name":"impl-190"}}],"calls":1,"error":{"code":"GUARD_REFUSED","column":12,"line":1,"message":"kill refused by the guard: lanes are stopped with drover kill","method":"kill","name":"GuardError"},"logs":[],"ms":21}}
 ```
 
+### `secret.ls`
+
+shed's own secrets by name, with when each was saved; never a value.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"secret.ls","params":{}}
+{"jsonrpc":"2.0","id":1,"result":[{"name":"BOAT_API_KEY","saved_at":1762416000}]}
+```
+
+### `secret.rm`
+
+Removes one of shed's own secrets; twice is once.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"secret.rm","params":{"name":"BOAT_API_KEY"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `secret.set`
+
+Saves one of shed's own secrets (a VM provider's key) on the main host: a Keychain item on macOS, a 0600 file elsewhere. The value is never logged, saved in the state file or returned.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"secret.set","params":{"name":"BOAT_API_KEY","value":"bk_0123456789abcdef"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
 ### `send`
 
 Paste text into the terminal, then press enter: bracketed when the program has turned bracketed paste on, unless `no_paste`; no enter with `no_enter`. While a person has an unsent line (typed through `terminal.input`), the send waits until they press enter or clear it (`ctrl+u`, `ctrl+c`), or `DRAFT_HELD` once `draft_wait` seconds (default 60, 0 off) pass after their last key, writing nothing. Sends go in one at a time, each whole. ACP: the text goes to the bridge as it is.
@@ -558,6 +585,7 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32016 | `NOT_DELIVERED` |
 | -32017 | `ACCOUNT_LOCAL_ONLY` |
 | -32018 | `NO_PROXY` |
+| -32019 | `SECRET_STORE` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

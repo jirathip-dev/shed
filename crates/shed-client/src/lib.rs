@@ -20,8 +20,9 @@ use shed_proto::{
     AcpSession, AgentInfo, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams, Handover,
     HandoverCheckParams, HandoverParams, Input, KeyId, KeysParams, Link, Login, LsParams,
     MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams, Proc, ProxyKey,
-    ReadParams, ReadResult, Report, ReportParams, Reported, ResizeParams, RunParams, SendParams,
-    StateParams, StatsParams, Target, TerminalInfo, WaitParams, WaitResult, frame,
+    ReadParams, ReadResult, Report, ReportParams, Reported, ResizeParams, RunParams, SavedSecret,
+    SecretName, SecretSet, SendParams, StateParams, StatsParams, Target, TerminalInfo, WaitParams,
+    WaitResult, frame,
 };
 
 pub use conn::{Conn, Error, notification, once};
@@ -300,6 +301,34 @@ pub trait Calls {
     /// Stops a per-run key signing at once.
     fn proxy_revoke(&self, id: &str) -> Result<(), Error> {
         unit(self, Method::ProxyRevoke, &KeyId { id: id.to_owned() })
+    }
+
+    /// Saves one of shed's own secrets; the value is never returned.
+    fn secret_set(&self, name: &str, value: String) -> Result<(), Error> {
+        unit(
+            self,
+            Method::SecretSet,
+            &SecretSet {
+                name: name.to_owned(),
+                value,
+            },
+        )
+    }
+
+    /// shed's own secrets by name.
+    fn secrets(&self) -> Result<Vec<SavedSecret>, Error> {
+        typed(self, Method::SecretLs, &serde_json::json!({}))
+    }
+
+    /// Removes one of shed's own secrets; twice is once.
+    fn secret_rm(&self, name: &str) -> Result<(), Error> {
+        unit(
+            self,
+            Method::SecretRm,
+            &SecretName {
+                name: name.to_owned(),
+            },
+        )
     }
 
     /// Reads the account's status and usage now.
