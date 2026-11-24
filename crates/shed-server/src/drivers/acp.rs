@@ -1048,10 +1048,6 @@ mod tests {
             {"optionId": "never", "name": "Never", "kind": "reject_always"}])
     }
 
-    fn some(s: &str) -> Option<String> {
-        Some(s.to_owned())
-    }
-
     #[tokio::test]
     async fn a_judge_reads_the_request_and_its_allow_picks_allow_once_over_allow_always() {
         let script = r#"r=$(cat); has() { case $r in *"$1"*) ;; *) exit 3 ;; esac; }
@@ -1060,10 +1056,15 @@ mod tests {
             echo '{"decision": "allow", "reason": "a delete inside the worktree"}'"#;
         let (picked, event) = judged(script, offered()).await;
         assert_eq!(picked, "once");
-        let reason = some("a delete inside the worktree");
+        let reason = Some("a delete inside the worktree".to_owned());
         assert_eq!(
             event,
-            ("once".to_owned(), some("judge"), some("allow"), reason)
+            (
+                "once".to_owned(),
+                Some("judge".to_owned()),
+                Some("allow".to_owned()),
+                reason
+            )
         );
     }
 
@@ -1082,9 +1083,9 @@ mod tests {
         assert_eq!(picked, "no");
         let deny = (
             "no".to_owned(),
-            some("judge"),
-            some("deny"),
-            some("push to main"),
+            Some("judge".to_owned()),
+            Some("deny".to_owned()),
+            Some("push to main".to_owned()),
         );
         assert_eq!(event, deny);
     }
@@ -1105,7 +1106,7 @@ mod tests {
             let (picked, (_, by, decision, reason)) = judged(script, offered()).await;
             assert_eq!(
                 (picked.as_str(), by, decision),
-                ("no", some("judge"), some("deny"))
+                ("no", Some("judge".to_owned()), Some("deny".to_owned()))
             );
             let reason = reason.unwrap_or_default();
             assert!(reason.starts_with(why), "{script}: {reason}");
@@ -1115,7 +1116,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_judge_past_its_timeout_denies() {
         let (picked, (_, _, decision, reason)) = judged("exec sleep 600", offered()).await;
-        assert_eq!((picked.as_str(), decision), ("no", some("deny")));
-        assert_eq!(reason, some("the judge took over 30 s"));
+        assert_eq!((picked.as_str(), decision), ("no", Some("deny".to_owned())));
+        assert_eq!(reason, Some("the judge took over 30 s".to_owned()));
     }
 }
