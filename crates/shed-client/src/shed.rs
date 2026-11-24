@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use serde_json::Value;
-use shed_proto::{Event, EventsParams, Hello, Method, ScreenUpdate, WatchParams};
+use shed_proto::{Event, EventsParams, Hello, Method, ScreenUpdate, Tool, WatchParams};
 
 use crate::{Calls, Conn, Error, Stream};
 
@@ -19,6 +19,7 @@ pub struct Shed {
     socket: PathBuf,
     idle: Arc<Mutex<Vec<Conn>>>,
     timeout: Option<Duration>,
+    tool: Option<Tool>,
 }
 
 impl Shed {
@@ -28,6 +29,7 @@ impl Shed {
             socket: socket.into(),
             idle: Arc::default(),
             timeout: Some(Duration::from_secs(10)),
+            tool: None,
         }
     }
 
@@ -38,6 +40,13 @@ impl Shed {
             timeout: call,
             ..self
         }
+    }
+
+    /// Each connection names the caller's own `tool` at hello, as [`Conn::connect_as`].
+    #[must_use]
+    pub fn tool(self, tool: Tool) -> Self {
+        let tool = Some(tool);
+        Self { tool, ..self }
     }
 
     /// The server's hello.
@@ -56,7 +65,10 @@ impl Shed {
     /// # Errors
     /// As [`Conn::connect`].
     pub fn connect(&self) -> Result<Conn, Error> {
-        Conn::connect(&self.socket)
+        match self.tool.clone() {
+            Some(tool) => Conn::connect_as(&self.socket, tool),
+            None => Conn::connect(&self.socket),
+        }
     }
 
     /// The events of the terminals carrying every one of `params.labels`, after `params.since`.

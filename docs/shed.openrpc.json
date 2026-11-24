@@ -1383,12 +1383,172 @@
             "minimum": 0,
             "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
           }
+        },
+        {
+          "name": "tool",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A client's own tool, which the `install` methods may move besides shed."
+          }
         }
       ],
       "result": {
         "name": "result",
         "schema": {
           "$ref": "#/components/schemas/Hello"
+        }
+      }
+    },
+    {
+      "name": "install.back",
+      "description": "Renames `<dest>.prev` over the live binary, once `<dest>.prev --version` answers; else `UNSTAGED` and nothing moves. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
+        }
+      }
+    },
+    {
+      "name": "install.find",
+      "description": "A release's `SHA256SUMS`, read on the main host; none there yet is `NO_RELEASE`. `tool` must be `shed` or the tool the client named at `hello`, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "tool",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "`shed` or the caller's [`Tool`] name."
+          }
+        },
+        {
+          "name": "releases",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The releases URL."
+          }
+        },
+        {
+          "name": "tag",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The release tag, the caller's choice."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Release"
+        }
+      }
+    },
+    {
+      "name": "install.ls",
+      "description": "The `--version` line of `<dest>`, `<dest>.new` and `<dest>.prev`. `dest` must be shed's own binary or the tool's the client named at `hello`, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
+        }
+      }
+    },
+    {
+      "name": "install.stage",
+      "description": "Downloads `<tool>-<arch>-<os>` to `<dest>.new.part`, checks its sha256 against `SHA256SUMS`, makes it 755, checks that its `--version` contains `build` and renames it to `<dest>.new`; the live binary is untouched. A failed check removes the file and is `UNSTAGED`, naming it (`asset`, `download`, `checksum`, `version`); `build` already staged fetches nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "source",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Source",
+            "description": "The release."
+          }
+        },
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "What `<dest>.new --version` must contain."
+          }
+        },
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
+        }
+      }
+    },
+    {
+      "name": "install.swap",
+      "description": "Keeps the live binary as `<dest>.prev` (a hard link) and renames `<dest>.new` over it, once `<dest>.new --version` answers with `build`; else `UNSTAGED` and nothing moves. Live already `build`: nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "dest",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The live binary."
+          }
+        },
+        {
+          "name": "build",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The build `<dest>.new` must be."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Install"
         }
       }
     },
@@ -5737,6 +5897,24 @@
         ],
         "description": "The answer to `handover.check` and `handover`."
       },
+      "Tool": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Its name, as its release assets start (`drover`); the last part of `exe`."
+          },
+          "exe": {
+            "type": "string",
+            "description": "Its live binary's absolute path."
+          }
+        },
+        "required": [
+          "name",
+          "exe"
+        ],
+        "description": "The calling tool, named at `hello`: the one binary besides shed's own the `install` methods move."
+      },
       "Hello": {
         "type": "object",
         "properties": {
@@ -5769,12 +5947,94 @@
             "format": "uint32",
             "minimum": 0,
             "description": "The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone."
+          },
+          "tool": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Tool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A client's own tool, which the `install` methods may move besides shed."
           }
         },
         "required": [
           "version"
         ],
         "description": "`hello` params and result: the sender's product, version, build and protocol range."
+      },
+      "Install": {
+        "type": "object",
+        "properties": {
+          "live": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`<dest>`."
+          },
+          "staged": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`<dest>.new`."
+          },
+          "prev": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`<dest>.prev`."
+          }
+        },
+        "description": "An install's three files, each by its `--version` line; none when missing or not answering."
+      },
+      "Release": {
+        "type": "object",
+        "properties": {
+          "tag": {
+            "type": "string",
+            "description": "The tag."
+          },
+          "assets": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each asset's sha256, from `SHA256SUMS`."
+          }
+        },
+        "required": [
+          "tag",
+          "assets"
+        ],
+        "description": "`install.find` result: a release's assets."
+      },
+      "Source": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "description": "`shed` or the caller's [`Tool`] name."
+          },
+          "releases": {
+            "type": "string",
+            "description": "The releases URL."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The release tag, the caller's choice."
+          }
+        },
+        "required": [
+          "tool",
+          "releases",
+          "tag"
+        ],
+        "description": "Where a release is: `<releases>/<tag>/SHA256SUMS` and `<releases>/<tag>/<tool>-<arch>-<os>`."
       },
       "Link": {
         "type": "object",
@@ -7265,6 +7525,18 @@
       "NO_PROXY": {
         "code": -32018,
         "message": "NO_PROXY"
+      },
+      "NOT_OWN_BINARY": {
+        "code": -32019,
+        "message": "NOT_OWN_BINARY"
+      },
+      "NO_RELEASE": {
+        "code": -32020,
+        "message": "NO_RELEASE"
+      },
+      "UNSTAGED": {
+        "code": -32021,
+        "message": "UNSTAGED"
       },
       "INVALID_REQUEST": {
         "code": -32600,

@@ -119,6 +119,8 @@ impl RpcError {
     }
 }
 
+impl std::error::Error for RpcError {}
+
 impl std::fmt::Display for RpcError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
@@ -143,6 +145,9 @@ pub struct Hello {
     /// The oldest protocol the sender still speaks: a server's oldest served, a client's oldest accepted server; none means `protocol` alone.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oldest: Option<u32>,
+    /// A client's own tool, which the `install` methods may move besides shed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<crate::Tool>,
 }
 
 impl Hello {
@@ -155,6 +160,7 @@ impl Hello {
             build: BUILD.to_owned(),
             protocol: PROTOCOL,
             oldest: Some(OLDEST_PROTOCOL),
+            tool: None,
         }
     }
 

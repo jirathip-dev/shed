@@ -9,7 +9,7 @@ use std::time::Duration;
 use serde::Serialize;
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_json::Value;
-use shed_proto::{ErrorCode, Hello, Method, Request, Response, RpcError, Target};
+use shed_proto::{ErrorCode, Hello, Method, Request, Response, RpcError, Target, Tool};
 
 use crate::stream::Stream;
 use crate::{Calls, MIN_PROTOCOL};
@@ -201,7 +201,16 @@ impl Conn {
     /// [`Error::Io`] when nothing listens; [`Error::Version`] when the server is not one this client speaks to.
     pub fn connect(socket: &Path) -> Result<Self, Error> {
         let stream = UnixStream::connect(socket).map_err(io_at(socket))?;
-        Self::on(socket.to_owned(), stream)
+        Self::on(socket.to_owned(), stream, None)
+    }
+
+    /// As [`Conn::connect`], naming the caller's own `tool`: the one binary besides shed's the `install` calls move.
+    ///
+    /// # Errors
+    /// As [`Conn::connect`].
+    pub fn connect_as(socket: &Path, tool: Tool) -> Result<Self, Error> {
+        let stream = UnixStream::connect(socket).map_err(io_at(socket))?;
+        Self::on(socket.to_owned(), stream, Some(tool))
     }
 
     /// Shakes hands over `stream`: a socket, or one end of a socketpair to `ssh … shed connect`.
@@ -209,10 +218,10 @@ impl Conn {
     /// # Errors
     /// As [`Conn::connect`].
     pub fn over(stream: UnixStream) -> Result<Self, Error> {
-        Self::on(PathBuf::new(), stream)
+        Self::on(PathBuf::new(), stream, None)
     }
 
-    fn on(socket: PathBuf, stream: UnixStream) -> Result<Self, Error> {
+    fn on(socket: PathBuf, stream: UnixStream, tool: Option<Tool>) -> Result<Self, Error> {
         let reader = BufReader::new(stream.try_clone().map_err(io_at(&socket))?);
         let writer = BufWriter::new(stream);
         let wire = RefCell::new(Wire {
@@ -225,7 +234,7 @@ impl Conn {
             wire,
             server: ours(),
         };
-        let hello = encode(&conn.server)?;
+        let hello = encode(&Hello { tool, ..ours() })?;
         conn.server = shaken(conn.exchange(Method::Hello, hello))?;
         Ok(conn)
     }

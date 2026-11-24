@@ -249,6 +249,51 @@ The handshake; must come first on every connection. Another product, or a protoc
 {"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
 ```
 
+### `install.back`
+
+Renames `<dest>.prev` over the live binary, once `<dest>.prev --version` answers; else `UNSTAGED` and nothing moves. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.back","params":{"dest":"/home/user/.cargo/bin/drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":null}}
+```
+
+### `install.find`
+
+A release's `SHA256SUMS`, read on the main host; none there yet is `NO_RELEASE`. `tool` must be `shed` or the tool the client named at `hello`, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.find","params":{"releases":"https://github.com/o/drover/releases/download","tag":"build-1a2b3c4","tool":"drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"assets":{"drover-aarch64-apple-darwin":"9f86d081884c7d65"},"tag":"build-1a2b3c4"}}
+```
+
+### `install.ls`
+
+The `--version` line of `<dest>`, `<dest>.new` and `<dest>.prev`. `dest` must be shed's own binary or the tool's the client named at `hello`, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.ls","params":{"dest":"/home/user/.cargo/bin/drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":null}}
+```
+
+### `install.stage`
+
+Downloads `<tool>-<arch>-<os>` to `<dest>.new.part`, checks its sha256 against `SHA256SUMS`, makes it 755, checks that its `--version` contains `build` and renames it to `<dest>.new`; the live binary is untouched. A failed check removes the file and is `UNSTAGED`, naming it (`asset`, `download`, `checksum`, `version`); `build` already staged fetches nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.stage","params":{"build":"1a2b3c4","dest":"/home/user/.cargo/bin/drover","source":{"releases":"https://github.com/o/drover/releases/download","tag":"build-1a2b3c4","tool":"drover"}}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":"drover 0.4.0 (1a2b3c4)"}}
+```
+
+### `install.swap`
+
+Keeps the live binary as `<dest>.prev` (a hard link) and renames `<dest>.new` over it, once `<dest>.new --version` answers with `build`; else `UNSTAGED` and nothing moves. Live already `build`: nothing. Only shed's own binary or the client's tool, else `NOT_OWN_BINARY`.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"install.swap","params":{"build":"1a2b3c4","dest":"/home/user/.cargo/bin/drover"}}
+{"jsonrpc":"2.0","id":1,"result":{"live":"drover 0.4.0 (4254d78)","prev":null,"staged":null}}
+```
+
 ### `keys`
 
 Press keys by name (`enter`, `esc`, `ctrl+c`, `up`, …); nothing is sent if any name is unknown.
@@ -558,6 +603,9 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32016 | `NOT_DELIVERED` |
 | -32017 | `ACCOUNT_LOCAL_ONLY` |
 | -32018 | `NO_PROXY` |
+| -32019 | `NOT_OWN_BINARY` |
+| -32020 | `NO_RELEASE` |
+| -32021 | `UNSTAGED` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |

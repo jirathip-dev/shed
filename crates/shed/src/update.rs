@@ -1,14 +1,12 @@
-use std::env::consts::ARCH;
-use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::PermissionsExt as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
 use shed_client::Conn;
-use shed_server::proto::{BUILD, Handover, Method};
+use shed_server::install::{self, asset};
+use shed_server::proto::{BUILD, Handover, Method, Source, Stage, Swap};
 use shed_server::runner;
 use shed_server::{Paths, config};
 
@@ -22,69 +20,6 @@ fn main_head(repo: &str) -> anyhow::Result<String> {
     match sha.filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit())) {
         Some(sha) if ran.status.success() => Ok(sha.get(..7).unwrap_or_default().to_owned()),
         _ => bail!("git ls-remote {repo} main: {}", err.trim()),
-    }
-}
-
-struct Staged(PathBuf);
-
-impl Drop for Staged {
-    fn drop(&mut self) {
-        fs::remove_file(&self.0).ok();
-    }
-}
-
-fn curl(url: &str) -> Result<Vec<u8>, String> {
-    let ran = runner::output("curl", ["-fsSL", url], &[]).map_err(|e| format!("curl: {e}"))?;
-    let err = String::from_utf8_lossy(&ran.stderr).trim().to_owned();
-    ran.status.success().then_some(ran.stdout).ok_or(err)
-}
-
-#[cfg(target_os = "macos")]
-const OS: &str = "apple-darwin";
-#[cfg(not(target_os = "macos"))]
-const OS: &str = "unknown-linux-gnu";
-
-impl Staged {
-    fn fetch(url: &str, sums: &str, to: &str, exe: &Path) -> anyhow::Result<Self> {
-        let asset = format!("shed-{ARCH}-{OS}");
-        let want = sums.lines().find_map(|l| {
-            let (sum, name) = l.split_once(char::is_whitespace)?;
-            (name.trim_start().trim_start_matches('*') == asset).then_some(sum)
-        });
-        let want = want.with_context(|| format!("SHA256SUMS names no {asset}"))?;
-        let staged = Self(exe.with_extension("new"));
-        let bytes = curl(&format!("{url}/{asset}")).map_err(anyhow::Error::msg)?;
-        fs::write(&staged.0, bytes)?;
-        let sum = [
-            "-c",
-            "sha256sum \"$1\" 2>/dev/null || shasum -a 256 \"$1\"",
-            "sh",
-        ];
-        let args = sum
-            .map(OsStr::new)
-            .into_iter()
-            .chain([staged.0.as_os_str()]);
-        let ran = runner::output("sh", args, &[])?;
-        let got = String::from_utf8_lossy(&ran.stdout);
-        let got = got.split_whitespace().next().unwrap_or_default();
-        if got != want {
-            bail!("checksum: {asset} is {got:?}, SHA256SUMS says {want}");
-        }
-        fs::set_permissions(&staged.0, fs::Permissions::from_mode(0o755))?;
-        let ran = runner::output(&staged.0, ["--version"], &[])?;
-        let said = String::from_utf8_lossy(&ran.stdout);
-        if !said.trim_end().ends_with(&format!("({to})")) {
-            bail!("--version says {:?}, not {to}", said.trim());
-        }
-        Ok(staged)
-    }
-
-    fn swap(self, exe: &Path) -> anyhow::Result<()> {
-        let prev = exe.with_extension("prev");
-        fs::remove_file(&prev).ok();
-        fs::hard_link(exe, &prev).with_context(|| prev.display().to_string())?;
-        fs::rename(&self.0, exe).with_context(|| exe.display().to_string())?;
-        Ok(())
     }
 }
 
@@ -119,25 +54,34 @@ pub fn pass(paths: &Paths, dir: &Path, exe: &Path, dry: bool) -> anyhow::Result<
             Some(_) => format!("serve {} on {BUILD}", hand_over(serve, BUILD)),
         });
     }
-    let url = format!("{releases}/{tag}");
-    let sums = match curl(&format!("{url}/SHA256SUMS")) {
-        Ok(sums) => String::from_utf8_lossy(&sums).into_owned(),
-        Err(why) => return Ok(format!("waiting for {tag}: {why}")),
+    let source = Source {
+        tool: "shed".to_owned(),
+        releases,
+        tag: tag.clone(),
     };
-    if dry {
-        return Ok(format!(
-            "would    fetch shed-{ARCH}-{OS}, check, swap, hand over"
-        ));
+    if let Err(why) = install::find(&source) {
+        return Ok(format!("waiting for {tag}: {why}"));
     }
-    let staged = Staged::fetch(&url, &sums, &to, exe).context(tag.clone())?;
-    let check = json!({"build": to, "candidate": staged.0});
+    if dry {
+        let asset = asset("shed");
+        return Ok(format!("would    fetch {asset}, check, swap, hand over"));
+    }
+    let (dest, build) = (exe.to_owned(), to.clone());
+    install::stage(&Stage {
+        source,
+        build,
+        dest,
+    })
+    .context(tag.clone())?;
+    let check = json!({"build": to, "candidate": exe.with_extension("new")});
     let checked = serve
         .as_mut()
         .map(|c| c.call::<_, Handover>(Method::HandoverCheck, &check));
     if let Some(Err(e)) = checked {
-        return Ok(format!("deferred {tag}: {e}; nothing swapped"));
+        return Ok(format!("deferred {tag}: {e}; staged, nothing swapped"));
     }
-    staged.swap(exe)?;
+    let (dest, build) = (exe.to_owned(), to.clone());
+    install::swap(&Swap { dest, build })?;
     let served = hand_over(serve, &to);
     Ok(format!("updated {BUILD} -> {to}; serve {served}"))
 }

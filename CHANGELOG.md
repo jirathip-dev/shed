@@ -301,6 +301,10 @@ All notable changes to this project are documented here. The format follows
 - `machine.stats` reports macOS's memory pressure level as `mem_level` (`normal`, `warn` or `critical`), now and in
   `history`, and every process row in it and in `terminal.procs` carries `cpu_ms`, its CPU time, so two reads give a
   CPU share.
+- `install.find`, `install.ls`, `install.stage`, `install.swap` and `install.back` move a release of shed's own
+  binary or of the tool the client named at `hello` (`tool`), on the main host, and refuse any other binary with
+  `NOT_OWN_BINARY`; `shed install ls` shows shed's live, staged and previous builds. Self-update runs on the same
+  code, and a deferred pass now keeps the checked `<binary>.new` for the next one.
 
 ### Changed
 
