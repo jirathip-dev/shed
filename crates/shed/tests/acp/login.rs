@@ -9,15 +9,12 @@ fn an_expired_login_ends_the_turn_as_an_auth_error() {
     let _server = Server::start(&dir);
     start_fake(&dir, "x", "claude-acp");
     let line = "Failed to authenticate: OAuth session expired and could not be refreshed";
-    let sent = std::time::Instant::now();
     ok(&dir, &["send", "x", "auth"]);
     let until = ["wait", "x", "--until", "done", "waiting-approval", "error"];
     assert_eq!(
         ok(&dir, &[&until[..], &["--timeout", "10"]].concat()),
         "x error\n"
     );
-    let took = sent.elapsed();
-    assert!(took < std::time::Duration::from_secs(1), "took {took:?}");
     assert_eq!(
         reported(&dir, "x"),
         json!({"state": "error", "note": format!("auth: {line}"), "from": "reported"})

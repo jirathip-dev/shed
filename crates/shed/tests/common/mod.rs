@@ -2,11 +2,10 @@ use std::cell::RefCell;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
 
 use shed_client::Conn;
-use shed_server::Paths;
 use shed_server::proto::{LsParams, Method, TerminalInfo};
+use shed_server::{Paths, clock};
 
 struct Made(RefCell<Vec<PathBuf>>);
 
@@ -28,12 +27,11 @@ pub fn temp_dir(name: &str) -> PathBuf {
     dir.canonicalize().expect("canonical temp dir")
 }
 
-pub fn eventually(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !check() {
-        assert!(Instant::now() < deadline, "timed out waiting for {what}");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+pub fn eventually(what: &str, check: impl FnMut() -> bool) {
+    assert!(
+        clock::poll(clock::PATIENCE, check),
+        "timed out waiting for {what}"
+    );
 }
 
 pub struct Server(pub Child, PathBuf);

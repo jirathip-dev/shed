@@ -1,7 +1,6 @@
 use std::io::{BufRead as _, BufReader};
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
 
 use serde_json::json;
 use shed_client::MIN_PROTOCOL;
@@ -9,6 +8,7 @@ use shed_server::proto::{BUILD, LONG_VERSION, PROTOCOL};
 
 use crate::common::{Server, temp_dir};
 use crate::{shed, shed_in, stdout};
+use shed_server::clock;
 
 #[test]
 fn hello_prints_the_version() {
@@ -91,13 +91,11 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
         let older = json!({"jsonrpc": "2.0", "id": 1, "result":
             {"product": "shed", "version": "0.0.0", "build": "56de739", "protocol": MIN_PROTOCOL - 1}});
         std::io::Write::write_all(&mut stream, format!("{older}\n").as_bytes()).expect("reply");
-        held.recv_timeout(Duration::from_secs(10)).ok();
+        held.recv_timeout(clock::PATIENCE).is_ok()
     });
-    let started = Instant::now();
     let out = shed_in(&dir, &["ls"]);
-    let took = started.elapsed();
     done.send(()).ok();
-    server.join().expect("fake server");
+    let held_on = server.join().expect("fake server");
     assert_eq!(out.status.code(), Some(1), "{out:?}");
     assert_eq!(
         String::from_utf8_lossy(&out.stderr),
@@ -106,7 +104,7 @@ fn a_client_refuses_a_server_below_its_oldest_protocol_at_once_naming_both_range
             MIN_PROTOCOL - 1
         )
     );
-    assert!(took < Duration::from_secs(2), "took {took:?}");
+    assert!(held_on, "the client waited for the server to hang up");
 }
 
 #[test]

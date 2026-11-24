@@ -5,8 +5,8 @@ build it from source with `cargo install`.
 
 ## The release workflow
 
-`.github/workflows/release.yml` runs after the `ci` workflow ends green on a push to main or staging (`workflow_run`).
-GitHub runs a `workflow_run` workflow from the default branch's copy, so it starts once the file is on main. It
+`.github/workflows/release.yml` runs after the `ci` workflow ends green on a push to main or staging (`workflow_run`),
+a re-run of `ci` included. GitHub runs a `workflow_run` workflow from the default branch's copy, which is staging's. It
 builds `aarch64-apple-darwin` (macOS runner) and `x86_64-unknown-linux-gnu` (the oldest hosted Ubuntu, for a low
 glibc floor), then publishes one GitHub release:
 
@@ -18,6 +18,15 @@ glibc floor), then publishes one GitHub release:
 
 `shed` is the only binary: the server is `shed serve`. `shed --version` prints `<version> (<sha7>)`, the commit it was
 built from; each build job checks that it names the sha the release is tagged with, so an installer can check it too.
+
+### Finding a main release run (#356)
+
+GitHub lists every `workflow_run` run under the default branch's head branch and sha (staging), whichever branch it
+builds, so `gh run list -w release -b main` is always empty. The run title names the built branch and sha
+(`release main <sha>`), and so do the release's notes (`shed main @ <sha>`). #356 was filed because main's release
+runs looked missing. They were not: main 7540e74's first green `ci` started a release run that failed on #338's missing
+`scripts/fake-link.py`, and the `ci` re-run started a release run with the fixed workflow, which published
+`build-7540e74`.
 
 ### Main behind staging (#338)
 
@@ -35,7 +44,20 @@ and `spctl -a -vv -t install`. A bare binary cannot carry a stapled ticket, so t
 and checked online. Only the signed binary is published.
 
 A failed build, signing or publish step ends its job green with an error annotation and publishes nothing, so the
-workflow never turns the branch red. The failure shows up as a missing release. Re-run the workflow run to retry.
+workflow never turns the branch red. The failure shows up as a missing release. To retry, re-run the `ci` run, which
+starts a release run with today's workflow, or publish by hand. Re-running the failed release run itself replays the
+workflow file as it was then.
+
+### Publishing a main sha by hand (#356)
+
+```sh
+gh workflow run release.yml -R jirathip-dev/shed -f sha=<main sha> -f publish=true
+```
+
+This builds that sha, publishes its `build-<sha7>` release and pushes its client tag, exactly as a green `ci` on main
+would have done. The sha must be a commit on main, and `publish=true` needs a sha. Otherwise the run fails before
+building anything. A release that already exists is not replaced: the publish step reports an error. Without
+`publish=true` the run is a dry run (see below).
 
 ### Secrets
 
@@ -64,8 +86,9 @@ or `crates/shed-catalog` changed since then (or there is no tag yet), pushes `cl
 `<PROTOCOL>` is `shed_proto::PROTOCOL` at that commit and `<n>` counts from 0 within each protocol. A run with no
 client change, or a re-run on a tagged commit, pushes nothing. The tag is git only, with no release assets.
 
-Starting the workflow by hand (`gh workflow run release.yml -R jirathip-dev/shed`) is a dry run: it builds and
-publishes nothing and prints the tag it would push, or `no client change since <tag>`. Locally,
+Starting the workflow by hand without `publish=true` (`gh workflow run release.yml -R jirathip-dev/shed`, optionally
+with `-f sha=<main sha>`) is a dry run: it builds and publishes nothing and prints the tag it would push for the
+dispatched ref (or that sha), or `no client change since <tag>`. Locally,
 `scripts/client-tag.sh [<commit>]` prints the same; `--push` pushes it.
 
 ## A manual install

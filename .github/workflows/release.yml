@@ -6,50 +6,96 @@ name: release
 # #338: this file runs from the default branch (staging) on a checkout of the built sha, which may be behind it: a file
 # only newer commits have (scripts/fake-link.py) is skipped with a ::notice:: when absent; the binaries stay required.
 # #267: on main it also tags client-v<PROTOCOL>.<n> when a client crate changed; started by hand it is a dry run.
+# #356: a workflow_run run carries the default branch's head branch and sha in Actions' run list, so run-name names
+# the built branch and sha. Started by hand with a main sha and publish: true it builds, publishes and tags that sha.
+run-name: >-
+  release ${{ github.event.workflow_run.head_branch || 'by hand' }}
+  ${{ github.event.workflow_run.head_sha || inputs.sha }}
 on:
   workflow_run:
     workflows: [ci]
     types: [completed]
     branches: [main, staging]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: a commit on main to build (empty is a dry run of the dispatched ref)
+        default: ""
+      publish:
+        description: build, publish build-<sha7> and push its client tag
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
-env:
-  SHA: ${{ github.event.workflow_run.head_sha }}
-  BRANCH: ${{ github.event.workflow_run.head_branch }}
-
 jobs:
-  client-tag:
+  target:
     if: >-
       github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main')
+      github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    outputs:
+      sha: ${{ steps.t.outputs.sha }}
+      branch: ${{ steps.t.outputs.branch }}
+      publish: ${{ steps.t.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SHA || github.sha }}
           fetch-depth: 0
-      - name: tag a client release (a dry run when started by hand)
+      - id: t
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INPUT_SHA: ${{ inputs.sha }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
         run: |
-          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+          if [ -n "$RUN_SHA" ]; then
+            printf 'sha=%s\nbranch=%s\npublish=true\n' "$RUN_SHA" "$RUN_BRANCH" >> "$GITHUB_OUTPUT"
+          elif [ -z "$INPUT_SHA" ]; then
+            [ "$INPUT_PUBLISH" != true ] || { echo "::error::publish needs a sha"; exit 1; }
+            printf 'sha=%s\nbranch=main\npublish=false\n' "$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          elif sha=$(git rev-parse --verify --quiet "$INPUT_SHA^{commit}") &&
+            git merge-base --is-ancestor "$sha" origin/main; then
+            printf 'sha=%s\nbranch=main\npublish=%s\n' "$sha" "$INPUT_PUBLISH" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$INPUT_SHA is not a commit on main"
+            exit 1
+          fi
+
+  client-tag:
+    needs: target
+    if: needs.target.outputs.branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PUBLISH: ${{ needs.target.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.target.outputs.sha }}
+          fetch-depth: 0
+      - name: tag a client release (a dry run unless publishing)
+        run: |
+          if [ "$PUBLISH" != true ]; then
             scripts/client-tag.sh HEAD
           elif ! scripts/client-tag.sh --push HEAD; then
             echo "::error::the client release tag failed"
           fi
 
   linux:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    needs: target
+    if: needs.target.outputs.publish == 'true'
     runs-on: ubuntu-22.04
     outputs:
       ok: ${{ steps.build.outputs.ok }}
+    env:
+      SHA: ${{ needs.target.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SHA }}
+          ref: ${{ needs.target.outputs.sha }}
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: x86_64-unknown-linux-gnu
@@ -78,15 +124,18 @@ jobs:
             shed-fake-link.py
 
   macos:
-    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    needs: target
+    if: needs.target.outputs.publish == 'true'
     runs-on: macos-latest
     environment: release
     outputs:
       ok: ${{ steps.sign.outputs.ok }}
+    env:
+      SHA: ${{ needs.target.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.SHA }}
+          ref: ${{ needs.target.outputs.sha }}
       - uses: dtolnay/rust-toolchain@1.97.1
         with:
           targets: aarch64-apple-darwin
@@ -120,7 +169,7 @@ jobs:
           path: shed-aarch64-apple-darwin
 
   publish:
-    needs: [linux, macos]
+    needs: [target, linux, macos]
     if: needs.linux.outputs.ok == 'true' && needs.macos.outputs.ok == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -128,6 +177,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
+      SHA: ${{ needs.target.outputs.sha }}
+      BRANCH: ${{ needs.target.outputs.branch }}
     steps:
       - uses: actions/download-artifact@v4
         with:

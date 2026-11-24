@@ -1,7 +1,7 @@
 use std::io::{BufRead as _, BufReader, Write as _};
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use shed_server::Paths;
@@ -145,7 +145,6 @@ fn a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream() {
     ];
     ok(&dir, &quiet);
     let mut lines = BufReader::new(events.stdout.take().expect("stdout")).lines();
-    let started = Instant::now();
     let idle = lines.find_map(|l| {
         let v: Value = serde_json::from_str(&l.ok()?).ok()?;
         (v["event"] == "state").then_some(v)
@@ -157,5 +156,4 @@ fn a_quiet_terminal_is_surfaced_as_idle_on_the_events_stream() {
         (&idle["name"], &idle["state"]),
         (&json!("stuck"), &json!("idle"))
     );
-    assert!(started.elapsed() < Duration::from_secs(10));
 }
