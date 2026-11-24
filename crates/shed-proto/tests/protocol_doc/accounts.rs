@@ -26,6 +26,7 @@ fn work() -> Account {
             read_at: 1_762_416_000,
         }),
         balance: None,
+        spend: None,
         token: Some(TokenInfo {
             saved_at: 1_762_000_000,
             expires_at: Some(1_793_536_000),
