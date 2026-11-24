@@ -33,6 +33,9 @@ pub struct ExecParams {
     /// Run it on this machine, over its held link.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
+    /// Run it inside `srt` with these rules; no `srt` there is `SANDBOX_MISSING`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::Sandbox>,
 }
 
 /// `exec` result.

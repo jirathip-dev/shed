@@ -1,13 +1,15 @@
 use super::{Entry, Registry, internal, load::history, warm::recipe};
+use crate::sandbox::{self, Own, WRAP_VAR, Wrap};
 use shed_accounts::Store;
 use shed_accounts::choice::{self, Choice};
 use shed_accounts::env::Injected;
 use shed_core::{History, Size, Terminal};
+use shed_proto::Sandbox;
 use shed_proto::{ErrorCode, EventKind, RpcError, RunParams, State, TerminalInfo};
 use std::fs;
 use std::os::fd::AsFd as _;
 use std::os::unix::net::UnixStream;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -105,6 +107,9 @@ impl Registry {
         if p.warm && (p.acp.is_none() || p.resume.is_some() || !p.env.is_empty()) {
             return Err(bad("warm needs acp and takes no resume or env"));
         }
+        if p.sandbox.is_some() && (p.warm || p.keep) {
+            return Err(bad("sandbox takes no warm or keep"));
+        }
         if p.acp.is_none() && (p.model.is_some() || p.effort.is_some()) {
             return Err(bad("model and effort need acp"));
         }
@@ -160,6 +165,7 @@ impl Registry {
         let mut vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
         let Injected { set, unset } = account.unwrap_or_default();
         vars.extend(set);
+        let sandboxed = self.wrapped(&name, &mut p, &mut vars)?;
         let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
         p.idle_after = (p.idle_after).or_else(|| self.terminal_record(agent)?.idle_after);
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
@@ -197,9 +203,65 @@ impl Registry {
             redacted: false,
             auto: p.env.contains_key(crate::drivers::launch::AUTO_ACCOUNT),
             account: p.account,
+            sandboxed,
         };
         self.started(info.clone(), term);
         Ok(self.saved(info))
+    }
+
+    fn wrapped(
+        &self,
+        name: &str,
+        p: &mut RunParams,
+        vars: &mut Vec<(String, String)>,
+    ) -> Result<bool, RpcError> {
+        let Some(sandbox) = &p.sandbox else {
+            return Ok(false);
+        };
+        let agent = p.labels.get("agent").filter(|_| p.acp.is_none());
+        let wrap = self.sandbox(name, sandbox, (p.acp.as_ref(), agent), vars)?;
+        vars.extend(wrap.env.iter().cloned());
+        match &p.acp {
+            Some(_) => {
+                let prefix = serde_json::to_string(&wrap.prefix).map_err(internal)?;
+                vars.push((WRAP_VAR.to_owned(), prefix));
+            }
+            None => p.cmd = wrap.around(&p.cmd),
+        }
+        Ok(true)
+    }
+
+    pub(crate) fn sandbox(
+        &self,
+        name: &str,
+        sandbox: &Sandbox,
+        (acp, agent): (Option<&String>, Option<&String>),
+        vars: &[(String, String)],
+    ) -> Result<Wrap, RpcError> {
+        let catalog = crate::providers::Catalog::load(&self.providers).0;
+        let record = match (acp, agent) {
+            (Some(id), _) => catalog.by_id(id),
+            (None, Some(agent)) => catalog.by_agent(agent),
+            (None, None) => None,
+        };
+        let var = record.and_then(|r| r.config_dir_var.as_ref());
+        let set = var.and_then(|v| vars.iter().rev().find(|(k, _)| k == v));
+        let home = crate::accounts::home();
+        let default = (record.and_then(|r| r.default_folder.as_deref())).map(|d| {
+            d.strip_prefix("~/")
+                .map_or_else(|| d.into(), |rest| home.join(rest))
+        });
+        let config = set.map(|(_, v)| PathBuf::from(v)).or(default);
+        let own = Own {
+            state: &self.path,
+            providers: &self.providers,
+            socket: &self.socket,
+        };
+        let needs = record.and_then(|r| r.sandbox.as_deref());
+        let mut sandbox = sandbox.clone();
+        let adapter = acp.map(|id| self.path.with_file_name("agents").join(id));
+        sandbox.read.extend(adapter);
+        sandbox::prepare(&own, name, &sandbox, (needs, config.as_deref()))
     }
 
     fn started(&mut self, info: TerminalInfo, term: Terminal) {

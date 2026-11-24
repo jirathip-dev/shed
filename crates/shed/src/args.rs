@@ -19,6 +19,10 @@ pub fn mem(s: &str) -> Result<u64, String> {
     shed_server::config::mem_mb(s).ok_or_else(|| format!("{s:?} is not a size, e.g. 200M or 4G"))
 }
 
+pub fn sandbox(s: &str) -> Result<shed_server::proto::Sandbox, String> {
+    serde_json::from_str(s).map_err(|e| format!("not a sandbox: {e}"))
+}
+
 pub fn label(s: &str) -> Result<(String, String), String> {
     s.split_once('=')
         .map(|(k, v)| (k.to_owned(), v.to_owned()))

@@ -147,7 +147,9 @@ impl Registry {
         let files = self.files(name);
         let session = (entry.info.session.as_ref()).filter(|_| entry.info.acp.is_some());
         let (state, session) = (self.path.clone(), session.map(|s| s.id.clone()));
+        let named = name.to_owned();
         Ok((self.saved(entry.info), move || {
+            crate::sandbox::remove(&state, &named);
             for file in files.into_iter().flatten() {
                 fs::remove_file(file).ok();
             }

@@ -155,3 +155,10 @@ Glob = ["search", "pattern"]
 WebFetch = ["fetch", "url"]
 WebSearch = ["fetch", "query"]
 Task = ["think", "description"]
+
+# What Claude Code needs inside a sandbox (`run`'s `sandbox`): srt takes the run's temp folder from `tmp_var`.
+[sandbox]
+tmp_var = "CLAUDE_CODE_TMPDIR"
+read = ["~/.local/share/claude", "~/.local/bin/claude", "~/Library/Keychains"]
+write = ["{config}", "~/.claude.json"]
+hosts = ["*.anthropic.com", "claude.ai", "*.claude.ai"]

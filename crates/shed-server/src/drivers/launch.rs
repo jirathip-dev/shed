@@ -91,8 +91,9 @@ pub(crate) const AUTO_ACCOUNT: &str = "SHED_ACP_AUTO";
 
 pub(crate) const JUDGE: &str = "SHED_ACP_JUDGE";
 
-pub(crate) const LANE_ONLY: [&str; 6] = [
+pub(crate) const LANE_ONLY: [&str; 7] = [
     AUTO_ACCOUNT,
+    crate::sandbox::WRAP_VAR,
     JUDGE,
     "SHED_ACP_RESUME",
     "SHED_ACP_MCP",
@@ -108,7 +109,16 @@ pub(crate) fn agent<A: AsRef<std::ffi::OsStr>>(
 ) -> std::io::Result<tokio::process::Child> {
     let unset = account.unset.iter().map(String::as_str);
     let unset: Vec<_> = LANE_ONLY.into_iter().chain(unset).collect();
-    shed_core::runner::piped(program, args, cwd, (&unset, &account.set))
+    let wrap = crate::config::var(crate::sandbox::WRAP_VAR);
+    let wrap: Vec<String> = wrap
+        .and_then(|w| serde_json::from_str(&w).ok())
+        .unwrap_or_default();
+    let args = args
+        .into_iter()
+        .map(|a| a.as_ref().to_string_lossy().into_owned());
+    let mut cmd = wrap.into_iter().chain([program.to_owned()]).chain(args);
+    let program = cmd.next().unwrap_or_default();
+    shed_core::runner::piped(&program, cmd, cwd, (&unset, &account.set))
 }
 
 pub(crate) fn vars(p: &RunParams, name: &str) -> serde_json::Result<Vec<(String, String)>> {

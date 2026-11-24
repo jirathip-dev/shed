@@ -989,7 +989,7 @@
     },
     {
       "name": "exec",
-      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.",
+      "description": "Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link. `sandbox` runs it inside `srt` with those rules, as `run`'s does (`docs/hosts/sandbox.md`).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -1060,6 +1060,21 @@
               "null"
             ],
             "description": "Run it on this machine, over its held link."
+          }
+        },
+        {
+          "name": "sandbox",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sandbox"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run it inside `srt` with these rules; no `srt` there is `SANDBOX_MISSING`."
           }
         }
       ],
@@ -1996,7 +2011,7 @@
     },
     {
       "name": "run",
-      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only. `policy` `judge` (ACP) runs `judge` (argv) in the terminal's cwd for each permission request, with one JSON object on its stdin: `name`, `labels`, `cwd`, `tool_call` (the agent's ACP `toolCall`: `kind`, `title`, `rawInput`, `locations`, …; `null` when it sent none) and `options` (each `id`, `name`, `kind`); it answers on stdout with `{\"decision\": \"allow\" | \"deny\", \"reason\": \"…\"}`. `allow` picks the first `allow_once` option, else `allow_always`, so a later call still reaches the judge; `deny` picks the first `reject_once`, else `reject_always`; with no such option the request is cancelled. It fails closed: a judge that does not start, exits non-zero, takes over `judge_secs` (default 30) or prints no verdict is a `deny` with that reason. The `approved` event records `by: judge`, the `decision` and the `reason`.",
+      "description": "Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only. `policy` `judge` (ACP) runs `judge` (argv) in the terminal's cwd for each permission request, with one JSON object on its stdin: `name`, `labels`, `cwd`, `tool_call` (the agent's ACP `toolCall`: `kind`, `title`, `rawInput`, `locations`, …; `null` when it sent none) and `options` (each `id`, `name`, `kind`); it answers on stdout with `{\"decision\": \"allow\" | \"deny\", \"reason\": \"…\"}`. `allow` picks the first `allow_once` option, else `allow_always`, so a later call still reaches the judge; `deny` picks the first `reject_once`, else `reject_always`; with no such option the request is cancelled. It fails closed: a judge that does not start, exits non-zero, takes over `judge_secs` (default 30) or prints no verdict is a `deny` with that reason. The `approved` event records `by: judge`, the `decision` and the `reason`. `sandbox` runs the program (ACP: the agent, each time the bridge starts it) inside `srt` with rules shed writes on that machine: the caller's `read`, `write`, `deny`, `hosts`, `sockets` and `mach`, the agent record's `[sandbox]`, and shed's own denies; a `write` that holds shed's state, its config or the folder `srt` or shed is in is `INVALID_PARAMS`, and no `srt` there is `SANDBOX_MISSING` (`docs/hosts/sandbox.md`).",
       "paramStructure": "by-name",
       "params": [
         {
@@ -2270,6 +2285,21 @@
               "null"
             ],
             "description": "ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing."
+          }
+        },
+        {
+          "name": "sandbox",
+          "required": false,
+          "schema": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Sandbox"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Run it inside `srt` with these rules (ACP: the agent, not its bridge); no `srt` there is `SANDBOX_MISSING`."
           }
         }
       ],
@@ -3755,6 +3785,18 @@
             ],
             "description": "A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.",
             "default": null
+          },
+          "sandbox": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SandboxNeeds"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What it needs inside a sandbox.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp/provider-records.md`)."
@@ -4556,6 +4598,45 @@
         ],
         "description": "The prompt's echo: its first `chars` characters must show on the screen before enter."
       },
+      "SandboxNeeds": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "tmp_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable `srt` takes the run's temp folder from.",
+            "default": null
+          },
+          "read": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders and files it reads.",
+            "default": []
+          },
+          "write": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders and files it writes.",
+            "default": []
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Domains it reaches.",
+            "default": []
+          }
+        },
+        "description": "An agent record's `[sandbox]`: what the agent itself needs inside, `~` for home and `{config}` for the run's\nconfig folder (its account's, else the record's `default_folder`)."
+      },
       "Agent": {
         "type": "object",
         "additionalProperties": false,
@@ -4783,6 +4864,10 @@
           "auto": {
             "type": "boolean",
             "description": "Its account is `auto`'s pick: a limit or `account.use` moves it."
+          },
+          "sandboxed": {
+            "type": "boolean",
+            "description": "It runs inside `srt` (`run`'s `sandbox`)."
           }
         },
         "required": [
@@ -5939,6 +6024,62 @@
           }
         ],
         "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
+      },
+      "Sandbox": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "read": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders and files it may read, besides the system's own."
+          },
+          "write": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Folders and files it may write (and read)."
+          },
+          "deny": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Reads denied even inside an allowed folder."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Domains it may reach (`*.example.com` allowed); none: no network."
+          },
+          "sockets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Unix sockets it may connect to, besides the inside socket."
+          },
+          "mach": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "macOS mach services it may look up, besides srt's defaults."
+          },
+          "tmp": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its own temp folder; default one shed makes for it in its state folder."
+          }
+        },
+        "description": "`run`'s and `exec`'s `sandbox`: the caller's folders and hosts; shed adds the system's, the agent's and its own denies."
       },
       "ExecResult": {
         "type": "object",
@@ -7933,6 +8074,10 @@
       "SECRET_STORE": {
         "code": -32022,
         "message": "SECRET_STORE"
+      },
+      "SANDBOX_MISSING": {
+        "code": -32023,
+        "message": "SANDBOX_MISSING"
       },
       "INVALID_REQUEST": {
         "code": -32600,

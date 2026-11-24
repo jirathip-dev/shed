@@ -89,6 +89,8 @@ pub struct Provider {
     pub credentials: Option<CredentialsRecord>,
     /// A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.
     pub terminal: Option<Box<TerminalRecord>>,
+    /// What it needs inside a sandbox.
+    pub sandbox: Option<Box<crate::SandboxNeeds>>,
 }
 
 /// A terminal agent: its start, its setup wizard and how a `send` delivers a prompt to its screen.
