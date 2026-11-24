@@ -362,7 +362,7 @@ struct Tools {
 impl Tools {
     fn new(name: &str) -> Self {
         let host = Host::new(name);
-        let _serve = Server::start(&host.dir);
+        let serve = Server::start(&host.dir);
         std::fs::create_dir(host.dir.join("tools")).expect("tools");
         let (exe, other) = (host.dir.join("tools/drover"), host.dir.join("tools/cooee"));
         script(&exe, OLD);
@@ -382,7 +382,7 @@ impl Tools {
         let caller = Conn::connect_as(&host.socket(), tool).expect("hello naming drover");
         Self {
             host,
-            _serve,
+            _serve: serve,
             exe,
             other,
             asset,

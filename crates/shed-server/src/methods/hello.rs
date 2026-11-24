@@ -8,11 +8,11 @@ pub(super) fn call(cx: &mut Call<'_>) -> Reply {
     if !p.compatible() {
         return Err(RpcError::version(&p, &Hello::ours()));
     }
-    if let Some(t) = p.tool.as_ref() {
-        if !t.exe.is_absolute() || t.exe.file_name() != Some(OsStr::new(&t.name)) {
-            let why = "tool: exe must be an absolute path whose last part is its name";
-            return Err(RpcError::new(ErrorCode::InvalidParams, why));
-        }
+    if let Some(t) = p.tool.as_ref()
+        && (!t.exe.is_absolute() || t.exe.file_name() != Some(OsStr::new(&t.name)))
+    {
+        let why = "tool: exe must be an absolute path whose last part is its name";
+        return Err(RpcError::new(ErrorCode::InvalidParams, why));
     }
     let answer = Hello::answer(&p);
     cx.session.protocol = Some(answer.protocol);
