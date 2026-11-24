@@ -103,6 +103,9 @@ pub struct RunParams {
     /// ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// Run it inside `srt` with these rules (ACP: the agent, not its bridge); no `srt` there is `SANDBOX_MISSING`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::Sandbox>,
 }
 
 /// A child's link to the terminal that started it.
@@ -395,6 +398,10 @@ pub enum State {
 /// `account` is the account it runs on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent fact of the wire shape"
+)]
 pub struct TerminalInfo {
     /// The unique name.
     pub name: String,
@@ -445,4 +452,7 @@ pub struct TerminalInfo {
     /// Its account is `auto`'s pick: a limit or `account.use` moves it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto: bool,
+    /// It runs inside `srt` (`run`'s `sandbox`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sandboxed: bool,
 }

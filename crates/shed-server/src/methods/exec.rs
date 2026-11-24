@@ -1,10 +1,13 @@
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::Duration;
 
 use crate::call::{Call, Reply, io_error, json};
 use crate::proto::{self, ErrorCode, ExecParams, ExecResult, RpcError};
-use crate::runner;
+use crate::{lock, runner};
+
+static NEXT: AtomicU64 = AtomicU64::new(1);
 
 pub(super) async fn call(cx: &mut Call<'_>) -> Reply {
     let p: ExecParams = cx.params()?;
@@ -13,7 +16,15 @@ pub(super) async fn call(cx: &mut Call<'_>) -> Reply {
         .map_or(Ok(Duration::MAX), Duration::try_from_secs_f64);
     let timeout = timeout.map_err(|e| RpcError::new(ErrorCode::InvalidParams, e))?;
     let cwd = p.cwd.unwrap_or_else(|| PathBuf::from("."));
-    let ran = runner::exec(&p.cmd, &cwd, &p.env, p.stdin, timeout, proto::REPLY_LIMIT).await;
+    let (mut cmd, mut env, name) = (p.cmd, p.env, format!("exec-{}", NEXT.fetch_add(1, Relaxed)));
+    let state = lock(cx.registry).path.clone();
+    if let Some(sandbox) = &p.sandbox {
+        let wrap = lock(cx.registry).sandbox(&name, sandbox, None, &[])?;
+        cmd = wrap.around(&cmd);
+        env.extend(wrap.env);
+    }
+    let ran = runner::exec(&cmd, &cwd, &env, p.stdin, timeout, proto::REPLY_LIMIT).await;
+    crate::sandbox::remove(&state, &name);
     let (status, stdout, stderr) = ran.map_err(io_error)?;
     crate::files::within_limit(stdout.len() + stderr.len()).map_err(io_error)?;
     let signal = status.signal().map(|s| s.saturating_add(128));

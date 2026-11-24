@@ -295,6 +295,11 @@ All notable changes to this project are documented here. The format follows
   binary or of the tool the client named at `hello` (`tool`), on the main host, and refuse any other binary with
   `NOT_OWN_BINARY`; `shed install ls` shows shed's live, staged and previous builds. Self-update runs on the same
   code, and a deferred pass now keeps the checked `<binary>.new` for the next one.
+- `run` and `exec` take a `sandbox` (`--sandbox <json>`): the command, or an ACP terminal's agent each time its
+  bridge starts it, runs inside `srt` with rules shed writes on that machine (the caller's folders and hosts,
+  the agent record's new `[sandbox]`, and shed's own denies of home, `~/.ssh`, its state, config and socket). No
+  `srt` there is the new `SANDBOX_MISSING`. A sandboxed command reaches only the new inside socket
+  (`SHED_SOCKET`), which serves `hello`, `heartbeat`, `state` and `emit` (docs/hosts/sandbox.md).
 - Codex accounts report their usage windows (`5h`, `7d` or `30d`, used % and reset) like Claude's, read from
   `codex app-server`'s `account/rateLimits/read`; `auto` and the switch on a limit use them. Antigravity has no
   way to read its windows per account, so it reports none.

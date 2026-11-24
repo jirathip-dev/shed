@@ -83,6 +83,8 @@ pub struct Provider {
     pub proxy: Option<ProxyRecord>,
     /// Where the login lives, for the drift check.
     pub credentials: Option<CredentialsRecord>,
+    /// What it needs inside a sandbox.
+    pub sandbox: Option<Box<crate::SandboxNeeds>>,
 }
 
 /// The driver a provider's lanes run on.

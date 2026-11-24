@@ -30,6 +30,8 @@ pub mod machine;
 pub use machine::*;
 pub mod method;
 pub use method::*;
+pub mod sandbox;
+pub use sandbox::*;
 pub mod screen;
 pub use screen::*;
 pub mod script;

@@ -21,9 +21,11 @@ pub(crate) async fn connection(
     registry: Shared,
     held: Arc<links::Links>,
     stream: tokio::net::UnixStream,
+    inside: bool,
 ) {
     let mut session = Session {
         links: held,
+        inside,
         ..Session::default()
     };
     let (read, out) = stream.into_split();
@@ -166,6 +168,7 @@ fn documented(schema: &Value, doc: &Value, names: &mut BTreeSet<String>) {
 
 pub(crate) async fn dispatch(registry: &Shared, session: &mut Session, request: &Request) -> Reply {
     let method = Method::parse(&request.method)
+        .filter(|m| !session.inside || crate::inside::METHODS.contains(m))
         .ok_or_else(|| RpcError::new(ErrorCode::MethodNotFound, &request.method))?;
     if session.protocol.is_none() && method.needs_hello() {
         return Err(RpcError::new(
@@ -233,7 +236,7 @@ mod tests {
         beat: bool,
     ) -> (tokio::task::JoinHandle<()>, Lines, OwnedWriteHalf) {
         let (server, client) = tokio::net::UnixStream::pair().expect("pair");
-        let conn = tokio::spawn(connection(registry, Arc::default(), server));
+        let conn = tokio::spawn(connection(registry, Arc::default(), server, false));
         let (read, mut write) = client.into_split();
         let hello = Request::new(
             1,

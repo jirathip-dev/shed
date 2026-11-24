@@ -6,7 +6,7 @@ use shed_proto::flow::{Class, Differs, FlowName, FlowReport, Mode};
 use shed_proto::{
     ExecParams, ExecResult, FileParams, Handover, HandoverCheckParams, HandoverParams, Hello, Link,
     LinkState, MachineParams, MachineStats, MemLevel, Method, Proc, Report, ReportParams, Sample,
-    Span, StatsParams,
+    Sandbox, Span, StatsParams,
 };
 
 fn links_example() -> (Value, Value) {
@@ -131,6 +131,11 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
                 stdin: Vec::new(),
                 env: BTreeMap::from([("GIT_PAGER".into(), "cat".into())]),
                 machine: Some("box".into()),
+                sandbox: Some(Sandbox {
+                    write: vec![PathBuf::from("/home/user/project")],
+                    hosts: vec!["github.com".into()],
+                    ..Sandbox::default()
+                }),
             })
             .unwrap(),
             to_value(ExecResult {

@@ -208,6 +208,9 @@ async fn listen(
         watched,
         bind(&crate::proxy::socket(control))?,
     );
+    if let Err(e) = crate::inside::listen(&registry, &links, &paths.state) {
+        writeln!(io::stderr(), "shed serve: no inside socket: {e}").ok();
+    }
     let listener = match listener {
         Some(listener) => tokio::net::UnixListener::from_std(listener)?,
         None => bind(&paths.socket)?,
@@ -221,12 +224,17 @@ async fn listen(
     )
     .ok();
     for early in early {
-        tokio::spawn(connection(Arc::clone(&registry), Arc::clone(&links), early));
+        tokio::spawn(connection(
+            Arc::clone(&registry),
+            Arc::clone(&links),
+            early,
+            false,
+        ));
     }
     let mut stop = std::pin::pin!(stop);
     loop {
         tokio::select! {
-            () = accept(&listener, &registry, &links) => {}
+            () = accept(&listener, &registry, &links, false) => {}
             () = &mut stop => break,
             Some(()) = handovers.recv() => {
                 let (why, back) = handover::run(&registry, &listener).await;
@@ -247,7 +255,7 @@ async fn listen(
     Ok(())
 }
 
-fn bind(socket: &Path) -> io::Result<tokio::net::UnixListener> {
+pub(crate) fn bind(socket: &Path) -> io::Result<tokio::net::UnixListener> {
     match fs::remove_file(socket) {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
@@ -257,11 +265,21 @@ fn bind(socket: &Path) -> io::Result<tokio::net::UnixListener> {
     Ok(listener)
 }
 
-async fn accept(listener: &tokio::net::UnixListener, registry: &Shared, links: &Arc<links::Links>) {
+pub(crate) async fn accept(
+    listener: &tokio::net::UnixListener,
+    registry: &Shared,
+    links: &Arc<links::Links>,
+    inside: bool,
+) {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                tokio::spawn(connection(Arc::clone(registry), Arc::clone(links), stream));
+                tokio::spawn(connection(
+                    Arc::clone(registry),
+                    Arc::clone(links),
+                    stream,
+                    inside,
+                ));
             }
             Err(e) => {
                 writeln!(io::stderr(), "shed serve: accept: {e}").ok();
