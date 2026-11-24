@@ -29,6 +29,7 @@ pub(crate) fn info(state: State) -> TerminalInfo {
         redacted: false,
         account: None,
         auto: false,
+        sandboxed: false,
     }
 }
 
@@ -95,6 +96,8 @@ pub(crate) fn run_params() -> Value {
         env: BTreeMap::new(),
         acp: None,
         policy: None,
+        judge: Vec::new(),
+        judge_secs: None,
         resume: None,
         mcp_servers: Vec::new(),
         meta: None,
@@ -106,6 +109,7 @@ pub(crate) fn run_params() -> Value {
         rows: None,
         cols: None,
         account: None,
+        sandbox: None,
     })
     .unwrap()
 }

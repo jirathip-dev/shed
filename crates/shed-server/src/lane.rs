@@ -141,9 +141,70 @@ pub(crate) trait Driver {
     fn forget(&mut self);
 }
 
+#[derive(Deserialize, Default)]
+pub(crate) struct Judge {
+    pub(crate) cmd: Vec<String>,
+    pub(crate) secs: Option<u64>,
+    #[serde(default)]
+    pub(crate) labels: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub(crate) name: String,
+    #[serde(skip)]
+    pub(crate) cwd: PathBuf,
+}
+
+#[derive(Deserialize)]
+struct Verdict {
+    decision: Decision,
+    #[serde(default)]
+    reason: String,
+}
+
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum Decision {
+    Allow,
+    Deny,
+}
+
+impl Judge {
+    async fn verdict(&self, ask: &Ask) -> Verdict {
+        self.run(ask).await.unwrap_or_else(|reason| Verdict {
+            decision: Decision::Deny,
+            reason,
+        })
+    }
+
+    async fn run(&self, ask: &Ask) -> Result<Verdict, String> {
+        let request = serde_json::json!({"name": self.name, "labels": self.labels, "cwd": self.cwd,
+            "tool_call": ask.call, "options": ask.options});
+        let secs = self.secs.unwrap_or(30);
+        let timeout = Duration::from_secs(secs);
+        let env = BTreeMap::new();
+        let ran = shed_core::runner::exec(
+            &self.cmd,
+            &self.cwd,
+            &env,
+            request.to_string().into_bytes(),
+            timeout,
+            1 << 16,
+        );
+        let (status, out, _) = ran.await.map_err(|e| match e.kind() {
+            io::ErrorKind::TimedOut => format!("the judge took over {secs} s"),
+            _ => format!("the judge did not run: {e}"),
+        })?;
+        if !status.success() {
+            return Err(format!("the judge failed: {status}"));
+        }
+        serde_json::from_slice(&out)
+            .map_err(|e| format!("the judge's answer is not a verdict: {e}"))
+    }
+}
+
 pub(crate) struct Lane {
     out: UnboundedSender<Out>,
     policy: Policy,
+    pub(crate) judge: Judge,
     turns: usize,
     prompted: bool,
     asks: VecDeque<(String, Vec<ApprovalOption>)>,
@@ -179,6 +240,7 @@ impl Lane {
         Self {
             out,
             policy,
+            judge: Judge::default(),
             turns: 0,
             prompted: false,
             asks: VecDeque::new(),
@@ -203,6 +265,20 @@ impl Lane {
             auto: None,
             switch: None,
         }
+    }
+
+    fn bridged(
+        out: UnboundedSender<Out>,
+        policy: Policy,
+        rules: Provider,
+        (name, cwd): (&str, &Path),
+    ) -> Self {
+        let mut lane = Self::new(out, policy, rules, turn_idle_timeout());
+        lane.hibernate_set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+        let judge = crate::config::var(crate::drivers::launch::JUDGE);
+        lane.judge = (judge.and_then(|j| serde_json::from_str(&j).ok())).unwrap_or_default();
+        (lane.judge.name, lane.judge.cwd) = (name.to_owned(), cwd.to_owned());
+        lane
     }
 
     fn send(&self, out: Out) -> Result<(), String> {
@@ -418,7 +494,12 @@ impl Lane {
                     return self.say(format!("shed: no option {choice:?}; one of {ids}"));
                 };
                 driver.approve(&id, Some(&option))?;
-                self.emit(EventKind::Approved { option });
+                self.emit(EventKind::Approved {
+                    option,
+                    by: None,
+                    decision: None,
+                    reason: None,
+                });
                 self.settle();
             }
             Input::Cancel => {
@@ -461,7 +542,7 @@ impl Lane {
         Ok(())
     }
 
-    fn hear(&mut self, heard: Heard, driver: &mut impl Driver) -> Result<(), String> {
+    async fn hear(&mut self, heard: Heard, driver: &mut impl Driver) -> Result<(), String> {
         match heard {
             Heard::Text(chunk) => {
                 self.reply.push_str(&chunk);
@@ -483,7 +564,7 @@ impl Lane {
                 self.show_usage();
             }
             Heard::Limit(resets) => self.limited(resets),
-            Heard::Ask(ask) => return self.ask(ask, driver),
+            Heard::Ask(ask) => return self.ask(ask, driver).await,
             Heard::TurnEnd { stop, error, meta } => {
                 self.turns = self.turns.saturating_sub(1);
                 match error {
@@ -579,32 +660,47 @@ impl Lane {
         }
     }
 
-    fn ask(&mut self, ask: Ask, driver: &mut impl Driver) -> Result<(), String> {
-        let tool = (ask.title)
+    async fn ask(&mut self, ask: Ask, driver: &mut impl Driver) -> Result<(), String> {
+        let tool = (ask.title.clone())
             .or_else(|| (self.titles.get(&ask.tool_call)).map(|t| t.0.clone()))
             .unwrap_or_else(|| "tool".to_owned());
         self.emit(EventKind::ApprovalRequest {
             id: ask.id.clone(),
             tool: tool.clone(),
             options: ask.options.clone(),
-            call: ask.call,
+            call: ask.call.clone(),
         });
-        let kinds = match self.policy {
+        let (allow, judged) = match self.policy {
             Policy::Ask => {
                 self.asks.push_back((ask.id, ask.options));
                 self.state("waiting-approval", Some(tool));
                 return Ok(());
             }
-            Policy::Allow => ["allow_once", "allow_always"],
-            Policy::Deny => ["reject_once", "reject_always"],
+            Policy::Allow => (true, None),
+            Policy::Deny => (false, None),
+            Policy::Judge => {
+                let verdict = self.judge.verdict(&ask).await;
+                (verdict.decision == Decision::Allow, Some(verdict.reason))
+            }
+        };
+        let kinds = if allow {
+            ["allow_once", "allow_always"]
+        } else {
+            ["reject_once", "reject_always"]
         };
         let pick = kinds
             .iter()
             .find_map(|k| ask.options.iter().find(|o| o.kind == *k));
         let option = pick.map(|o| o.id.clone());
         driver.approve(&ask.id, option.as_deref())?;
-        if let Some(option) = option {
-            self.emit(EventKind::Approved { option });
+        if option.is_some() || judged.is_some() {
+            self.emit(EventKind::Approved {
+                option: option.unwrap_or_default(),
+                by: judged.is_some().then(|| "judge".to_owned()),
+                decision: (judged.is_some())
+                    .then(|| (if allow { "allow" } else { "deny" }).to_owned()),
+                reason: judged,
+            });
         }
         Ok(())
     }
@@ -634,7 +730,7 @@ impl Lane {
         self.shown.cache_lifetime = self.rules.cache_lifetime(api);
         (self.shown.id, self.shown.mcp_servers) = (opened.id, opened.mcp);
         D::NAME.clone_into(&mut self.shown.driver);
-        self.hear(opened.session, driver)?;
+        self.hear(opened.session, driver).await?;
         (self.ended, self.child) = (None, None);
         self.tree();
         let ready = format!("shed: ACP session ready ({}); send a prompt", self.shown.id);
@@ -666,7 +762,7 @@ impl Lane {
             tokio::select! {
                 biased;
                 heard = driver.heard() => match heard {
-                    Some(heard) => self.hear(heard, driver)?,
+                    Some(heard) => self.hear(heard, driver).await?,
                     None => return Ok(false),
                 },
                 input = inputs.recv(), if typing => match input {
@@ -837,8 +933,7 @@ fn run(
         .build()?;
     let writer = runtime.spawn(writer.run(outs));
     runtime.spawn(writer::read_input(typed));
-    let mut lane = Lane::new(out, policy, rules, turn_idle_timeout());
-    lane.hibernate_set = crate::config::var("SHED_ACP_HIBERNATE_AFTER");
+    let mut lane = Lane::bridged(out, policy, rules, (name, cwd));
     let auto = crate::config::var(crate::drivers::launch::AUTO_ACCOUNT);
     lane.auto = auto.map(|on| (on, socket.to_owned()));
     if let Some(why) = why {

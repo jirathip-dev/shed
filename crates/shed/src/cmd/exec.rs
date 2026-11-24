@@ -17,6 +17,8 @@ pub struct Args {
     timeout: Option<f64>,
     #[arg(short = 'i')]
     stdin: bool,
+    #[arg(long, value_name = "JSON", value_parser = crate::args::sandbox)]
+    sandbox: Option<shed_server::proto::Sandbox>,
     #[arg(last = true, required = true)]
     cmd: Vec<String>,
 }
@@ -34,6 +36,7 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
             .unwrap_or_default(),
         machine: server.machine(),
         cmd: args.cmd,
+        sandbox: args.sandbox,
         ..ExecParams::default()
     };
     let done = server.connect(None)?.exec(&params)?;

@@ -4,10 +4,10 @@ use anyhow::{Context as _, bail};
 use serde_json::{Map, Value};
 use shed_client::Calls as _;
 use shed_server::lane::Policy;
-use shed_server::proto::{Parent, RunParams};
+use shed_server::proto::{Parent, RunParams, Sandbox};
 use shed_server::runner::ExitCode;
 
-use crate::args::{label, mem, policy, size};
+use crate::args::{label, mem, policy, sandbox, size};
 use crate::cx::{Cx, On};
 
 pub const ON: On = On::Link;
@@ -34,6 +34,10 @@ pub struct Args {
     acp: Option<String>,
     #[arg(long, requires = "acp", value_parser = policy, default_value = "ask")]
     policy: Policy,
+    #[arg(long, value_name = "CMD", requires = "acp")]
+    judge: Option<String>,
+    #[arg(long, value_name = "S", requires = "judge")]
+    judge_secs: Option<u64>,
     #[arg(long, value_name = "ID", requires = "acp")]
     resume: Option<String>,
     #[arg(long, value_name = "FILE", requires = "acp")]
@@ -58,6 +62,8 @@ pub struct Args {
     size: Option<(u16, u16)>,
     #[arg(long, value_name = "SIZE", value_parser = mem)]
     mem_max: Option<u64>,
+    #[arg(long, value_name = "JSON", value_parser = sandbox)]
+    sandbox: Option<Sandbox>,
     #[arg(last = true, required_unless_present = "acp")]
     cmd: Vec<String>,
 }
@@ -101,6 +107,10 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         env: args.env.into_iter().collect(),
         policy: args.acp.is_some().then_some(args.policy),
         acp: args.acp,
+        judge: (args.judge.iter())
+            .flat_map(|j| j.split_whitespace().map(str::to_owned))
+            .collect(),
+        judge_secs: args.judge_secs,
         resume: args.resume,
         mcp_servers,
         meta: args.meta,
@@ -118,6 +128,7 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
         }),
         machine: server.machine(),
         mem_max_mb: args.mem_max,
+        sandbox: args.sandbox,
         rows: args.size.map(|s| s.0),
         cols: args.size.map(|s| s.1),
         account: args.account,

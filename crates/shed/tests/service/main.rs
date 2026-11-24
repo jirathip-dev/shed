@@ -4,6 +4,7 @@
 
 mod antigravity;
 mod autostart;
+mod codex;
 #[path = "../common/mod.rs"]
 mod common;
 mod doctor;

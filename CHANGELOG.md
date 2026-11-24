@@ -13,9 +13,6 @@ All notable changes to this project are documented here. The format follows
   that sends none) fails at once with `client <sha> / server <sha>: protocol <a> vs <b>; restart shed serve`.
   `shed doctor` fails when the running server is another build than the binary, and `shed install` (and
   `scripts/install.sh` when the job is installed) restarts the server.
-- `shed setup [<agent>…] [--dry-run] [--remove]` adds hooks that report an installed agent's state through
-  `shed state` (a no-op outside shed) to its config file, keeping every other entry; `shed doctor` lists per
-  agent whether they are in. Claude Code's are in `~/.claude/settings.json`; see `docs/hooks.md`.
 - Parent and child terminals: `shed run` inside a terminal (`$SHED`) records it as the child's `parent`
   (`--parent T` sets it, `--no-parent` clears it); `get`, `ls --json` and every event show it, and
   `ls --parent T` lists a terminal's children. When a parent's program ends or is killed its children are
@@ -155,11 +152,6 @@ All notable changes to this project are documented here. The format follows
   installed adapter (now under `installed`); `agents.match {id, text}` applies an agent's limit and auth
   rules to a caller's text. See docs/acp/provider-records.md.
 - cooee and drover: read program facts from `shed agents --json` in place of their own copies.
-- Screen rules for PTY agents: a terminal labelled `agent=<agent>` checks its provider record's `[[rules]]`
-  (a state, a priority, the last N screen lines and texts to match) on screen changes, at most every 250 ms;
-  a rule above the agent's own report outranks it while its screen shows. Claude Code's folder-trust prompt
-  reads `blocked` (`permission`). `get` says where a state came from: `reported.from` is `reported`,
-  `rule:<id>` or `silence`. See docs/hooks.md.
 - `shed top` and `shed ls` show an ACP terminal's agent state (`working`, `done`, `hibernated`, …) as STATE.
   `top` splits an ACP terminal's memory into AGENT (the bridge, adapter and agent as the turn began) and WORK
   (what it started), kept as `resources.agent_mb` and `work_mb`, and ends with a totals line. `shed top <t>
@@ -250,12 +242,6 @@ All notable changes to this project are documented here. The format follows
   of its own that ends with the run. `shed connect` now ends when whoever reads its output is gone, so a
   script whose caller dropped the SSH session stops. `skill/script/` is the skill doc, with the methods list
   generated from the protocol.
-- Terminal (non-ACP) agents as provider records: a record's `[terminal]` table gives the start command, the
-  process names, the pinned version, its first-run wizard (texts and the keys that dismiss it) and how a
-  prompt lands (`ready`, `echo`, `accepted`). `shed run` labelled `agent=<agent>` presses the wizard's keys
-  when it shows; `send` waits for a ready state, types the text, retypes it until its start shows, presses
-  enter and waits for an accepted state, else fails `NOT_DELIVERED`. dsh-TUI is the first:
-  `providers/dsh.toml`.
 - `shed account add|ls|login|status|rm` and the `account.*` methods: shed keeps one config folder per account
   on the main host (made empty, or an existing one adopted by link), an optional 0600 setup token beside it, and
   what the status command last said; the login runs on a redacted screen. `shed doctor` reports a signed-out
@@ -309,6 +295,18 @@ All notable changes to this project are documented here. The format follows
   binary or of the tool the client named at `hello` (`tool`), on the main host, and refuse any other binary with
   `NOT_OWN_BINARY`; `shed install ls` shows shed's live, staged and previous builds. Self-update runs on the same
   code, and a deferred pass now keeps the checked `<binary>.new` for the next one.
+- `run` and `exec` take a `sandbox` (`--sandbox <json>`): the command, or an ACP terminal's agent each time its
+  bridge starts it, runs inside `srt` with rules shed writes on that machine (the caller's folders and hosts,
+  the agent record's new `[sandbox]`, and shed's own denies of home, `~/.ssh`, its state, config and socket). No
+  `srt` there is the new `SANDBOX_MISSING`. A sandboxed command reaches only the new inside socket
+  (`SHED_SOCKET`), which serves `hello`, `heartbeat`, `state` and `emit` (docs/hosts/sandbox.md).
+- Codex accounts report their usage windows (`5h`, `7d` or `30d`, used % and reset) like Claude's, read from
+  `codex app-server`'s `account/rateLimits/read`; `auto` and the switch on a limit use them. Antigravity has no
+  way to read its windows per account, so it reports none.
+- API-key accounts' tokens and cost this month: each lane's usage on a key-only account adds to the account's
+  `spend` (`month`, `tokens`, `cost`) in `account.ls` and `account.status`, priced by the event's own cost,
+  else the record's new `[price]` table, else `"unknown"`. The totals survive a restart and start again each
+  month, in the machine's local time (docs/accounts/usage.md).
 
 ### Changed
 
@@ -363,6 +361,11 @@ All notable changes to this project are documented here. The format follows
   not loaded. The job templates in `dist/` are gone: their golden copies are farrier's `fixtures/units/`.
 - `shed serve` no longer moves an ACP transcript from the old `acp/` folder to its session on upgrade:
   servers from before the sessions index (#183) upgrade through a release that has it.
+- Agents run only over ACP (protocol 6): screen-driven terminal agents are gone. A provider record has no
+  `[terminal]`, `[[rules]]` or `[hooks]` (a user file that still has one is skipped and `shed doctor` names
+  it), `send` to a plain terminal types the text as before, `shed setup` and the `NOT_DELIVERED` error are
+  removed, and the dsh-TUI record is dropped. Plain shells, `screen.watch`, `send`, `keys`, `read`, `wait`,
+  `state` and `run --idle-after` are unchanged.
 
 ### Fixed
 

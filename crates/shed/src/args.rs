@@ -4,7 +4,7 @@ use shed_server::proto::{Children, Span};
 
 pub fn policy(s: &str) -> Result<Policy, String> {
     serde_json::from_value(Value::String(s.to_owned()))
-        .map_err(|_| format!("{s:?}: allow, deny or ask"))
+        .map_err(|_| format!("{s:?}: allow, deny, ask or judge"))
 }
 
 pub fn children(s: &str) -> Result<Children, String> {
@@ -17,6 +17,10 @@ pub fn size(s: &str) -> Result<(u16, u16), String> {
 
 pub fn mem(s: &str) -> Result<u64, String> {
     shed_server::config::mem_mb(s).ok_or_else(|| format!("{s:?} is not a size, e.g. 200M or 4G"))
+}
+
+pub fn sandbox(s: &str) -> Result<shed_server::proto::Sandbox, String> {
+    serde_json::from_str(s).map_err(|e| format!("not a sandbox: {e}"))
 }
 
 pub fn label(s: &str) -> Result<(String, String), String> {

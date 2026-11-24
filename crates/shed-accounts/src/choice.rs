@@ -143,6 +143,7 @@ mod tests {
             limited_until: (state == AccountState::Limited).then_some(1_500),
             usage,
             balance: None,
+            spend: None,
             token: None,
             setup: Vec::new(),
             runs,

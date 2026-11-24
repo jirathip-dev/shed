@@ -3,8 +3,8 @@ use std::collections::BTreeMap;
 use serde_json::{Value, json, to_value};
 use shed_proto::{
     AcpSession, AcpUsage, Agent, AgentInfo, ApprovalOption, Cache, DriverKind, EmitParams, Event,
-    EventKind, EventsParams, Hooks, MatchParams, Matched, Medians, Method, ModelParams, Provider,
-    Quota, Rule, SessionRecord, State, Tokens,
+    EventKind, EventsParams, MatchParams, Matched, Medians, Method, ModelParams, Provider, Quota,
+    SessionRecord, State, Tokens,
 };
 
 use crate::terminal::{RESOURCES, done, info};
@@ -120,6 +120,9 @@ pub(crate) fn events() -> Vec<Event> {
         },
         EventKind::Approved {
             option: "allow".into(),
+            by: Some("judge".into()),
+            decision: Some("allow".into()),
+            reason: Some("an edit inside the worktree".into()),
         },
         EventKind::Reply {
             text: "Fixed; all 12 tests pass.".into(),
@@ -206,10 +209,6 @@ fn agent_info() -> AgentInfo {
         auth_failures: strings(&["fake: login gone"]),
         limit: strings(&["fake: limit hit"]),
         resets: strings(&["back at "]),
-        hooks: Some(Hooks {
-            file: ".fake/settings.json".into(),
-            events: vec![["Stop".into(), "done".into()]],
-        }),
         login: Some("fake login".into()),
         status: Some("fake login status".into()),
         logout: Some("fake logout".into()),
@@ -222,15 +221,6 @@ fn agent_info() -> AgentInfo {
         model_env: None,
         effort_args: strings(&["--effort", "{effort}"]),
         efforts: strings(&["low", "high"]),
-        rules: vec![Rule {
-            id: "trust".into(),
-            state: "blocked".into(),
-            kind: Some("permission".into()),
-            priority: 10,
-            region: 20,
-            any: strings(&["Trust this folder?"]),
-            version: "0.1.0".into(),
-        }],
         quota: Some(Quota {
             path: strings(&["quota", "token_count"]),
             input: "inputTokens".into(),

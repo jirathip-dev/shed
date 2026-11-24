@@ -30,6 +30,8 @@ pub mod machine;
 pub use machine::*;
 pub mod method;
 pub use method::*;
+pub mod sandbox;
+pub use sandbox::*;
 pub mod screen;
 pub use screen::*;
 pub mod script;
@@ -49,7 +51,7 @@ pub const BUILD: &str = env!("SHED_BUILD");
 pub const LONG_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("SHED_BUILD"), ")");
 
 /// The wire protocol version; raise it only to drop or retype a method, field or type (`just protocol`). From 3 a server refuses a request field the method does not document.
-pub const PROTOCOL: u32 = 5;
+pub const PROTOCOL: u32 = 6;
 
 /// The oldest protocol this build still speaks: a server answers a client on it in its shapes, a client accepts a server on it.
 pub const OLDEST_PROTOCOL: u32 = 1;

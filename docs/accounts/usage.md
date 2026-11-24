@@ -2,6 +2,10 @@
 
 shed reads an account's usage with the record's `[usage]` probe (its command in the account's folder, read by
 the windows' markers) whenever it runs the status command: `account.status`, after a login, and on a beat.
+Claude's probe is `claude -p /usage`; Codex's asks `codex app-server` for `account/rateLimits/read` and names
+each window by its length (`5h`, `7d`, `30d`). Antigravity has none: its ACP server has no quota call, and
+`agy -p /usage` reads agy's own login, not the account's folder.
+
 A reading stands for `usage.fresh` seconds. Every minute shed reads again each signed-in account that has a
 run and a reading older than that; `account.ls` reads a stale account again in the background, so the next
 call shows it. `checked_at` is when it last read one.
@@ -36,3 +40,23 @@ the background: one `curl` whose config, the auth header with the key in it, goe
 in no argument, output or log. The reading is the account's `balance` (`currency`, `total`, `read_at`) and
 shows in `shed account ls`'s `USAGE` column. A 401 marks the key `rejected`, and the probe sends it no more
 until a new key is saved. What a low balance means (`warn_below`, an alert) is the caller's.
+
+## Month spend
+
+An API-key account (a record with no `config_dir_var`) adds up what its lanes use: each `usage` event of a
+lane on it adds the change in the session's `total` tokens, and the change in the event's own `cost`, else
+those tokens priced by the record's `[price]` table (per million tokens):
+
+```toml
+[price]
+currency = "USD"
+input = 0.27
+cache_read = 0.07
+cache_write = 0.27
+output = 1.10
+```
+
+With neither, the tokens still count and the month's `cost` is `"unknown"` (also when two currencies meet).
+The totals are the account's `spend` (`month` as `YYYY-MM`, `tokens`, `cost`) in `account.ls` and
+`account.status`, kept in `accounts.json` across restarts and upgrades. They are this machine's only, and start
+again at the first usage of a new month in the machine's local time; a past month's are not shown.

@@ -2,7 +2,7 @@
 
 <!-- Generated from crates/shed-proto by `SHED_BLESS=1 cargo test -p shed-proto --features schema`; do not edit. -->
 
-Version: `0.0.0`, protocol `5`, oldest served `1`.
+Version: `0.0.0`, protocol `6`, oldest served `1`.
 
 Newline-delimited [JSON-RPC 2.0](https://www.jsonrpc.org/specification) over a Unix socket, mode 0600:
 `$XDG_RUNTIME_DIR/shed.sock` (macOS: `~/Library/Caches/shed/shed.sock`). One request per line, one
@@ -102,7 +102,7 @@ Each agent shed has a provider record for or has installed, by id, as `shed agen
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
-{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"balance":null,"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"env":{},"hooks":{"events":[["Stop","done"]],"file":".fake/settings.json"},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"rules":[{"any":["Trust this folder?"],"id":"trust","kind":"permission","priority":10,"region":20,"state":"blocked","version":"0.1.0"}],"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"terminal":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"balance":null,"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"env":{},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"price":null,"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"sandbox":null,"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
 ```
 
 ### `agents.match`
@@ -170,10 +170,10 @@ Stream events. After the response the server writes one event per line (see Even
 
 ### `exec`
 
-Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link.
+Run a program without a terminal in a process group of its own, `stdin` fed to it and `env` over the server's variables (kept in memory only), and answer with its exit code (128 + the signal when one ended it) and the exact bytes it wrote. The group is ended when the program returns or `timeout` seconds pass (`IO`); output over `REPLY_LIMIT` bytes is `IO`, never cut. `machine` runs it there, over the held link. `sandbox` runs it inside `srt` with those rules, as `run`'s does (`docs/hosts/sandbox.md`).
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","env":{"GIT_PAGER":"cat"},"machine":"box","timeout":30.0}}
+{"jsonrpc":"2.0","id":1,"method":"exec","params":{"cmd":["git","status","--short"],"cwd":"/home/user/project","env":{"GIT_PAGER":"cat"},"machine":"box","sandbox":{"hosts":["github.com"],"write":["/home/user/project"]},"timeout":30.0}}
 {"jsonrpc":"2.0","id":1,"result":{"code":0,"stderr":[],"stdout":[32,77,32,115,114,99,47,108,105,98,46,114,115,10]}}
 ```
 
@@ -245,8 +245,8 @@ Keep the connection alive. Once a connection sends one, the server closes it whe
 The handshake; must come first on every connection. Another product, or a protocol range that does not overlap the server's, is refused with `SHED_VERSION`.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
-{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":4,"product":"shed","protocol":5,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{"build":"4254d78","oldest":5,"product":"shed","protocol":6,"version":"0.0.0"}}
+{"jsonrpc":"2.0","id":1,"result":{"build":"4254d78","oldest":5,"product":"shed","protocol":6,"version":"0.0.0"}}
 ```
 
 ### `install.back`
@@ -336,7 +336,7 @@ Each configured machine's held link: `up`, `reconnecting` or `down`, since when,
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"machine.links","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":5,"version":"0.0.0"},"home":"/home/user","os":"linux","proxy":41234,"since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
+{"jsonrpc":"2.0","id":1,"result":{"box":{"arch":"x86_64","hello":{"build":"4254d78","oldest":1,"product":"shed","protocol":6,"version":"0.0.0"},"home":"/home/user","os":"linux","proxy":41234,"since":1762416000,"state":"up"},"old":{"down_since":1762415000,"error":"SHED_VERSION: shed 0.1.0 here, 0.2.0 on old; install the same version on both","since":1762416000,"state":"down"}}}
 ```
 
 ### `machine.rm`
@@ -417,12 +417,12 @@ The whole API as one OpenRPC document, as `shed schema` prints it (`docs/shed.op
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"rpc.discover","params":{}}
-{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":5},"openrpc":"1.3.2"}}
+{"jsonrpc":"2.0","id":1,"result":{"info":{"title":"shed","version":"0.0.0","x-protocol":6},"openrpc":"1.3.2"}}
 ```
 
 ### `run`
 
-Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only.
+Start a terminal. `name` defaults to the first free `tN`; `keep` brings it back as a shell in its cwd after a server restart; `rows` and `cols` default to `$SHED_SIZE` (`RxC`) of the server, else 50x200. ACP: `mcp_servers` (stdio, `http`, `sse`, in ACP's shapes) go to the agent; their env and header values are never saved or shown. `meta` (an object) goes unchanged as the session's `_meta`. `no_hibernate` keeps the agent running when idle. `mem_max_mb` (default the server's `$SHED_MEM_MAX`, e.g. `4G`) limits the process tree's memory, and a `mem-limit` event (with `notify`, a `[shed] <name> mem-limit …` line to the parent) says what was ended: on Linux with a user systemd that has the memory controller the program runs in its own scope with `MemoryMax` and the kernel ends a process (the agent's children are ranked first); elsewhere, once the tree is over for two samples in a row, the sampler ends the largest process the agent started (SIGTERM, SIGKILL 2 s later), and an agent over it by itself is only reported. The sampler is a guard against sustained use, not a hard limit: a fast allocation can pass it between samples. `warm` takes the ready spare session of the same recipe (agent, command, cwd, policy, MCP servers, meta, size), renamed to `name` with these labels, and starts the next spare; spares are listed as `.warm-N`, at most `$SHED_WARM_MAX` (default 2) of them, each killed after `$SHED_WARM_IDLE` seconds (default 600) unused. `parent` links it to the terminal that started it: when the parent's program ends the child is killed too, unless `outlive`; with `notify` a `[shed] <name> blocked|error|exited …` line is typed into the parent (a prompt for an ACP parent) when the child blocks, errors or ends, once per piece of news, held while the parent reports `working`. `account` (ACP, on the main host) runs the agent on that account of its provider (`account.ls`): its folder variable set, its token too while its own login is signed out, none of the record's `scrub` and `cache.api_vars` inherited, and a caller `env` setting any of them refused; `meta` and the command are unchanged, and the token is kept in memory only. `policy` `judge` (ACP) runs `judge` (argv) in the terminal's cwd for each permission request, with one JSON object on its stdin: `name`, `labels`, `cwd`, `tool_call` (the agent's ACP `toolCall`: `kind`, `title`, `rawInput`, `locations`, …; `null` when it sent none) and `options` (each `id`, `name`, `kind`); it answers on stdout with `{"decision": "allow" | "deny", "reason": "…"}`. `allow` picks the first `allow_once` option, else `allow_always`, so a later call still reaches the judge; `deny` picks the first `reject_once`, else `reject_always`; with no such option the request is cancelled. It fails closed: a judge that does not start, exits non-zero, takes over `judge_secs` (default 30) or prints no verdict is a `deny` with that reason. The `approved` event records `by: judge`, the `decision` and the `reason`. `sandbox` runs the program (ACP: the agent, each time the bridge starts it) inside `srt` with rules shed writes on that machine: the caller's `read`, `write`, `deny`, `hosts`, `sockets` and `mach`, the agent record's `[sandbox]`, and shed's own denies; a `write` that holds shed's state, its config or the folder `srt` or shed is in is `INVALID_PARAMS`, `keep` or `warm` with it is `INVALID_PARAMS`, and no `srt` there is `SANDBOX_MISSING` (`docs/hosts/sandbox.md`).
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"run","params":{"cmd":["make","test"],"cwd":"/home/user/project","keep":true,"labels":{"issue":"7","role":"impl"},"mem_max_mb":4096,"name":"build","parent":{"name":"lead","notify":true}}}
@@ -575,7 +575,7 @@ send wakes it on the same session.
 {"seq":10,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"plan","entries":[{"content":"Fix the test","priority":"high","status":"in_progress"}]}
 {"seq":11,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"mode","mode":"default"}
 {"seq":12,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approval_request","id":"7","tool":"Edit src/lib.rs","options":[{"id":"allow","name":"Allow","kind":"allow_once"},{"id":"reject","name":"Reject","kind":"reject_once"}],"call":{"toolCallId":"call_1","kind":"edit","locations":[{"path":"/work/src/lib.rs"}]}}
-{"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow"}
+{"seq":13,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"approved","option":"allow","by":"judge","decision":"allow","reason":"an edit inside the worktree"}
 {"seq":14,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"reply","text":"Fixed; all 12 tests pass.","stop_reason":"end_turn"}
 {"seq":15,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"session","id":"sess_1","driver":"acp","model":"opus","models":[["opus","Opus"],["haiku","Haiku"]],"mcp_servers":[{"headers":[{"name":"Authorization","value":"***"}],"name":"web","type":"http","url":"https://mcp.example/"}],"commands":[["review","Review the diff","files"]],"usage":{"used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}},"turn_ended":1763337600,"cache_lifetime":3600,"cache_likely":"warm","ready_ms":2400,"first_token_ms":1800}
 {"seq":16,"name":"build","labels":{"issue":"7","role":"impl"},"parent":"lead","event":"usage","used":53000,"size":200000,"cost":{"amount":0.045,"currency":"USD"},"turn":{"input":100,"cache_read":900,"cache_write":1000,"output":50},"total":{"input":200,"cache_read":1800,"cache_write":2000,"output":100}}
@@ -627,13 +627,13 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32013 | `ACCOUNT_SETUP` |
 | -32014 | `ACCOUNT_SIGNED_OUT` |
 | -32015 | `ACCOUNT_LIMITED` |
-| -32016 | `NOT_DELIVERED` |
 | -32017 | `ACCOUNT_LOCAL_ONLY` |
 | -32018 | `NO_PROXY` |
 | -32019 | `NOT_OWN_BINARY` |
 | -32020 | `NO_RELEASE` |
 | -32021 | `UNSTAGED` |
 | -32022 | `SECRET_STORE` |
+| -32023 | `SANDBOX_MISSING` |
 | -32600 | `INVALID_REQUEST` |
 | -32601 | `NO_SUCH_METHOD` |
 | -32602 | `INVALID_PARAMS` |
@@ -641,5 +641,5 @@ An error's `message` starts with its name: `NAME: detail`.
 | -32700 | `PARSE` |
 
 ```json
-{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 6-7 / server 56de739 protocol 4-5; update the server and restart shed serve"}}
+{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"SHED_VERSION: client 02fcf97 protocol 7-8 / server 56de739 protocol 5-6; update the server and restart shed serve"}}
 ```

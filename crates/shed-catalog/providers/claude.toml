@@ -85,26 +85,6 @@ key_var = "ANTHROPIC_AUTH_TOKEN"
 auth = "authorization: Bearer {token}"
 append = { "anthropic-beta" = "oauth-2025-04-20" }
 
-[hooks]
-file = ".claude/settings.json"
-events = [
-  ["UserPromptSubmit", "working"],
-  ["PostToolUse", "working"],
-  ["PermissionRequest", "blocked"],
-  ["Stop", "done"],
-  ["StopFailure", "error"]
-]
-
-# Screens no hook reports, each with its golden screen in crates/shed-server/tests/screens/<agent>-<id>.txt.
-[[rules]]
-id = "trust"
-state = "blocked"
-kind = "permission"
-priority = 10
-region = 20
-any = ["Yes, I trust this folder"]
-version = "2.1.326"
-
 # The stream driver: `claude`'s own stream-json mode. Off until <config>/providers/claude.toml says driver = "stream".
 [stream]
 wire = "claude"
@@ -155,3 +135,10 @@ Glob = ["search", "pattern"]
 WebFetch = ["fetch", "url"]
 WebSearch = ["fetch", "query"]
 Task = ["think", "description"]
+
+# What Claude Code needs inside a sandbox (`run`'s `sandbox`): srt takes the run's temp folder from `tmp_var`.
+[sandbox]
+tmp_var = "CLAUDE_CODE_TMPDIR"
+read = ["~/.local/share/claude", "~/.local/bin/claude", "~/Library/Keychains"]
+write = ["{config}", "~/.claude.json"]
+hosts = ["*.anthropic.com", "claude.ai", "*.claude.ai"]

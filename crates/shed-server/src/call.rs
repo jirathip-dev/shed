@@ -40,6 +40,7 @@ pub(crate) struct Session {
     pub(crate) links: Arc<links::Links>,
     pub(crate) busy: Option<handover::Busy>,
     pub(crate) tool: Option<crate::proto::Tool>,
+    pub(crate) inside: bool,
 }
 
 pub(crate) async fn blocking<T: Send + 'static>(

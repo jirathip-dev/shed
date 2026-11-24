@@ -21,6 +21,8 @@ pub enum Policy {
     Deny,
     /// Report `blocked` and wait for `shed approve`.
     Ask,
+    /// Run `judge` for each request and pick by its `allow` or `deny`; it fails closed.
+    Judge,
 }
 
 /// `run` params.
@@ -59,6 +61,12 @@ pub struct RunParams {
     /// ACP: how the bridge answers permission requests (default `ask`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy: Option<Policy>,
+    /// ACP, `policy` `judge`: the judge's program and arguments, a request as JSON on its stdin.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub judge: Vec<String>,
+    /// ACP, `policy` `judge`: seconds the judge may take before the request is denied (default 30).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_secs: Option<u64>,
     /// ACP: continue this session (`$SHED_ACP_RESUME` to the bridge): shed's transcript of it is replayed, then
     /// the agent loads it (`session/load`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -95,6 +103,9 @@ pub struct RunParams {
     /// ACP, on the main host: run on this account of the agent's provider (`account.ls`); none sets nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// Run it inside `srt` with these rules (ACP: the agent, not its bridge); no `srt` there is `SANDBOX_MISSING`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox: Option<crate::Sandbox>,
 }
 
 /// A child's link to the terminal that started it.
@@ -264,7 +275,7 @@ pub struct Reported {
     /// The other agent's escape the state came from, e.g. `jan-osc9999`; absent for shed's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state_source: Option<String>,
-    /// Where the state came from: `reported`, `rule:<id>` (a screen rule) or `silence` (`idle_after`).
+    /// Where the state came from: `reported` or `silence` (`idle_after`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     /// OSC 7501's record path, e.g. `build/tests`; absent for the terminal's own.
@@ -387,6 +398,10 @@ pub enum State {
 /// `account` is the account it runs on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent fact of the wire shape"
+)]
 pub struct TerminalInfo {
     /// The unique name.
     pub name: String,
@@ -437,4 +452,7 @@ pub struct TerminalInfo {
     /// Its account is `auto`'s pick: a limit or `account.use` moves it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto: bool,
+    /// It runs inside `srt` (`run`'s `sandbox`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub sandboxed: bool,
 }

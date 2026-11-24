@@ -145,6 +145,15 @@ pub enum EventKind {
     Approved {
         /// The chosen option's id.
         option: String,
+        /// `judge` when the `judge` policy answered.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
+        /// The judge's `allow` or `deny`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        decision: Option<String>,
+        /// The judge's reason, or why it failed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
     },
     /// ACP: the turn ended.
     Reply {

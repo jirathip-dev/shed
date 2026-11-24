@@ -15,8 +15,8 @@ mod events;
 mod files;
 mod flows;
 pub mod handover;
-pub mod hooks;
 mod input;
+mod inside;
 pub mod install;
 pub mod lane;
 pub mod limit;
@@ -26,6 +26,7 @@ pub mod providers;
 mod proxy;
 mod registry;
 pub mod relay;
+mod sandbox;
 mod screen;
 mod script;
 pub mod secrets;
@@ -135,11 +136,19 @@ impl Paths {
     /// The per-user defaults. macOS: `~/Library/Caches/shed/shed.sock`, and `state.json` and
     /// `config.toml` in `~/Library/Application Support/shed/`. Elsewhere: `$XDG_RUNTIME_DIR/shed.sock`,
     /// `$XDG_STATE_HOME/shed/state.json` (default `~/.local/state`) and
-    /// `$XDG_CONFIG_HOME/shed/config.toml` (default `~/.config`).
+    /// `$XDG_CONFIG_HOME/shed/config.toml` (default `~/.config`). `$SHED_SOCKET` (a sandboxed run's) names the socket.
     ///
     /// # Errors
     /// [`Error::NoHome`] or [`Error::NoRuntimeDir`] when the variables they need are unset.
     pub fn user() -> Result<Self, Error> {
+        let mut paths = Self::user_default()?;
+        if let Some(inside) = config::var_os("SHED_SOCKET").filter(|v| !v.is_empty()) {
+            paths.socket = inside.into();
+        }
+        Ok(paths)
+    }
+
+    fn user_default() -> Result<Self, Error> {
         let var = |k| config::var_os(k).filter(|v: &OsString| !v.is_empty());
         let home = var("HOME").map(PathBuf::from).ok_or(Error::NoHome);
         if cfg!(target_os = "macos") {

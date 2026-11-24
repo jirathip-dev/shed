@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    BalanceProbe, CredentialsRecord, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
+    BalanceProbe, CredentialsRecord, Price, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
 };
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
@@ -19,7 +19,7 @@ use crate::{
 pub struct Provider {
     /// The ACP agent id (`shed agents add <id>`).
     pub id: String,
-    /// The PTY agent's name, as `shed setup` takes it.
+    /// The agent program's own name.
     pub agent: String,
     /// Text in a line that says the login expired.
     pub auth_failures: Vec<String>,
@@ -27,8 +27,6 @@ pub struct Provider {
     pub limit: Vec<String>,
     /// Markers in a limit line that the reset time follows.
     pub resets: Vec<String>,
-    /// The `shed state` hooks `shed setup` writes.
-    pub hooks: Option<Hooks>,
     /// The command that logs in.
     pub login: Option<String>,
     /// The command that shows whether it is logged in.
@@ -55,8 +53,6 @@ pub struct Provider {
     pub effort_args: Vec<String>,
     /// The effort levels it takes.
     pub efforts: Vec<String>,
-    /// The screens that set its state, for a terminal labelled `agent=<agent>`.
-    pub rules: Vec<Rule>,
     /// Where its prompt responses' `_meta` carries the turn's tokens.
     pub quota: Option<Quota>,
     /// How long its prompt cache lives on each login.
@@ -79,87 +75,16 @@ pub struct Provider {
     pub usage: Option<UsageProbe>,
     /// The balance probe.
     pub balance: Option<Box<BalanceProbe>>,
+    /// The price per million tokens, for an API-key account's cost when the agent reports none.
+    pub price: Option<Box<Price>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
     /// The token proxy.
     pub proxy: Option<ProxyRecord>,
     /// Where the login lives, for the drift check.
     pub credentials: Option<CredentialsRecord>,
-    /// A terminal (non-ACP) agent: how shed drives its screen, for a terminal labelled `agent=<agent>`.
-    pub terminal: Option<Box<TerminalRecord>>,
-}
-
-/// A terminal agent: its start, its setup wizard and how a `send` delivers a prompt to its screen.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(default, deny_unknown_fields)]
-pub struct TerminalRecord {
-    /// The command line that starts it, `{file}` standing for its settings patch.
-    pub command: Vec<String>,
-    /// The names of its processes.
-    pub processes: Vec<String>,
-    /// The version it is pinned at.
-    pub version: Option<VersionPin>,
-    /// Seconds of silence after which it reads `idle`, for a `run` that sets no `idle_after`.
-    pub idle_after: Option<u64>,
-    /// The first-run screen `run` dismisses.
-    pub wizard: Option<Wizard>,
-    /// The states a `send` waits for before it types.
-    pub ready: StateWait,
-    /// How a `send` checks that its text reached the screen.
-    pub echo: EchoCheck,
-    /// The states that, after enter, show the prompt was taken.
-    pub accepted: StateWait,
-}
-
-/// The version a terminal agent is pinned at, and how to read the installed one.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct VersionPin {
-    /// The command that prints the version.
-    pub command: Vec<String>,
-    /// The text that starts the output line the version follows.
-    pub line: String,
-    /// The pinned version.
-    pub pin: String,
-}
-
-/// A first-run screen and the keys that dismiss it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Wizard {
-    /// The texts that show it, any one of them.
-    pub any: Vec<String>,
-    /// The keys pressed when it shows.
-    pub keys: Vec<String>,
-    /// Seconds to wait after the keys before a `send` may type.
-    pub settle: u64,
-}
-
-/// States to wait for, and for how long.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct StateWait {
-    /// The states, any one of them.
-    pub states: Vec<String>,
-    /// Seconds before the `send` fails.
-    pub secs: u64,
-}
-
-/// The prompt's echo: its first `chars` characters must show on the screen before enter.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct EchoCheck {
-    /// How many characters of the prompt's first line it looks for; 0 skips the check.
-    pub chars: usize,
-    /// How many times the text is typed before the `send` fails.
-    pub attempts: u32,
-    /// Seconds each attempt waits for the echo.
-    pub secs: u64,
+    /// What it needs inside a sandbox.
+    pub sandbox: Option<Box<crate::SandboxNeeds>>,
 }
 
 /// The driver a provider's lanes run on.
@@ -218,29 +143,6 @@ pub struct Cache {
     pub api: u64,
     /// Variables that, set and not empty in the agent's environment, mean an API key.
     pub api_vars: Vec<String>,
-}
-
-/// A screen rule: while one of `any` shows in the last `region` non-blank lines of the screen, the state is
-/// `state`. Above priority 0 it outranks the agent's own report; at or below, it applies only without one.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Rule {
-    /// Its name; `get` shows `rule:<id>` as the state's `from`.
-    pub id: String,
-    /// The state it sets.
-    pub state: String,
-    /// Why it is blocked: `permission`, `question` or `auth`.
-    #[serde(default)]
-    pub kind: Option<String>,
-    /// The highest matching rule wins; the agent's own report has priority 0.
-    pub priority: i32,
-    /// How many of the screen's last non-blank lines it looks at.
-    pub region: usize,
-    /// The texts it matches, any one of them.
-    pub any: Vec<String>,
-    /// The agent version its golden screen was captured from.
-    pub version: String,
 }
 
 /// The keys of a turn's tokens in a prompt response's `_meta`.
@@ -353,17 +255,6 @@ impl Provider {
         text.lines()
             .find(|l| self.auth_failures.iter().any(|s| l.contains(s)))
     }
-}
-
-/// A PTY agent's hook table.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct Hooks {
-    /// Its config file, under the home folder.
-    pub file: String,
-    /// Each hook event and the state it reports.
-    pub events: Vec<[String; 2]>,
 }
 
 /// One installed ACP agent.
