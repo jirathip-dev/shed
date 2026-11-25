@@ -235,8 +235,8 @@ mod tests {
         used(&mut reg, "b", 3_000, 2_000, Some(0.75));
         let month = shed_accounts::check::month();
         let tokens = |input, output| json!({"input": input, "cache_read": 0, "cache_write": 0, "output": output});
-        let a = json!({"month": month, "tokens": tokens(250_000, 30_000), "cost": {"amount": 0.74, "currency": "USD"}});
-        let b = json!({"month": month, "tokens": tokens(3_000, 2_000), "cost": {"amount": 0.75, "currency": "USD"}});
+        let a = json!({"month": month, "tokens": tokens(250_000, 30_000), "cost": {"amount": 0.74, "currency": "USD"}, "source": "usage"});
+        let b = json!({"month": month, "tokens": tokens(3_000, 2_000), "cost": {"amount": 0.75, "currency": "USD"}, "source": "usage"});
         assert_eq!(spend(&reg, &store, "a"), a);
         assert_eq!(spend(&reg, &store, "b"), b);
         assert_eq!(spend(&reg, &store, "c"), Value::Null);
