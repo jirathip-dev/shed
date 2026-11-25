@@ -189,7 +189,7 @@ async fn with_no_tokens_reported_the_months_cost_is_the_balances_drops() {
     let status = || check::status(&store, &provider, "work", "/".as_ref());
     let cost = |a: &shed_proto::Account| {
         let spend = serde_json::to_value(&a.spend).expect("json");
-        (spend["cost"]["amount"].as_f64().unwrap_or(-1.0) * 100.0).round() / 100.0
+        format!("{:.2}", spend["cost"]["amount"].as_f64().unwrap_or(-1.0))
     };
     let source = |a: &shed_proto::Account| a.spend.as_ref().map(|s| s.source);
     let month = check::month();
@@ -202,7 +202,12 @@ async fn with_no_tokens_reported_the_months_cost_is_the_balances_drops() {
     store
         .spent(&provider, "work", &month, none, Some(own))
         .expect("spent");
-    for (now, want) in [("5.37", 0.2), ("5.37", 0.2), ("6.00", 0.2), ("5.70", 0.5)] {
+    for (now, want) in [
+        ("5.37", "0.20"),
+        ("5.37", "0.20"),
+        ("6.00", "0.20"),
+        ("5.70", "0.50"),
+    ] {
         *total.lock().expect("total") = now;
         let read = status().await.expect("status");
         assert_eq!(cost(&read), want, "at {now}");

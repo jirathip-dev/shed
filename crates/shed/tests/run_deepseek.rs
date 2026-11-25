@@ -1,5 +1,5 @@
 //! The built-in `opencode` and `pi-acp` records run on a `deepseek` key account with no file under
-//! `<config>/providers/`: the key reaches the agent, OpenCode gets the model through its config, and pi-acp,
+//! `<config>/providers/`: the key reaches the agent, `OpenCode` gets the model through its config, and pi-acp,
 //! which takes no model, refuses one.
 #![cfg(test)]
 
