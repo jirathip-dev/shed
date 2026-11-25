@@ -5,12 +5,13 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::time::Duration;
+use std::sync::{Mutex, PoisonError};
+use std::time::{Duration, Instant};
 
 use sha2::{Digest as _, Sha256};
 use shed_core::{clock, redact, runner};
 use shed_proto::{
-    Account, AccountState, Balance, CredentialsRecord, Drift, Provider, RpcError, Usage,
+    Account, AccountState, Balance, CredentialsRecord, Drift, Money, Provider, RpcError, Usage,
 };
 
 use crate::choice::fullest;
@@ -23,6 +24,36 @@ const TIMEOUT: Duration = Duration::from_mins(2);
 const LIMIT: u64 = 1 << 16;
 const LINE: usize = 80;
 const KEYCHAIN: Duration = Duration::from_secs(10);
+const MONTH_HOLDS: Duration = Duration::from_mins(1);
+
+static MONTH: Mutex<Option<(Instant, String)>> = Mutex::new(None);
+
+/// This month as `YYYY-MM` in the machine's local time, read again at most once a minute.
+#[must_use]
+pub fn month() -> String {
+    let mut held = MONTH.lock().unwrap_or_else(PoisonError::into_inner);
+    let now = clock::now();
+    if let Some((_, month)) = held
+        .as_ref()
+        .filter(|(at, _)| now.duration_since(*at) < MONTH_HOLDS)
+    {
+        return month.clone();
+    }
+    let out = runner::output("date", ["+%Y-%m"], &[]).map(|o| o.stdout);
+    let month = String::from_utf8_lossy(&out.unwrap_or_default())
+        .trim()
+        .to_owned();
+    *held = Some((now, month.clone()));
+    month
+}
+
+fn fell(was: Option<&Balance>, now: Option<&Balance>) -> Option<Money> {
+    let (was, now) = (was?, now?);
+    (was.currency == now.currency && now.total < was.total).then(|| Money {
+        amount: was.total - now.total,
+        currency: now.currency.clone(),
+    })
+}
 
 /// The argv that runs `line` for an account in `folder` (none: the CLI's default) with `env` set and `unset` unset.
 #[must_use]
@@ -174,6 +205,7 @@ pub async fn status(
     let (folder, now) = (store.folder(provider, name)?, clock::unix_now());
     let read = balance(store, provider, name, now).await;
     let mut reading = store.reading(provider, name);
+    let drop = fell(reading.balance.as_ref(), read.as_ref());
     if provider.balance.is_some() {
         (reading.balance, reading.checked_at) = (read.or(reading.balance), Some(now));
     }
@@ -207,6 +239,9 @@ pub async fn status(
         (reading.usage, reading.checked_at) = (read.or(reading.usage), Some(now));
     }
     store.keep(provider, name, reading)?;
+    if let Some(drop) = drop {
+        store.fell(provider, name, &month(), drop)?;
+    }
     store.account(provider, name)
 }
 

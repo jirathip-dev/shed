@@ -274,6 +274,21 @@ pub struct Spend {
     pub tokens: Tokens,
     /// What they cost.
     pub cost: Cost,
+    /// Where `cost` comes from.
+    #[serde(default)]
+    pub source: SpendSource,
+}
+
+/// Where a month's cost comes from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum SpendSource {
+    /// The lanes' usage: their own cost, else their tokens by the record's `[price]`.
+    #[default]
+    Usage,
+    /// The balance's drops between readings, when the lanes reported no tokens.
+    Balance,
 }
 
 impl Spend {
@@ -281,7 +296,7 @@ impl Spend {
     #[must_use]
     pub fn plus(self, month: &str, tokens: Tokens, cost: Option<Money>) -> Self {
         if self.month != month {
-            return Self::new(month, tokens, cost);
+            return Self::new(month, tokens, cost, self.source);
         }
         let cost = match (self.cost, cost) {
             (Cost::Known(a), Some(b)) if a.currency == b.currency => Cost::Known(Money {
@@ -297,13 +312,24 @@ impl Spend {
         }
     }
 
-    /// `tokens` costing `cost` in `month`.
+    /// `tokens` costing `cost` in `month`, by `source`.
     #[must_use]
-    pub fn new(month: &str, tokens: Tokens, cost: Option<Money>) -> Self {
+    pub fn new(month: &str, tokens: Tokens, cost: Option<Money>, source: SpendSource) -> Self {
         Self {
             month: month.to_owned(),
             tokens,
             cost: Cost::of(cost),
+            source,
+        }
+    }
+
+    /// The month's spend: the balance's drops `fell` when the usage `spent` has no tokens that month, else the usage.
+    #[must_use]
+    pub fn of_month(spent: Option<Self>, fell: Option<Self>) -> Option<Self> {
+        match (spent, fell) {
+            (Some(s), Some(f)) if s.month > f.month => Some(s),
+            (Some(s), Some(f)) if s.month == f.month && s.tokens != Tokens::default() => Some(s),
+            (s, f) => f.or(s),
         }
     }
 }

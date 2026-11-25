@@ -1,5 +1,6 @@
 # DeepSeek's API: an account of it is only a key (no config folder variable), whose balance shed reads.
 # A file of the same name in <config>/providers/ overrides keys of this one.
+id = "deepseek"
 agent = "deepseek"
 token_var = "DEEPSEEK_API_KEY"
 
