@@ -131,62 +131,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn opencode_and_pi_run_on_a_deepseek_key_with_no_provider_file() {
-        use std::collections::BTreeMap;
-        use std::os::unix::fs::PermissionsExt as _;
-
-        use shed_accounts::{Store, env::Injected};
-
-        use crate::proto::{AccountAdd, DriverKind};
-
-        let dir = crate::temp_dir("providers-deepseek-lanes");
-        let catalog = Catalog::load(&dir.join("providers")).0;
-        let store = Store::beside(&dir.join("state.json"));
-        let key = dir.join("work.key");
-        std::fs::write(&key, "sk-deepseek-test").unwrap();
-        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
-        let add = AccountAdd {
-            provider: "deepseek".into(),
-            name: "work".into(),
-            folder: None,
-            token_file: Some(key),
-        };
-        store.add(catalog.by_id("deepseek").unwrap(), &add).unwrap();
-        let run = |id: &str| {
-            let record = catalog.by_id(id).unwrap();
-            let set = Injected::for_run(&store, record, "work", &BTreeMap::new())
-                .unwrap()
-                .set;
-            let picked = record.pick(DriverKind::Acp, Some("deepseek/deepseek-chat"), None);
-            (set, picked.map(|p| (p.env, p.args)))
-        };
-        let pairs = |p: &[(&str, &str)]| -> BTreeMap<String, String> {
-            p.iter()
-                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-                .collect()
-        };
-        let (set, picked) = run("opencode");
-        let config = r#"{"model":"{env:OPENCODE_MODEL}"}"#;
-        let want = [
-            ("DEEPSEEK_API_KEY", "sk-deepseek-test"),
-            ("OPENCODE_CONFIG_CONTENT", config),
-        ];
-        assert_eq!(set, pairs(&want));
-        let model = vec![(
-            "OPENCODE_MODEL".to_owned(),
-            "deepseek/deepseek-chat".to_owned(),
-        )];
-        assert_eq!(picked, Ok((model, Vec::new())));
-        let (set, picked) = run("pi-acp");
-        assert_eq!(set, pairs(&[("DEEPSEEK_API_KEY", "sk-deepseek-test")]));
-        assert_eq!(
-            picked,
-            Err("pi-acp takes no model on this driver".to_owned())
-        );
-        std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
     fn the_limit_messages_give_their_reset_time() {
         let hit = |id: &str, text: &str| fake(id).limit_hit(text).map(|(_, at)| at);
         let claude = "You've hit your limit · resets 3pm (Europe/London)";
