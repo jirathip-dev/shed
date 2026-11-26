@@ -307,6 +307,8 @@ All notable changes to this project are documented here. The format follows
   `spend` (`month`, `tokens`, `cost`) in `account.ls` and `account.status`, priced by the event's own cost,
   else the record's new `[price]` table, else `"unknown"`. The totals survive a restart and start again each
   month, in the machine's local time (docs/accounts/usage.md).
+- `caller = true` in a host's `providers/claude.toml` starts claude lanes, on the ACP adapter and the stream
+  driver, with `CLAUDE_CODE_ENTRYPOINT=shed`; off in the shipped record (A/B in `docs/accounts/caller-ab.md`).
 
 ### Changed
 

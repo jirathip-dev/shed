@@ -181,3 +181,32 @@ fn an_effort_the_record_does_not_take_is_refused() {
         "{err}"
     );
 }
+
+#[test]
+fn caller_on_names_shed_to_the_adapter_unless_the_record_s_env_names_another() {
+    let (dir, _server) = lab("env-caller", &[]);
+    let file = Paths::in_dir(&dir).providers().join("fake.toml");
+    let record = std::fs::read_to_string(&file).expect("read the record");
+    let said = |name: &str, keys: &str| {
+        std::fs::write(&file, format!("{keys}\n{record}")).expect("write the record");
+        assert!(start(&dir, name, "high").status.success());
+        let ready = [
+            "wait",
+            name,
+            "--output",
+            "ACP session ready",
+            "--timeout",
+            "10",
+        ];
+        ok(&dir, &ready);
+        turn(&dir, name, "env FAKE_CALLER")
+    };
+    let on = "caller_var = \"FAKE_CALLER\"\ncaller = true";
+    assert_eq!(
+        said("off", "caller_var = \"FAKE_CALLER\""),
+        "no FAKE_CALLER"
+    );
+    assert_eq!(said("on", on), "FAKE_CALLER has 4 chars");
+    let own = format!("{on}\nenv = {{ FAKE_CALLER = \"own-caller\" }}");
+    assert_eq!(said("own", &own), "FAKE_CALLER has 10 chars");
+}

@@ -369,3 +369,23 @@ fn run_s_model_takes_the_stream_record_s_words() {
     let want = ["--allow", "--model", "smart", "--session-id", &id];
     assert_eq!(lab.starts(), [strings(&want)]);
 }
+
+#[test]
+fn caller_on_names_shed_to_the_stream_agent_unless_the_record_s_env_names_another() {
+    let lab = Lab::new("stream-caller", &[]);
+    let file = Paths::in_dir(&lab.dir).providers().join("fake.toml");
+    let record = std::fs::read_to_string(&file).expect("read the record");
+    let said = |name: &str, keys: &str| {
+        std::fs::write(&file, format!("{keys}\n{record}")).expect("write the record");
+        lab.run(name, &["--policy", "allow"]);
+        assert_eq!(lab.session(name).0, "stream");
+        lab.turn(name, "env FAKE_CALLER");
+        ok(&lab.dir, &["read", name, "--lines", "1"])
+    };
+    let on = "caller_var = \"FAKE_CALLER\"\ncaller = true";
+    let off = "caller_var = \"FAKE_CALLER\"";
+    assert_eq!(said("off", off), "FAKE_CALLER=None\n");
+    assert_eq!(said("on", on), "FAKE_CALLER=shed\n");
+    let own = format!("{on}\nenv = {{ FAKE_CALLER = \"own-caller\" }}");
+    assert_eq!(said("own", &own), "FAKE_CALLER=own-caller\n");
+}

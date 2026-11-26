@@ -18,6 +18,9 @@ setup_files = ["CLAUDE.md", "settings.json", "rules", "agents", "commands", "ski
 session_files = ["projects/*/{session}.jsonl"]
 default_folder = "~/.claude"
 scrub = ["CLAUDE_CODE_OAUTH_TOKEN"]
+# The caller name Claude Code sends; caller = true in <config>/providers/claude.toml starts lanes as `shed` (docs/accounts/caller-ab.md).
+caller_var = "CLAUDE_CODE_ENTRYPOINT"
+caller = false
 
 [quota]
 path = ["quota", "token_count"]
