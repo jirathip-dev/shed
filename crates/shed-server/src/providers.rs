@@ -11,9 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::Error;
 use crate::drivers::stream::Wire;
-use crate::proto::{AgentInfo, EventKind, Medians, Provider};
+use crate::proto::{AgentInfo, Medians, Provider};
 pub use shed_catalog::Catalog;
-use std::time::UNIX_EPOCH;
 
 type MakeWire = fn() -> Box<dyn Wire>;
 include!(concat!(env!("OUT_DIR"), "/wires.rs"));
