@@ -290,26 +290,22 @@ ignore_case = true
 [[ban]]
 pattern = "sccache"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-cloud/**"]
-reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is the runners repo's (build and CI machines), a lane's cache env drover's"
 
 [[ban]]
 pattern = "pnpm"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-cloud/**"]
-reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is the runners repo's (build and CI machines), a lane's cache env drover's"
 
 [[ban]]
 pattern = "CARGO_TARGET_DIR"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-cloud/**"]
-reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is the runners repo's (build and CI machines), a lane's cache env drover's"
 
 [[ban]]
 pattern = "RUSTC_WRAPPER"
 paths = ["crates/*/src/**"]
-except = ["crates/shed-cloud/**"]
-reason = "#336: toolchains, build caches and disk are not shed's; host setup is shed-cloud's, a lane's cache env drover's"
+reason = "#336: toolchains, build caches and disk are not shed's; host setup is the runners repo's (build and CI machines), a lane's cache env drover's"
 
 [[size]]
 paths = ["crates/*/tests/**/*.rs"]
