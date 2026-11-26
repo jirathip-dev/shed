@@ -5,7 +5,7 @@
 
 mod common;
 
-use std::io::{BufRead as _, BufReader, Read as _, Write as _};
+use std::io::{BufRead as _, BufReader, Write as _};
 use std::net::TcpListener;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
@@ -126,8 +126,6 @@ fn a_callback_address_is_fetched_on_the_host_and_only_a_localhost_one() {
         stream
             .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
             .expect("the reply");
-        let mut rest = [0; 1024];
-        stream.read(&mut rest).ok();
     });
     let answer = format!("http://127.0.0.1:{port}/cb?code=abc\n");
     let out = shed(&dir, &args, &answer);
