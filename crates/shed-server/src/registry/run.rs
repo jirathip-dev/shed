@@ -238,7 +238,7 @@ impl Registry {
         let catalog = crate::providers::Catalog::load(&self.providers).0;
         let record = catalog.by_id(acp?)?;
         let folder = crate::providers::config_folder(record, vars)?;
-        crate::providers::clear_stale_lock(record, &folder)
+        crate::stale_lock::clear(record, &folder)
     }
 
     pub(crate) fn sandbox(

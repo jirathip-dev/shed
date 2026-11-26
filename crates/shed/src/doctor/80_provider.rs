@@ -1,6 +1,7 @@
 use shed_client::Calls as _;
 use shed_server::proto::EventKind;
-use shed_server::providers::{Catalog, config_folder, stale_lock};
+use shed_server::providers::{Catalog, config_folder};
+use shed_server::stale_lock;
 
 use crate::service::{Checks, Row};
 
@@ -16,7 +17,7 @@ pub(super) fn rows(cx: &Checks<'_>) -> Vec<Row> {
             .filter_map(|a| a.folder.clone());
         for folder in config_folder(record, &[]).into_iter().chain(named) {
             if let Some(EventKind::LockCleared { path, age_secs, .. }) =
-                stale_lock(record, &folder, now)
+                stale_lock::found(record, &folder, now)
             {
                 let (id, path) = (&record.id, path.display());
                 let why = format!("{id}: stale empty {path}, {age_secs} s old; the next start removes it, or rm it");
