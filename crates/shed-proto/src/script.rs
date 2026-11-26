@@ -183,6 +183,7 @@ impl Method {
             | Self::ScreenWatch
             | Self::Input
             | Self::AccountLogin
+            | Self::AccountAnswer
             | Self::TerminalKeys
             | Self::TerminalResize
             | Self::ReadOnly

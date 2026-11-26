@@ -42,13 +42,22 @@ Make an account: an empty config folder of mode 0700 under `accounts/<provider>/
 {"jsonrpc":"2.0","id":1,"result":{"adopted":false,"checked_at":1762416000,"folder":"/home/user/.local/state/shed/accounts/claude/work","line":"signed in · claude.ai (dev@example.com)","name":"work","preferred":true,"provider":"claude","runs":1,"setup":[],"state":"ready","token":{"expires_at":1793536000,"rejected":false,"saved_at":1762000000},"usage":{"read_at":1762416000,"windows":[{"id":"5h","resets_at":1762430400,"used_pct":12}]},"who":"dev@example.com"}}
 ```
 
-### `account.login`
+### `account.answer`
 
-The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`. With `token`, the record's `token.command` runs instead, and shed saves the setup token it prints, read off the unredacted screen, to the account's 0600 token file.
+The answer to the account's running remote login (`account.login` with `remote`), delivered the way its record's `remote_login.answer` says: `paste` types it into the login, `callback` fetches it on the host (only a `http://localhost:` or `http://127.0.0.1:` address); `none` takes no answer and is refused.
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"account.login","params":{"name":"work","provider":"claude","token":true}}
-{"jsonrpc":"2.0","id":1,"result":{"terminal":"login-claude-work"}}
+{"jsonrpc":"2.0","id":1,"method":"account.answer","params":{"answer":"the-code-the-page-shows","name":"work","provider":"claude"}}
+{"jsonrpc":"2.0","id":1,"result":{}}
+```
+
+### `account.login`
+
+The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`. With `token`, the record's `token.command` runs instead, and shed saves the setup token it prints, read off the unredacted screen, to the account's 0600 token file. With `remote`, the record's `remote_login.command` (else `login`) runs with `open`, `xdg-open` and `BROWSER` shadowed so no browser opens on the host, and the call waits up to 30 s for the sign-in link: the result carries it and the one-time code unredacted, and `answer` says how `account.answer` finishes it; the terminal stays redacted.
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"account.login","params":{"name":"work","provider":"claude","remote":true}}
+{"jsonrpc":"2.0","id":1,"result":{"answer":"paste","link":"https://claude.ai/oauth/authorize?code=true&state=abc","terminal":"login-claude-work"}}
 ```
 
 ### `account.ls`
@@ -102,7 +111,7 @@ Each agent shed has a provider record for or has installed, by id, as `shed agen
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"agents","params":{}}
-{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"balance":null,"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"env":{},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"price":null,"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"resets":["back at "],"sandbox":null,"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
+{"jsonrpc":"2.0","id":1,"result":[{"id":"fake-acp","installed":{"cmd":["npx","-y","fake-acp@0.1.0"],"distribution":"npx","id":"fake-acp","version":"0.1.0"},"medians":{"first_token_ms":1900,"ready_ms":2500,"sessions":20},"provider":{"agent":"fake","auth_failures":["fake: login gone"],"balance":null,"cache":{"api":300,"api_vars":["FAKE_API_KEY"],"plan":3600},"config_dir_var":"FAKE_HOME","credentials":null,"default_folder":null,"driver":"acp","effort_args":["--effort","{effort}"],"efforts":["low","high"],"env":{},"id":"fake-acp","install":"npm install -g fake-agent","limit":["fake: limit hit"],"login":"fake login","logout":"fake logout","model_args":["--model","{model}"],"model_env":null,"models":[["fast","Fast"]],"price":null,"proxy":null,"quota":{"cache_read":"cachedInputTokens","cache_write":"cachedWriteTokens","input":"inputTokens","output":"outputTokens","path":["quota","token_count"]},"remote_login":null,"resets":["back at "],"sandbox":null,"scrub":[],"session_files":[],"settings_var":null,"setup_files":[],"status":"fake login status","status_read":null,"stream":null,"token":null,"token_var":"FAKE_TOKEN","usage":null},"source":"/home/me/.config/shed/providers/fake.toml"}]}
 ```
 
 ### `agents.match`
