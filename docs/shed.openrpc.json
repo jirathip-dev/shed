@@ -941,6 +941,38 @@
               "why"
             ],
             "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "lock_cleared"
+              },
+              "path": {
+                "type": "string",
+                "description": "The lock's path."
+              },
+              "size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Its size in bytes."
+              },
+              "age_secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Seconds since its last change."
+              }
+            },
+            "required": [
+              "event",
+              "path",
+              "size",
+              "age_secs"
+            ],
+            "description": "Before the start, the record's stale lock was removed from the agent's config folder."
           }
         ],
         "description": "`emit` params."
@@ -3765,6 +3797,18 @@
             ],
             "description": "What it needs inside a sandbox.",
             "default": null
+          },
+          "stale_lock": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StaleLock"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A lock a killed agent leaves in its config folder, cleared before a start once stale.",
+            "default": null
           }
         },
         "description": "What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of\nthe same name in `<config>/providers/` (`docs/acp/provider-records.md`)."
@@ -4329,6 +4373,27 @@
           }
         },
         "description": "An agent record's `[sandbox]`: what the agent itself needs inside, `~` for home and `{config}` for the run's\nconfig folder (its account's, else the record's `default_folder`)."
+      },
+      "StaleLock": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Its name in the config folder."
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0,
+            "description": "Seconds since its last change after which an empty one is stale."
+          }
+        },
+        "required": [
+          "file",
+          "secs"
+        ],
+        "description": "A lock file in the config folder that an agent killed mid-write leaves behind: an empty one unchanged for\nlonger than `secs` is stale."
       },
       "Agent": {
         "type": "object",
@@ -5714,6 +5779,38 @@
               "why"
             ],
             "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "lock_cleared"
+              },
+              "path": {
+                "type": "string",
+                "description": "The lock's path."
+              },
+              "size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Its size in bytes."
+              },
+              "age_secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Seconds since its last change."
+              }
+            },
+            "required": [
+              "event",
+              "path",
+              "size",
+              "age_secs"
+            ],
+            "description": "Before the start, the record's stale lock was removed from the agent's config folder."
           }
         ],
         "description": "An event names its terminal, carries its labels and its `parent` (absent without one) and counts up in\n`seq`; `event` is `started`, `state` (the reported state changed), `exited` (by itself, with its `code`),\n`killed` (by `kill`), `resources` (memory or CPU moved by more than 10 % since the last one) or `mem-limit`\n(the tree passed `mem_max_mb`; `ended_by` is `kernel`, `shed` or `none`).\n\nAn ACP terminal (`shed run --acp`) adds its agent's events, emitted by its bridge: `turn` (a prompt), `text`\n(a reply chunk), `tool_call` (started or changed), `plan`, `mode`, `approval_request` (answer with\n`shed approve`), `approved`, `reply` (the turn's whole reply and its `stop_reason`), `session` (the session\nis ready, or its model or slash commands changed) and `usage` (the agent's `usage_update`: tokens `used` of\nthe context window's `size`, and its `cost`). A resumed session's history (`run` with `resume`) comes first, from\nshed's own transcript, its events marked `\"replay\": true` so a client does not count them as new; what the\nagent replays is dropped. An idle agent hibernates (state `hibernated`, its processes stopped); the next\nsend wakes it on the same session."
@@ -7181,6 +7278,38 @@
               "why"
             ],
             "description": "The terminal runs on an account: from `start`, or after a `limit` on the account it `was` on or the owner's\n`account.use`."
+          },
+          {
+            "type": "object",
+            "properties": {
+              "event": {
+                "type": "string",
+                "const": "lock_cleared"
+              },
+              "path": {
+                "type": "string",
+                "description": "The lock's path."
+              },
+              "size": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Its size in bytes."
+              },
+              "age_secs": {
+                "type": "integer",
+                "format": "uint64",
+                "minimum": 0,
+                "description": "Seconds since its last change."
+              }
+            },
+            "required": [
+              "event",
+              "path",
+              "size",
+              "age_secs"
+            ],
+            "description": "Before the start, the record's stale lock was removed from the agent's config folder."
           }
         ],
         "description": "One event of an ACP terminal's transcript."
