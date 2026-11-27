@@ -133,7 +133,7 @@ fn a_prompt_wakes_the_agent_and_its_history_is_not_repeated() {
     until(&dir, "h", "hibernated");
     ok(&dir, &["send", "h", "more"]);
     until(&dir, "h", "done");
-    assert_eq!(processes(&dir, "h"), 2, "awake again");
+    settles_at(&dir, "h", 2);
     assert_eq!(
         ok(&dir, &["read", "h"]),
         "> hi\nyou said: hi\n> more\nyou said: more\n"
@@ -206,8 +206,8 @@ fn no_hibernation_without_load_session_with_no_hibernate_or_before_a_turn() {
     past_the_delay();
     for name in ["a", "b"] {
         assert_eq!(reported(&dir, name)["state"], "done", "{name}");
-        assert_eq!(processes(&dir, name), 2, "{name}");
+        settles_at(&dir, name, 2);
     }
     assert_ne!(reported(&dir, "c")["state"], "hibernated");
-    assert_eq!(processes(&dir, "c"), 2);
+    settles_at(&dir, "c", 2);
 }
