@@ -85,8 +85,28 @@ pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// The record's `setup_files` that `folder` holds.
 #[must_use]
 pub fn setup(provider: &Provider, folder: &Path) -> Vec<String> {
-    let held = |f: &&String| fs::symlink_metadata(folder.join(f)).is_ok();
+    let held = |f: &&String| holds(&provider.setup_ignore, folder, f);
     provider.setup_files.iter().filter(held).cloned().collect()
+}
+
+fn holds(ignore: &[String], folder: &Path, rel: &str) -> bool {
+    if ignore.iter().any(|i| i == rel) || fs::symlink_metadata(folder.join(rel)).is_err() {
+        return false;
+    }
+    let under = format!("{rel}/");
+    if !ignore.iter().any(|i| i.starts_with(&under)) {
+        return true;
+    }
+    fs::read_dir(folder.join(rel)).map_or(true, |entries| {
+        entries.flatten().any(|e| {
+            let name = e.file_name();
+            holds(
+                ignore,
+                folder,
+                &format!("{under}{}", name.to_string_lossy()),
+            )
+        })
+    })
 }
 
 fn line(provider: &Provider, name: &str, drift: Option<Drift>, status: String) -> String {
@@ -535,5 +555,29 @@ pub(crate) mod tests {
             store.account(&p, "made").expect("read").setup,
             ["settings.json"]
         );
+    }
+
+    #[test]
+    fn what_the_agent_writes_itself_is_no_setup() {
+        let dir = temp("store-ignore");
+        let store = Store::beside(&dir.path().join("state.json"));
+        let mut p = provider();
+        p.setup_files = vec!["skills".into(), "plugins".into()];
+        p.setup_ignore = ["skills/synced", "plugins/store", "plugins/synced"]
+            .map(String::from)
+            .to_vec();
+        let folder = store.add(&p, &add("made", None)).expect("added").folder;
+        let folder = folder.expect("folder");
+        for d in ["skills/synced/org/s", "plugins/store", "plugins/synced/b"] {
+            fs::create_dir_all(folder.join(d)).expect("mkdir");
+        }
+        fs::write(folder.join("plugins/store/p.json"), "{}").expect("write");
+        let setup = || store.account(&p, "made").expect("read").setup;
+        assert!(setup().is_empty(), "{:?}", setup());
+        fs::create_dir_all(folder.join("skills/my-skill")).expect("mkdir");
+        fs::write(folder.join("skills/my-skill/SKILL.md"), "x").expect("write");
+        assert_eq!(setup(), ["skills"]);
+        fs::write(folder.join("plugins/installed_plugins.json"), "{}").expect("write");
+        assert_eq!(setup(), ["skills", "plugins"]);
     }
 }
