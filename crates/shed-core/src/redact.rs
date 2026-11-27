@@ -43,17 +43,28 @@ fn words(word: &str, out: &mut String) {
 
 /// `text` with anything that looks like a token replaced by `[redacted]`: a run of 20 or more token characters
 /// with both a letter and a digit, and in a link the values of `token`, `secret`, `password` and `key` parameters.
+/// A link that fills its line to the widest line's end goes on at the start of the next, as a wrapped screen row does.
 #[must_use]
 pub fn redact(text: &str) -> String {
+    let width = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
     let mut out = String::with_capacity(text.len());
-    for word in text.split_inclusive(char::is_whitespace) {
-        let bare = word.trim_end();
-        if bare.starts_with("https://") || bare.starts_with("http://") {
-            link(bare, &mut out);
-        } else {
-            words(bare, &mut out);
+    let mut wrapped = false;
+    for line in text.split_inclusive('\n') {
+        let row = line.strip_suffix('\n').unwrap_or(line);
+        let mut in_link = false;
+        for word in line.split_inclusive(char::is_whitespace) {
+            let bare = word.trim_end();
+            in_link = std::mem::take(&mut wrapped)
+                || bare.starts_with("https://")
+                || bare.starts_with("http://");
+            if in_link {
+                link(bare, &mut out);
+            } else {
+                words(bare, &mut out);
+            }
+            out.push_str(word.strip_prefix(bare).unwrap_or_default());
         }
-        out.push_str(word.strip_prefix(bare).unwrap_or_default());
+        wrapped = in_link && row.trim_end() == row && row.chars().count() == width;
     }
     out
 }
@@ -92,9 +103,9 @@ mod tests {
     #[test]
     fn a_google_sign_in_link_stays_whole_even_wrapped_across_screen_rows() {
         let link = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A57865%2Fauth%2Faicode&access_type=offline&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&code_challenge=Xk3vQ9mB2rT7wLpZ8nY4cF6hJ1sD5gA0eU2iO3kP7qW&code_challenge_method=S256&state=9f2c4e7a1b3d5f6e8a0c2b4d6f8e1a3c&response_type=code&client_id=123456789012-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.apps.googleusercontent.com";
-        let line = format!("Open the following link to authenticate the ACP server: {link}");
-        assert_eq!(redact(&line), line);
-        let rows: Vec<String> = line
+        let printed = format!("Open the following link to authenticate the ACP server: {link}");
+        assert_eq!(redact(&printed), printed);
+        let rows: Vec<String> = printed
             .chars()
             .collect::<Vec<_>>()
             .chunks(80)
