@@ -73,6 +73,13 @@ pub fn pass(paths: &Paths, dir: &Path, exe: &Path, dry: bool) -> anyhow::Result<
         dest,
     })
     .context(tag.clone())?;
+    let serve_exe = serve.as_ref().and_then(|c| c.server().exe.clone());
+    if let Some(theirs) = serve_exe.map(|e| fs::canonicalize(&e).unwrap_or(e))
+        && theirs != exe
+    {
+        let (theirs, ours) = (theirs.display(), exe.display());
+        bail!("serve runs {theirs}, not {ours}; run {theirs} self-update");
+    }
     let check = json!({"build": to, "candidate": exe.with_extension("new")});
     let checked = serve
         .as_mut()

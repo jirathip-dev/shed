@@ -45,7 +45,8 @@ pub fn run(cx: &Cx<'_>, Args { dry_run, pause, resume }: Args) -> anyhow::Result
         crate::out::line("another self-update pass runs");
         return Ok(ExitCode::SUCCESS);
     }
-    let exe = std::env::current_exe().context("this binary's path")?;
+    let exe = std::env::current_exe().and_then(fs::canonicalize);
+    let exe = exe.context("this binary's path")?;
     let dry = dry_run;
     if dry {
         let serve = Conn::connect(&paths.socket).map(|c| c.server().build.clone());
