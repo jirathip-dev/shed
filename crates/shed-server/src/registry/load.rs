@@ -25,10 +25,7 @@ pub(super) fn history(state: &Path, name: &str) -> History {
 
 pub(super) fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<Terminal> {
     let lent = crate::lane::pty_socket(socket, &info.name);
-    let taken = UnixStream::connect(&lent).and_then(|bridge| {
-        bridge.set_read_timeout(Some(GRACE))?;
-        crate::handover::take_over(&bridge, 4096)
-    });
+    let taken = UnixStream::connect(&lent).and_then(|bridge| borrow(&bridge));
     let Ok((Some(master), said)) = taken.map(|(fds, said)| (fds.into_iter().next(), said)) else {
         fs::remove_file(lent).ok();
         return None;
@@ -43,6 +40,11 @@ pub(super) fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<
         });
     }
     Some(term)
+}
+
+fn borrow(bridge: &UnixStream) -> io::Result<(Vec<OwnedFd>, Vec<u8>)> {
+    bridge.set_read_timeout(Some(GRACE))?;
+    crate::handover::take_over(bridge, 4096)
 }
 
 fn end_left_over<'a>(state: &Path, terminals: impl Iterator<Item = &'a TerminalInfo>) {
@@ -206,7 +208,18 @@ mod tests {
     use shed_proto::{LsParams, Sample};
 
     use std::fs;
+    use std::os::fd::AsFd as _;
     use std::path::Path;
+
+    #[test]
+    fn a_bridge_that_hung_up_once_it_lent_its_pty_is_still_adopted() {
+        let (ours, bridge) = UnixStream::pair().unwrap();
+        let (pty, _peer) = UnixStream::pair().unwrap();
+        crate::handover::hand_over(&bridge, &[pty.as_fd()], b"null").unwrap();
+        drop(bridge);
+        let (fds, said) = borrow(&ours).unwrap();
+        assert_eq!((fds.len(), said), (1, b"null".to_vec()));
+    }
 
     #[test]
     fn state_files_of_every_past_release_load() {
