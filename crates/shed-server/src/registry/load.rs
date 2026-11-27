@@ -43,7 +43,7 @@ pub(super) fn adopt(socket: &Path, state: &Path, info: &TerminalInfo) -> Option<
 }
 
 fn borrow(bridge: &UnixStream) -> io::Result<(Vec<OwnedFd>, Vec<u8>)> {
-    bridge.set_read_timeout(Some(GRACE))?;
+    bridge.set_read_timeout(Some(GRACE)).ok();
     crate::handover::take_over(bridge, 4096)
 }
 
