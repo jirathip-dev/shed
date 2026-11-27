@@ -29,7 +29,11 @@ fn connect_carries_the_protocol_over_a_socketpair() {
     let golden = std::fs::read_to_string(golden).expect("hello golden");
     let exchange: Vec<String> = golden
         .lines()
-        .map(|l| l.replace("$VERSION", VERSION).replace("$BUILD", BUILD))
+        .map(|l| {
+            l.replace("$VERSION", VERSION)
+                .replace("$BUILD", BUILD)
+                .replace("$SHED", env!("CARGO_BIN_EXE_shed"))
+        })
         .collect();
     let mut call = |request: &str| {
         (&ours)
