@@ -19,6 +19,14 @@ platform = "linux"
 "core/cap" = "drover has no line cap (#1812)"
 
 [pin]
-version = "1.2.0"
-aarch64-apple-darwin = "2db6e5164bb481f26e8f584f4beb197223e790c07891cb497700589a92785a5e"
-x86_64-unknown-linux-gnu = "a3732c674247f1685f942fcd4553c1b1886932390974c15dd7017fa3b2b57299"
+version = "1.7.0"
+aarch64-apple-darwin = "7f8810a7e5c1b73d0168ce7af2c45fb402279e98e13d05d273eeae4f396b7365"
+x86_64-unknown-linux-gnu = "fb3c10d02c3a1270fddc9c3984126cccb0779b9f2d15e31d74e204555a238cbb"
+
+[docs.records]
+"docs/cap-history/**" = "past line-cap changes, kept as written"
+"docs/decisions/**" = "decision records, kept as written"
+
+[docs.written]
+"skill/script/SKILL.md" = "the script skill's hand-written guide; its methods.md is generated"
+"skill/shed-client/SKILL.md" = "the client skill, written by hand"
