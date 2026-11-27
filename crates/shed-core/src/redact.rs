@@ -88,4 +88,27 @@ mod tests {
             format!("{digits} {letters} abc123 \"[redacted]\"")
         );
     }
+
+    #[test]
+    fn a_google_sign_in_link_stays_whole_even_wrapped_across_screen_rows() {
+        let link = "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2F127.0.0.1%3A57865%2Fauth%2Faicode&access_type=offline&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform%20https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email&code_challenge=Xk3vQ9mB2rT7wLpZ8nY4cF6hJ1sD5gA0eU2iO3kP7qW&code_challenge_method=S256&state=9f2c4e7a1b3d5f6e8a0c2b4d6f8e1a3c&response_type=code&client_id=123456789012-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6.apps.googleusercontent.com";
+        let line = format!("Open the following link to authenticate the ACP server: {link}");
+        assert_eq!(redact(&line), line);
+        let rows: Vec<String> = line
+            .chars()
+            .collect::<Vec<_>>()
+            .chunks(80)
+            .map(String::from_iter)
+            .collect();
+        let screen = rows.join("\n");
+        assert_eq!(redact(&screen), screen);
+        let token = format!(
+            "https://example.com/cb?state=s1&access_token={}",
+            "a1".repeat(12)
+        );
+        assert_eq!(
+            redact(&token),
+            "https://example.com/cb?state=s1&access_token=[redacted]"
+        );
+    }
 }
