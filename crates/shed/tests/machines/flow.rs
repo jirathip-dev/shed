@@ -81,6 +81,10 @@ fn keys_and_links_read_over_the_fake_link_agree_with_today_s_code_in_the_report(
         assert!(keys["fired"][row].is_u64(), "{row} in {keys}");
     }
     assert_eq!(keys["disagreements"], json!([]), "{keys}");
+    common::eventually("the link facts", || {
+        let links = flow(&root, "link");
+        saw(&links, "dialed") && saw(&links, "dial_failed")
+    });
     let links = flow(&root, "link");
     assert_eq!(links["subjects"], 2, "{links}");
     assert!(
