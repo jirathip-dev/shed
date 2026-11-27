@@ -98,7 +98,7 @@ Also out of scope:
 - No host setup. A shed machine is only a place shed can run an agent: the link, processes, and their CPU and
   memory. shed installs no toolchain, manages no build cache (sccache, pnpm's store, cargo targets) and cleans no
   disk beyond its own state folder, where its pruning of exited terminals and ACP sessions stays. Host setup is
-  shed-cloud's recipe; a lane's cache env is drover's.
+  the runners repo's, for build and CI machines; a lane's cache env is drover's.
 
 ## Constraints
 
