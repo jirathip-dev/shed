@@ -3657,6 +3657,14 @@
             "description": "The files and folders that make a config folder a setup: an account's folder holds none of them.",
             "default": []
           },
+          "setup_ignore": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Paths under `setup_files` the agent writes itself: a setup folder holding only these is no setup.",
+            "default": []
+          },
           "session_files": {
             "type": "array",
             "items": {
