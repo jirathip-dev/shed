@@ -1,11 +1,6 @@
 packs = ["core", "rust"]
 integration = "staging"
 
-[pin]
-version = "1.2.0"
-x86_64-unknown-linux-gnu = "a3732c674247f1685f942fcd4553c1b1886932390974c15dd7017fa3b2b57299"
-aarch64-apple-darwin = "2db6e5164bb481f26e8f584f4beb197223e790c07891cb497700589a92785a5e"
-
 [cache]
 
 [legs.macos]
@@ -22,3 +17,8 @@ platform = "linux"
 
 [off]
 "core/cap" = "drover has no line cap (#1812)"
+
+[pin]
+version = "1.2.0"
+aarch64-apple-darwin = "2db6e5164bb481f26e8f584f4beb197223e790c07891cb497700589a92785a5e"
+x86_64-unknown-linux-gnu = "a3732c674247f1685f942fcd4553c1b1886932390974c15dd7017fa3b2b57299"
