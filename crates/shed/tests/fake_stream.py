@@ -13,7 +13,7 @@ Each prompt line `{"prompt": P}` is echoed (`"prompted"`), then:
 - "tool": the tool call Build, in progress, then completed, and the reply "built".
 - "slow": the tool call Sleep, in progress, the text "thinking", then nothing until it is stopped.
 - "mcp": the reply "<mode> <text>" of the MCP file.
-- "env": the reply "WRAPPED=<$WRAPPED>".
+- "env NAME": the reply "NAME=<$NAME>" (NAME is WRAPPED when absent).
 - anything else: the reply "[<model>] you said: <P>".
 """
 import json
@@ -66,8 +66,9 @@ while True:
         time.sleep(600)
     elif prompt == "mcp":
         reply = MCP
-    elif prompt == "env":
-        reply = f"WRAPPED={os.environ.get('WRAPPED')}"
+    elif prompt.split()[:1] == ["env"]:
+        name = (prompt.split()[1:] or ["WRAPPED"])[0]
+        reply = f"{name}={os.environ.get(name)}"
     else:
         reply = f"[{MODEL}] you said: {prompt}"
     say({"text": reply})
