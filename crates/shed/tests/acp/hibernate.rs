@@ -133,7 +133,7 @@ fn a_prompt_wakes_the_agent_and_its_history_is_not_repeated() {
     until(&dir, "h", "hibernated");
     ok(&dir, &["send", "h", "more"]);
     until(&dir, "h", "done");
-    assert_eq!(processes(&dir, "h"), 2, "awake again");
+    settles_at(&dir, "h", 2);
     assert_eq!(
         ok(&dir, &["read", "h"]),
         "> hi\nyou said: hi\n> more\nyou said: more\n"

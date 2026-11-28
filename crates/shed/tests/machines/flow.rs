@@ -4,7 +4,7 @@ use std::process::Command;
 use serde_json::{Value, json};
 use shed_server::Paths;
 
-use crate::common::{self, Server, temp_dir};
+use crate::common::{Server, temp_dir};
 use crate::{SHED, fake_hosts, ok};
 
 fn key(id: &str, terminal: &str) -> Value {
@@ -60,20 +60,27 @@ fn keys_and_links_read_over_the_fake_link_agree_with_today_s_code_in_the_report(
         std::env::var("PATH").unwrap()
     );
     let _local = Server::with_env(&local, "3600", &[("PATH", &path)]);
-    common::eventually("the key facts over the link", || {
-        let keys = flow(&root, "key");
+    let ended = |id: &str| {
+        let keys: Value = serde_json::from_str(&ok(&root, &["--json", "proxy", "keys"])).unwrap();
+        let all = keys.as_array().expect("keys").iter();
+        all.into_iter()
+            .any(|k| k["id"] == id && k["state"] == "ended")
+    };
+    let counted = shed_server::clock::poll(shed_server::clock::PATIENCE * 3, || {
+        shed_server::clock::sleep(std::time::Duration::from_millis(500));
+        let (keys, links) = (flow(&root, "key"), flow(&root, "link"));
         ["alive", "gone", "unknown"].iter().all(|f| saw(&keys, f))
+            && saw(&links, "dialed")
+            && saw(&links, "dial_failed")
+            && ended("bbbb")
     });
+    assert!(counted, "the key and link facts never reached the report");
     let keys = flow(&root, "key");
     assert_eq!(keys["subjects"], 3, "{keys}");
     for row in ["K1", "K2", "K3"] {
         assert!(keys["fired"][row].is_u64(), "{row} in {keys}");
     }
     assert_eq!(keys["disagreements"], json!([]), "{keys}");
-    common::eventually("the link facts", || {
-        let links = flow(&root, "link");
-        saw(&links, "dialed") && saw(&links, "dial_failed")
-    });
     let links = flow(&root, "link");
     assert_eq!(links["subjects"], 2, "{links}");
     assert!(
@@ -81,14 +88,5 @@ fn keys_and_links_read_over_the_fake_link_agree_with_today_s_code_in_the_report(
         "{links}"
     );
     assert!(links["fired"]["L1"].is_u64(), "{links}");
-    let local_keys: Value = serde_json::from_str(&ok(&root, &["--json", "proxy", "keys"])).unwrap();
-    let ended = |id: &str| {
-        let all = local_keys.as_array().expect("keys").iter();
-        all.into_iter()
-            .any(|k| k["id"] == id && k["state"] == "ended")
-    };
-    assert!(
-        ended("bbbb") && !ended("aaaa") && !ended("cccc"),
-        "{local_keys}"
-    );
+    assert!(!ended("aaaa") && !ended("cccc"));
 }
