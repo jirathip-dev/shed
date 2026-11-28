@@ -60,6 +60,10 @@ pub(crate) fn bridge(
         }
     };
     p.env.extend(picked.env);
+    if let (Some(var), true) = (&record.caller_var, record.caller) {
+        let named = record.env.get(var).map_or("shed", String::as_str);
+        p.env.entry(var.clone()).or_insert_with(|| named.to_owned());
+    }
     let exe = std::env::current_exe().map_err(|e| internal(e.to_string()))?;
     let path = |p: &Path| p.to_string_lossy().into_owned();
     let bridge = [

@@ -3671,6 +3671,19 @@
             "description": "Variables its logins, status checks and runs on an account get.",
             "default": {}
           },
+          "caller_var": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The variable that names the program calling the agent.",
+            "default": null
+          },
+          "caller": {
+            "type": "boolean",
+            "description": "Whether lanes start with `caller_var` set to `shed`, unless `env` sets it.",
+            "default": false
+          },
           "effort_args": {
             "type": "array",
             "items": {
