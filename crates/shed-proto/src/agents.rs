@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    BalanceProbe, CredentialsRecord, Price, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
+    BalanceProbe, CredentialsRecord, Price, ProxyRecord, RemoteLogin, StatusRead, TokenSetup,
+    Tokens, UsageProbe,
 };
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
@@ -49,6 +50,10 @@ pub struct Provider {
     pub model_env: Option<String>,
     /// Variables its logins, status checks and runs on an account get.
     pub env: BTreeMap<String, String>,
+    /// The variable that names the program calling the agent.
+    pub caller_var: Option<String>,
+    /// Whether lanes start with `caller_var` set to `shed`, unless `env` sets it.
+    pub caller: bool,
     /// The adapter's arguments that set the effort, `{effort}` standing for one of `efforts`.
     pub effort_args: Vec<String>,
     /// The effort levels it takes.
@@ -81,6 +86,8 @@ pub struct Provider {
     pub price: Option<Box<Price>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
+    /// The login finished on another device.
+    pub remote_login: Option<RemoteLogin>,
     /// The token proxy.
     pub proxy: Option<ProxyRecord>,
     /// Where the login lives, for the drift check.

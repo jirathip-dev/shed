@@ -4,7 +4,7 @@ on:
     branches: [main, staging]
   pull_request:
     branches: [main, staging]
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, labeled]
 
 concurrency:
   group: ci-${{ github.event_name == 'push' && github.sha || github.ref }}
@@ -15,8 +15,9 @@ permissions:
 
 jobs:
   gates:
-    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@a1e76ca28aa643261034e6eabd8b452e0d5860ac # v1.1.1
+    uses: jirathip-dev/gatekeeper/.github/workflows/gates.yml@49e65a3c0e634088282c783f1f16211a7156fc75 # v1.7.0
     with:
+      scope: ${{ contains(github.event.pull_request.labels.*.name, 'merge-ready') && 'full' || 'light' }}
       runners: >-
         ${{ vars.CI_RUNNER && (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
           && format('{{"linux": "ubuntu-latest", "macos": {0}}}', vars.CI_RUNNER)
