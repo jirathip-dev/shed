@@ -33,3 +33,9 @@ model_env = "AGY_ACP_DEFAULT_MODEL"
 
 [env]
 AGY_ACP_FORCE_FILE_STORAGE = "1"
+
+# The login finished on another device (`shed account login --remote`): Google redirects to the host's localhost,
+# so the owner pastes the address the browser could not open and shed fetches it on the host.
+[remote_login]
+link = "https://accounts.google.com/"
+answer = "callback"

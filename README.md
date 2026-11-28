@@ -48,7 +48,7 @@ The v0.1 commands:
 <!-- commands -->
 | Command | What it does |
 |---|---|
-| `shed account add\|ls\|login\|status\|rm\|use` | The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `login --token` its setup-token command, saving the token it prints for runs on other machines, `status` reads it now, `ls` lists them (the preferred one marked) and `rm` signs one out and removes it (docs/accounts/store.md). `use <provider> <name>` makes a ready named account the one `auto` picks first and moves every live `auto` and `default` lane to it; `use <provider> --clear` drops the preference (docs/accounts/accounts.md). |
+| `shed account add\|ls\|login\|answer\|status\|rm\|use` | The accounts shed keeps on this host: `add <provider> <name> [--folder DIR] [--token-file FILE]` makes one (or adopts a folder), `login` runs its login on a redacted screen (type the code), `login --token` its setup-token command, saving the token it prints for runs on other machines, `login --remote` signs in from any device (no browser on the host: it prints the sign-in link and asks for the code or callback address), `answer <provider> <name> <answer>` hands a running remote login its answer (docs/accounts/login.md), `status` reads it now, `ls` lists them (the preferred one marked) and `rm` signs one out and removes it (docs/accounts/store.md). `use <provider> <name>` makes a ready named account the one `auto` picks first and moves every live `auto` and `default` lane to it; `use <provider> --clear` drops the preference (docs/accounts/accounts.md). |
 | `shed run --acp <agent>`, `shed agents`, `shed approve`, `shed cancel` | ACP agents as structured terminals; see below. |
 | `shed attach <t>` | Take over the terminal interactively; `Ctrl+\` detaches. |
 | `shed events [--label k=v] [--since N]` | Stream starts, state changes, exits, kills and resource moves as JSON lines; `--since` replays those still kept (the last 4,096 besides agent text chunks); a client too far behind is dropped with a `lagged` line. |
@@ -98,7 +98,7 @@ Also out of scope:
 - No host setup. A shed machine is only a place shed can run an agent: the link, processes, and their CPU and
   memory. shed installs no toolchain, manages no build cache (sccache, pnpm's store, cargo targets) and cleans no
   disk beyond its own state folder, where its pruning of exited terminals and ACP sessions stays. Host setup is
-  shed-cloud's recipe; a lane's cache env is drover's.
+  the runners repo's, for build and CI machines; a lane's cache env is drover's.
 
 ## Constraints
 
@@ -192,7 +192,7 @@ shed/
 - **Versioning:** SemVer, with a `CHANGELOG.md` (Keep a Changelog). Releases are tagged builds with checksums (GitHub
   Actions); `cargo install` works from the repo.
 - **Install:** `scripts/install.sh [BIN_DIR]` (`just install`) builds shed and, on macOS, signs every build with the
-  self-signed identity `herdsman-local` that herdsman and cooee share (herdsman's `scripts/signing-identity.sh`
+  self-signed identity `herdsman-local` that herdsman and cooee share (herdsman's signing-identity script
   creates it once), so a Keychain item that trusts one shed build trusts the next; with no identity it keeps the
   installed binary and exits 1. When the service job is installed, an install restarts the server (`shed install`
   stops and starts `dev.shed.serve`, ending its terminals), so the binary and the running server are the same build.

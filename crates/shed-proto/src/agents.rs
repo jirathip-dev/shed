@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    BalanceProbe, CredentialsRecord, Price, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
+    BalanceProbe, CredentialsRecord, Price, ProxyRecord, RemoteLogin, StatusRead, TokenSetup,
+    Tokens, UsageProbe,
 };
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
@@ -63,6 +64,8 @@ pub struct Provider {
     pub stream: Option<Stream>,
     /// The files and folders that make a config folder a setup: an account's folder holds none of them.
     pub setup_files: Vec<String>,
+    /// Paths under `setup_files` the agent writes itself: a setup folder holding only these is no setup.
+    pub setup_ignore: Vec<String>,
     /// A session's files under the config folder, `{session}` standing for its id.
     pub session_files: Vec<String>,
     /// The CLI's own config folder, `~/` for home: where `default`'s sessions are copied from, never to.
@@ -79,6 +82,8 @@ pub struct Provider {
     pub price: Option<Box<Price>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
+    /// The login finished on another device.
+    pub remote_login: Option<RemoteLogin>,
     /// The token proxy.
     pub proxy: Option<ProxyRecord>,
     /// Where the login lives, for the drift check.

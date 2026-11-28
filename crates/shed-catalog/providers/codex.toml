@@ -58,3 +58,10 @@ id = "30d"
 line = "30d window:"
 used = "% used"
 resets = "resets "
+
+# The login finished on another device (`shed account login --remote`): device-code login, the code under its line.
+[remote_login]
+command = "codex login --device-auth"
+link = "https://auth.openai.com/codex/device"
+code = "Enter this one-time code"
+answer = "none"

@@ -121,6 +121,15 @@ fn no_guard_refuses_what_acts_and_a_read_needs_no_guard() {
     assert!(!marker.exists());
     assert_eq!(reply["acting"][0]["error"]["code"], "NO_GUARD");
     start(&dir, "t");
+    eventually("the terminal's output", || {
+        let read = Command::new(SHED)
+            .arg("--dir")
+            .arg(&dir)
+            .args(["read", "t"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&read.stdout).contains("line two")
+    });
     let read = "const l = await shed.ls({}); const r = await shed.read({ name: l[0].name }); return r.text.includes('line two');";
     let mut reply = code(&dir, read);
     reply.as_object_mut().unwrap().remove("ms");
