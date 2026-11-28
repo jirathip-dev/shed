@@ -311,6 +311,11 @@ All notable changes to this project are documented here. The format follows
   `spend` (`month`, `tokens`, `cost`) in `account.ls` and `account.status`, priced by the event's own cost,
   else the record's new `[price]` table, else `"unknown"`. The totals survive a restart and start again each
   month, in the machine's local time (docs/accounts/usage.md).
+- `shed account login <provider> <name> --remote` (`account.login` with `remote`) signs in from any device: no browser
+  opens on the host, the sign-in link (and a one-time code) comes back unredacted, and the answer goes back with
+  `account.answer` (the CLI asks for it): pasted into the login for claude, fetched on the host as the localhost
+  callback for antigravity-acp, none for codex's device-code login. Each provider's way is its record's
+  `[remote_login]` (docs/accounts/login.md).
 
 ### Changed
 

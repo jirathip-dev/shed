@@ -1,8 +1,8 @@
 use serde_json::{Value, json, to_value};
 use shed_proto::{
-    Account, AccountAdd, AccountLogin, AccountMoves, AccountName, AccountState, AccountUse,
-    AccountsParams, KeyId, KeyState, Login, Method, ProxyKey, Relay, Stayed, TokenInfo, Usage,
-    Window,
+    Account, AccountAdd, AccountAnswer, AccountLogin, AccountMoves, AccountName, AccountState,
+    AccountUse, AccountsParams, KeyId, KeyState, Login, LoginAnswer, Method, ProxyKey, Relay,
+    Stayed, TokenInfo, Usage, Window,
 };
 
 fn work() -> Account {
@@ -70,13 +70,26 @@ pub(crate) fn example(method: Method) -> Option<(Value, Value)> {
             to_value(AccountLogin {
                 provider: "claude".into(),
                 name: "work".into(),
-                token: true,
+                token: false,
+                remote: true,
             })
             .unwrap(),
             to_value(Login {
                 terminal: "login-claude-work".into(),
+                link: Some("https://claude.ai/oauth/authorize?code=true&state=abc".into()),
+                code: None,
+                answer: Some(LoginAnswer::Paste),
             })
             .unwrap(),
+        ),
+        Method::AccountAnswer => (
+            to_value(AccountAnswer {
+                provider: "claude".into(),
+                name: "work".into(),
+                answer: "the-code-the-page-shows".into(),
+            })
+            .unwrap(),
+            json!({}),
         ),
         Method::AccountStatus => (named(), to_value(work()).unwrap()),
         Method::AccountRm => (named(), json!({})),
