@@ -284,6 +284,10 @@ All notable changes to this project are documented here. The format follows
 - The flow tables run in shadow beside today's code: where they disagree, a line goes to `flow-shadow.jsonl`
   beside the state file; `shed flow report` (`flow.report`) shows rows fired, facts never seen, stuck rows and
   the disagreements by class, and `shed doctor` counts the last 24 h's.
+- `shed_client::fake::Server` is a scriptable test double: per-method handlers over a shared `World`, built-in
+  `run`, `get`, `ls`, `kill`, `rm`, `send`, `state`, `exec`, `file.read` and `file.write`, cued agent replies,
+  live `events` streams a test pushes to until it closes them, `restart` and a forgotten ring (`reset`).
+- cooee: pin shed at this release to swap its own fake of shed for `shed_client::fake`.
 - `machine.stats` reports macOS's memory pressure level as `mem_level` (`normal`, `warn` or `critical`), now and in
   `history`, and every process row in it and in `terminal.procs` carries `cpu_ms`, its CPU time, so two reads give a
   CPU share.
