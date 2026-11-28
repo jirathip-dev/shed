@@ -31,6 +31,7 @@ mod screen;
 mod script;
 pub mod secrets;
 pub mod serve;
+pub mod stale_lock;
 mod stats;
 
 use std::ffi::OsString;

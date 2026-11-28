@@ -9,7 +9,7 @@ use shed_proto::{ErrorCode, EventKind, RpcError, RunParams, State, TerminalInfo}
 use std::fs;
 use std::os::fd::AsFd as _;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -164,6 +164,7 @@ impl Registry {
         let mut vars = crate::drivers::launch::vars(&p, &name).map_err(internal)?;
         let Injected { set, unset } = account.unwrap_or_default();
         vars.extend(set);
+        let cleared = self.clear_stale_lock(p.acp.as_deref(), &vars);
         let sandboxed = self.wrapped(&name, &mut p, &mut vars)?;
         let mem_max_mb = p.mem_max_mb.or_else(crate::config::mem_max);
         let cmd = command(&p.cmd, &unset, mem_max_mb);
@@ -200,6 +201,9 @@ impl Registry {
             sandboxed,
         };
         self.started(info.clone(), term);
+        if let Some(cleared) = cleared {
+            self.events.emit(&info, cleared);
+        }
         Ok(self.saved(info))
     }
 
@@ -230,6 +234,13 @@ impl Registry {
         Ok(true)
     }
 
+    fn clear_stale_lock(&self, acp: Option<&str>, vars: &[(String, String)]) -> Option<EventKind> {
+        let catalog = crate::providers::Catalog::load(&self.providers).0;
+        let record = catalog.by_id(acp?)?;
+        let folder = crate::providers::config_folder(record, vars)?;
+        crate::stale_lock::clear(record, &folder)
+    }
+
     pub(crate) fn sandbox(
         &self,
         name: &str,
@@ -239,14 +250,7 @@ impl Registry {
     ) -> Result<Wrap, RpcError> {
         let catalog = crate::providers::Catalog::load(&self.providers).0;
         let record = acp.and_then(|id| catalog.by_id(id));
-        let var = record.and_then(|r| r.config_dir_var.as_ref());
-        let set = var.and_then(|v| vars.iter().rev().find(|(k, _)| k == v));
-        let home = crate::accounts::home();
-        let default = (record.and_then(|r| r.default_folder.as_deref())).map(|d| {
-            d.strip_prefix("~/")
-                .map_or_else(|| d.into(), |rest| home.join(rest))
-        });
-        let config = set.map(|(_, v)| PathBuf::from(v)).or(default);
+        let config = record.and_then(|r| crate::providers::config_folder(r, vars));
         let own = Own {
             state: &self.path,
             providers: &self.providers,

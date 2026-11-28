@@ -94,6 +94,20 @@ pub struct Provider {
     pub credentials: Option<CredentialsRecord>,
     /// What it needs inside a sandbox.
     pub sandbox: Option<Box<crate::SandboxNeeds>>,
+    /// A lock a killed agent leaves in its config folder, cleared before a start once stale.
+    pub stale_lock: Option<StaleLock>,
+}
+
+/// A lock file in the config folder that an agent killed mid-write leaves behind: an empty one unchanged for
+/// longer than `secs` is stale.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct StaleLock {
+    /// Its name in the config folder.
+    pub file: String,
+    /// Seconds since its last change after which an empty one is stale.
+    pub secs: u64,
 }
 
 /// The driver a provider's lanes run on.

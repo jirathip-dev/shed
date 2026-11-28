@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Error;
 use crate::drivers::stream::Wire;
-use crate::proto::{AgentInfo, Medians};
+use crate::proto::{AgentInfo, Medians, Provider};
 pub use shed_catalog::Catalog;
 
 type MakeWire = fn() -> Box<dyn Wire>;
@@ -109,6 +109,18 @@ pub fn known(state: &Path, dir: &Path) -> Result<Vec<AgentInfo>, Error> {
         installed,
     };
     Ok(all.into_iter().map(info).collect())
+}
+
+/// Where a run's agent keeps its login: the record's `config_dir_var` in `vars`, else its `default_folder`.
+#[must_use]
+pub fn config_folder(record: &Provider, vars: &[(String, String)]) -> Option<PathBuf> {
+    let var = record.config_dir_var.as_ref();
+    let set = var.and_then(|v| vars.iter().rev().find(|(k, _)| k == v));
+    let default = record.default_folder.as_deref().map(|d| {
+        d.strip_prefix("~/")
+            .map_or_else(|| d.into(), |rest| crate::accounts::home().join(rest))
+    });
+    set.map(|(_, v)| PathBuf::from(v)).or(default)
 }
 
 #[cfg(test)]

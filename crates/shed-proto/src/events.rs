@@ -177,6 +177,15 @@ pub enum EventKind {
         /// `start`, `limit` or `owner`.
         why: String,
     },
+    /// Before the start, the record's stale lock was removed from the agent's config folder.
+    LockCleared {
+        /// The lock's path.
+        path: PathBuf,
+        /// Its size in bytes.
+        size: u64,
+        /// Seconds since its last change.
+        age_secs: u64,
+    },
 }
 
 impl EventKind {
@@ -192,6 +201,7 @@ impl EventKind {
                 | Self::Resources(_)
                 | Self::MemLimit { .. }
                 | Self::Account { .. }
+                | Self::LockCleared { .. }
         )
     }
 }

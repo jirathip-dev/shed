@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use shed_catalog::Catalog;
-use shed_proto::{AgentInfo, DriverKind, Picked};
+use shed_proto::{AgentInfo, DriverKind, Picked, StaleLock};
 
 fn host() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/host")
@@ -148,4 +148,15 @@ fn pick_places_a_model_and_an_effort_for_the_driver_that_runs() {
     assert!(gemini.pick(DriverKind::Acp, None, Some("low")).is_err());
     let codex = catalog.by_id("codex-acp").cloned().unwrap_or_default();
     assert!(codex.pick(DriverKind::Acp, Some("any"), None).is_err());
+}
+
+#[test]
+fn claudes_record_names_its_refresh_lock_and_the_60_s_window() {
+    let catalog = Catalog::built_in();
+    let claude = catalog.by_id("claude-acp").cloned().unwrap_or_default();
+    let lock = StaleLock {
+        file: ".oauth_refresh.lock".into(),
+        secs: 60,
+    };
+    assert_eq!(claude.stale_lock, Some(lock));
 }

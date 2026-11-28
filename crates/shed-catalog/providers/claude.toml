@@ -94,6 +94,12 @@ key_var = "ANTHROPIC_AUTH_TOKEN"
 auth = "authorization: Bearer {token}"
 append = { "anthropic-beta" = "oauth-2025-04-20" }
 
+# The lock a claude killed mid-refresh leaves (anthropics/claude-code#95236): an empty one past Claude Code's own
+# 60 s window is removed before a start.
+[stale_lock]
+file = ".oauth_refresh.lock"
+secs = 60
+
 # The stream driver: `claude`'s own stream-json mode. Off until <config>/providers/claude.toml says driver = "stream".
 [stream]
 wire = "claude"
