@@ -63,6 +63,8 @@ pub struct Provider {
     pub stream: Option<Stream>,
     /// The files and folders that make a config folder a setup: an account's folder holds none of them.
     pub setup_files: Vec<String>,
+    /// Paths under `setup_files` the agent writes itself: a setup folder holding only these is no setup.
+    pub setup_ignore: Vec<String>,
     /// A session's files under the config folder, `{session}` standing for its id.
     pub session_files: Vec<String>,
     /// The CLI's own config folder, `~/` for home: where `default`'s sessions are copied from, never to.
