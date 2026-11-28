@@ -192,7 +192,7 @@ shed/
 - **Versioning:** SemVer, with a `CHANGELOG.md` (Keep a Changelog). Releases are tagged builds with checksums (GitHub
   Actions); `cargo install` works from the repo.
 - **Install:** `scripts/install.sh [BIN_DIR]` (`just install`) builds shed and, on macOS, signs every build with the
-  self-signed identity `herdsman-local` that herdsman and cooee share (herdsman's `scripts/signing-identity.sh`
+  self-signed identity `herdsman-local` that herdsman and cooee share (herdsman's signing-identity script
   creates it once), so a Keychain item that trusts one shed build trusts the next; with no identity it keeps the
   installed binary and exits 1. When the service job is installed, an install restarts the server (`shed install`
   stops and starts `dev.shed.serve`, ending its terminals), so the binary and the running server are the same build.

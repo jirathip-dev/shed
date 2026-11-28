@@ -1,0 +1,32 @@
+crates/shed-accounts/src/choice.rs: pub const AUTO: no other crate names it
+crates/shed-accounts/src/choice.rs: pub fn fullest: no other crate names it
+crates/shed-accounts/src/keys.rs: pub fn random_hex: no other crate names it
+crates/shed-core/src/clock.rs: pub const PATIENCE: only tests name it
+crates/shed-core/src/screen/mod.rs: pub fn take_replies: no other crate names it
+crates/shed-core/src/screen/mod.rs: pub fn take_reports: no other crate names it
+crates/shed-core/src/terminal/io.rs: pub fn press: only tests name it
+crates/shed-secrets/src/lib.rs: pub fn adopt_files: only tests name it
+crates/shed-server/src/config/sessions.rs: pub fn median_of: no other crate names it
+crates/shed-server/src/config/sessions.rs: pub fn sessions_keep: no other crate names it
+crates/shed-server/src/config/sessions.rs: pub fn warm_idle: no other crate names it
+crates/shed-server/src/config/sessions.rs: pub fn warm_max: no other crate names it
+crates/shed-server/src/config/terminal.rs: pub fn default_size: no other crate names it
+crates/shed-server/src/config/terminal.rs: pub fn prune_after: no other crate names it
+crates/shed-server/src/handover.rs: pub const FORMAT: no other crate names it
+crates/shed-server/src/lane.rs: pub const LANE_STATES: no other crate names it
+crates/shed-server/src/lane.rs: pub fn pty_socket: no other crate names it
+crates/shed-server/src/machines.rs: pub const STATS_TIMEOUT: no other crate names it
+crates/shed-server/src/machines.rs: pub fn backoff: no other crate names it
+crates/shed/src/cx.rs: pub fn connect_within: no other crate names it
+crates/shed/src/cx.rs: pub fn serve_args: no other crate names it
+crates/shed/src/cx.rs: pub fn serve_detached: no other crate names it
+crates/shed/src/cx.rs: pub fn stdin_bytes: no other crate names it
+crates/shed/src/cx.rs: pub fn to_acp: no other crate names it
+crates/shed/src/service.rs: pub const LABEL: no other crate names it
+crates/shed/src/service.rs: pub const UPDATE: no other crate names it
+crates/shed/src/service.rs: pub fn migrate_updater: no other crate names it
+crates/shed/src/service.rs: pub fn old_updater: no other crate names it
+crates/shed/src/service.rs: pub fn on_disk: no other crate names it
+crates/shed/src/service.rs: pub fn start_job: no other crate names it
+crates/shed/src/table.rs: pub fn columns: no other crate names it
+crates/shed/src/table.rs: pub fn state_word: no other crate names it
