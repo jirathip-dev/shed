@@ -2,9 +2,9 @@
 """The test time budget (`just budget`): each crate's tests within `[package.metadata.gate] test_secs`.
 
 Builds every test binary of the workspace under ROOT (default .), then runs them crate by crate from the
-crate's folder, as `cargo test` does. Fails when a test fails, a crate under ROOT/crates states no
-budget, or a crate's tests use more CPU seconds (user and system, of the test binaries and the processes
-they wait for) than it. CPU time, not wall time: a busy host slows a test but does not make it use more
+crate's folder, as `cargo test` does. Fails when a test fails (naming each failing test), a crate under
+ROOT/crates states no budget, or a crate's tests use more CPU seconds (user and system, of the test
+binaries and the processes they wait for) than it. CPU time, not wall time: a busy host slows a test but does not make it use more
 CPU, so load cannot fail the budget (#310).
 """
 
@@ -23,6 +23,7 @@ def cpu():
     return used.ru_utime + used.ru_stime
 
 
+FAILED = re.compile(r"^test (\S+) \.\.\. FAILED$", re.M)
 BUDGET = re.compile(r"^\[package\.metadata\.gate\]\n(?:[^\[\n].*\n|\n)*?test_secs *= *([0-9.]+)", re.M)
 
 root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".")
@@ -46,8 +47,11 @@ for manifest in sorted(glob.glob(os.path.join(root, "crates/*/Cargo.toml"))):
         continue
     started, cpu_started = time.monotonic(), cpu()
     for exe in binaries.get(crate, []):
-        if subprocess.run([exe], cwd=crate).returncode != 0:
-            failed.append(f"{name}: {os.path.basename(exe)} failed")
+        ran = subprocess.run([exe], cwd=crate, stdout=subprocess.PIPE, text=True)
+        print(ran.stdout, end="", flush=True)
+        if ran.returncode != 0:
+            tests = ", ".join(FAILED.findall(ran.stdout)) or "no test result: it crashed"
+            failed.append(f"{name}: {os.path.basename(exe)} failed: {tests}")
     used, took, limit = cpu() - cpu_started, time.monotonic() - started, float(found.group(1))
     print(f"budget: {name}: {used:.1f} CPU s of {limit:g} ({took:.1f} s wall, reported only)")
     if used > limit:

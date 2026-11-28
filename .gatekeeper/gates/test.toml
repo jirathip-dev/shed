@@ -2,7 +2,7 @@ about = "every workspace test on the MSRV, crate by crate within its test_secs (
 fix = "fix the failing or slow test the log names; make each test remove its temp folders"
 budget_secs = 600
 setup = ["rust"]
-paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/budget.py", "scripts/temp-left.sh", "ci/fixtures/budget/**", "ci/fixtures/temp-left/**"]
+paths = ["crates/**", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "scripts/budget.py", "scripts/temp-left.sh", "ci/fixtures/budget/**", "ci/fixtures/budget-failing/**", "ci/fixtures/temp-left/**"]
 run = """
 set -eu
 dir=$(mktemp -d /tmp/shed-test.XXXXXX)
@@ -10,6 +10,8 @@ trap 'rm -rf "${dir:?}"' EXIT
 if [ "${GATEKEEPER_HOST:-}" = ci ]; then mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"; fi
 TMPDIR="$dir" scripts/budget.py
 if scripts/budget.py ci/fixtures/budget; then echo "the budget fixture passed: the time budget does not bite"; exit 1; fi
+if named=$(scripts/budget.py ci/fixtures/budget-failing); then echo "the failing fixture passed: a failing test does not fail the budget"; exit 1; fi
+case "$named" in *"failed: fails_and_the_budget_names_it"*) ;; *) echo "budget did not name the failing test"; exit 1 ;; esac
 scripts/temp-left.sh "$dir/"
 ! scripts/temp-left.sh ci/fixtures/temp-left
 """
