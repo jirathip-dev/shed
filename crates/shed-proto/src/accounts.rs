@@ -108,6 +108,51 @@ pub struct TokenSetup {
     pub days: u64,
 }
 
+/// A login the owner finishes on another device: the sign-in link it prints, and how the answer comes back.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(deny_unknown_fields)]
+pub struct RemoteLogin {
+    /// The command that logs in this way; the record's `login` when unset.
+    #[serde(default)]
+    pub command: Option<String>,
+    /// The text the sign-in link starts with.
+    pub link: String,
+    /// Text on the line before the one-time code the link's page asks for.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// How the answer comes back.
+    pub answer: LoginAnswer,
+}
+
+/// How the answer to a remote login comes back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum LoginAnswer {
+    /// The code the link's page shows, typed into the waiting login.
+    Paste,
+    /// The localhost address the browser could not open, fetched on the host for the waiting login.
+    Callback,
+    /// None: the login finishes once the link's page is done.
+    None,
+}
+
+impl RemoteLogin {
+    /// The sign-in link on `screen` and the one-time code under the `code` line, once the link is there.
+    #[must_use]
+    pub fn read(&self, screen: &str) -> Option<(String, Option<String>)> {
+        let link = screen
+            .split_whitespace()
+            .find(|w| w.starts_with(&self.link))?;
+        let code = self.code.as_deref().and_then(|marker| {
+            let mut lines = screen.lines().skip_while(|l| !l.contains(marker)).skip(1);
+            lines.find_map(|l| l.split_whitespace().next())
+        });
+        Some((link.to_owned(), code.map(str::to_owned)))
+    }
+}
+
 /// The token proxy: where a run on another machine's calls go, and how they are signed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(JsonSchema))]
@@ -506,6 +551,15 @@ pub struct AccountsParams {
 pub struct Login {
     /// The redacted terminal the login runs in.
     pub terminal: String,
+    /// `remote`: the sign-in link, unredacted, once the login printed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    /// `remote`: the one-time code the link's page asks for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    /// `remote`: how the answer comes back (`account.answer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer: Option<LoginAnswer>,
 }
 
 /// `account.login` params.
@@ -519,6 +573,21 @@ pub struct AccountLogin {
     /// Run the record's `token.command` and save the setup token it prints (0600).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub token: bool,
+    /// Run the record's `remote_login`: no browser on the host, the link handed back.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote: bool,
+}
+
+/// `account.answer` params.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(JsonSchema))]
+pub struct AccountAnswer {
+    /// The record's `agent` name.
+    pub provider: String,
+    /// The account.
+    pub name: String,
+    /// The code, or the callback address, one line.
+    pub answer: String,
 }
 
 /// A per-run key of the token proxy; never the key itself.

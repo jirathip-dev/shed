@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use shed_client::Calls as _;
-use shed_server::proto::{Account, AccountAdd, SendParams, State};
+use shed_server::proto::{
+    Account, AccountAdd, AccountAnswer, AccountLogin, Login, LoginAnswer, SendParams, State,
+};
 use shed_server::runner::ExitCode;
 
 use crate::cx::{Cx, On};
@@ -34,8 +36,15 @@ enum Action {
     Login {
         provider: String,
         name: String,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "remote")]
         token: bool,
+        #[arg(long)]
+        remote: bool,
+    },
+    Answer {
+        provider: String,
+        name: String,
+        answer: String,
     },
     Status {
         provider: String,
@@ -83,6 +92,18 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
             cx.print(&list, || table(&list))?;
             return Ok(ExitCode::SUCCESS);
         }
+        Action::Answer {
+            provider,
+            name,
+            answer,
+        } => {
+            shed.account_answer(&AccountAnswer {
+                provider,
+                name,
+                answer,
+            })?;
+            return Ok(ExitCode::SUCCESS);
+        }
         Action::Rm { provider, name } => {
             shed.account_rm(&provider, &name)?;
             out::line(format_args!("{provider}/{name} removed"));
@@ -123,14 +144,55 @@ pub fn run(cx: &Cx<'_>, args: Args) -> anyhow::Result<ExitCode> {
             provider,
             name,
             token,
+            remote,
         } => {
-            let terminal = shed.account_login(&provider, &name, token)?.terminal;
-            login(cx, &terminal)?;
-            shed.account_status(&provider, &name)?
+            let params = AccountLogin {
+                provider,
+                name,
+                token,
+                remote,
+            };
+            let started = shed.account_login(&params)?;
+            match &started.link {
+                Some(link) => remote_login(cx, &params, &started, link)?,
+                None => login(cx, &started.terminal)?,
+            }
+            shed.account_status(&params.provider, &params.name)?
         }
     };
     cx.print(&account, || table(std::slice::from_ref(&account)))?;
     Ok(ExitCode::SUCCESS)
+}
+
+fn remote_login(
+    cx: &Cx<'_>,
+    params: &AccountLogin,
+    started: &Login,
+    link: &str,
+) -> anyhow::Result<()> {
+    let shed = cx.server.connect(None)?;
+    out::line(format_args!("Open on any device: {link}"));
+    if let Some(code) = &started.code {
+        out::line(format_args!("Enter this code there: {code}"));
+    }
+    let ask = match started.answer {
+        Some(LoginAnswer::Paste) => Some("Paste the code it shows: "),
+        Some(LoginAnswer::Callback) => Some("Paste the address the browser could not open: "),
+        Some(LoginAnswer::None) | None => None,
+    };
+    if let Some(ask) = ask {
+        out::line(format_args!("{ask}"));
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        let answer = AccountAnswer {
+            provider: params.provider.clone(),
+            name: params.name.clone(),
+            answer,
+        };
+        shed.account_answer(&answer)?;
+    }
+    while shed.wait_state(&started.terminal, &["done"], 2.0)?.terminal.state != State::Exited {}
+    Ok(())
 }
 
 fn login(cx: &Cx<'_>, terminal: &str) -> anyhow::Result<()> {
