@@ -58,8 +58,45 @@
       }
     },
     {
+      "name": "account.answer",
+      "description": "The answer to the account's running remote login (`account.login` with `remote`), delivered the way its record's `remote_login.answer` says: `paste` types it into the login, `callback` fetches it on the host (only a `http://localhost:` or `http://127.0.0.1:` address); `none` takes no answer and is refused.",
+      "paramStructure": "by-name",
+      "params": [
+        {
+          "name": "provider",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The record's `agent` name."
+          }
+        },
+        {
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The account."
+          }
+        },
+        {
+          "name": "answer",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "description": "The code, or the callback address, one line."
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Empty"
+        }
+      }
+    },
+    {
       "name": "account.login",
-      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`. With `token`, the record's `token.command` runs instead, and shed saves the setup token it prints, read off the unredacted screen, to the account's 0600 token file.",
+      "description": "The record's `login` in a redacted terminal `login-<provider>-<name>` with the account's folder set; a second call while it runs returns the same terminal. shed kills it after 600 s; when it ends shed runs `account.status`. With `token`, the record's `token.command` runs instead, and shed saves the setup token it prints, read off the unredacted screen, to the account's 0600 token file. With `remote`, the record's `remote_login.command` (else `login`) runs with `open`, `xdg-open` and `BROWSER` shadowed so no browser opens on the host, and the call waits up to 30 s for the sign-in link: the result carries it and the one-time code unredacted, and `answer` says how `account.answer` finishes it; the terminal stays redacted.",
       "paramStructure": "by-name",
       "params": [
         {
@@ -84,6 +121,14 @@
           "schema": {
             "type": "boolean",
             "description": "Run the record's `token.command` and save the setup token it prints (0600)."
+          }
+        },
+        {
+          "name": "remote",
+          "required": false,
+          "schema": {
+            "type": "boolean",
+            "description": "Run the record's `remote_login`: no browser on the host, the link handed back."
           }
         }
       ],
@@ -3338,12 +3383,41 @@
         ],
         "description": "A setup token's dates."
       },
+      "Empty": {
+        "type": "object",
+        "additionalProperties": false
+      },
       "Login": {
         "type": "object",
         "properties": {
           "terminal": {
             "type": "string",
             "description": "The redacted terminal the login runs in."
+          },
+          "link": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`remote`: the sign-in link, unredacted, once the login printed it."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`remote`: the one-time code the link's page asks for."
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LoginAnswer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`remote`: how the answer comes back (`account.answer`)."
           }
         },
         "required": [
@@ -3351,9 +3425,25 @@
         ],
         "description": "`account.login`'s result."
       },
-      "Empty": {
-        "type": "object",
-        "additionalProperties": false
+      "LoginAnswer": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "paste",
+            "description": "The code the link's page shows, typed into the waiting login."
+          },
+          {
+            "type": "string",
+            "const": "callback",
+            "description": "The localhost address the browser could not open, fetched on the host for the waiting login."
+          },
+          {
+            "type": "string",
+            "const": "none",
+            "description": "None: the login finishes once the link's page is done."
+          }
+        ],
+        "description": "How the answer to a remote login comes back."
       },
       "AccountMoves": {
         "type": "object",
@@ -3749,6 +3839,18 @@
               }
             ],
             "description": "The setup token.",
+            "default": null
+          },
+          "remote_login": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RemoteLogin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The login finished on another device.",
             "default": null
           },
           "proxy": {
@@ -4221,6 +4323,41 @@
           "days"
         ],
         "description": "The setup token: the command that makes one, how it starts and how long it lasts."
+      },
+      "RemoteLogin": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The command that logs in this way; the record's `login` when unset.",
+            "default": null
+          },
+          "link": {
+            "type": "string",
+            "description": "The text the sign-in link starts with."
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Text on the line before the one-time code the link's page asks for.",
+            "default": null
+          },
+          "answer": {
+            "$ref": "#/components/schemas/LoginAnswer",
+            "description": "How the answer comes back."
+          }
+        },
+        "required": [
+          "link",
+          "answer"
+        ],
+        "description": "A login the owner finishes on another device: the sign-in link it prints, and how the answer comes back."
       },
       "ProxyRecord": {
         "type": "object",

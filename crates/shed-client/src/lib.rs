@@ -16,11 +16,11 @@ use serde::de::{DeserializeOwned, IgnoredAny};
 use serde_json::{Map, Value};
 pub use shed_proto as proto;
 use shed_proto::{
-    Account, AccountAdd, AccountLogin, AccountMoves, AccountName, AccountUse, AccountsParams,
-    AcpSession, AgentInfo, Dest, EmitParams, ErrorCode, ExecParams, ExecResult, FileParams,
-    Handover, HandoverCheckParams, HandoverParams, Input, Install, KeyId, KeysParams, Link, Login,
-    LsParams, MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams, Proc,
-    ProxyKey, ReadParams, ReadResult, Release, Report, ReportParams, Reported, ResizeParams,
+    Account, AccountAdd, AccountAnswer, AccountLogin, AccountMoves, AccountName, AccountUse,
+    AccountsParams, AcpSession, AgentInfo, Dest, EmitParams, ErrorCode, ExecParams, ExecResult,
+    FileParams, Handover, HandoverCheckParams, HandoverParams, Input, Install, KeyId, KeysParams,
+    Link, Login, LsParams, MachineParams, MachineStats, MatchParams, Matched, Method, ModelParams,
+    Proc, ProxyKey, ReadParams, ReadResult, Release, Report, ReportParams, Reported, ResizeParams,
     RunParams, SavedSecret, SecretName, SecretSet, SendParams, Source, Stage, StateParams,
     StatsParams, Swap, Target, TerminalInfo, WaitParams, WaitResult, frame,
 };
@@ -282,15 +282,14 @@ pub trait Calls {
     }
 
     /// Starts the account's login in a redacted terminal; with `token`, the setup token's command, whose token
-    /// shed saves.
-    fn account_login(&self, provider: &str, name: &str, token: bool) -> Result<Login, Error> {
-        let (provider, name) = (provider.to_owned(), name.to_owned());
-        let params = AccountLogin {
-            provider,
-            name,
-            token,
-        };
-        typed(self, Method::AccountLogin, &params)
+    /// shed saves; with `remote`, the login finished on another device, its sign-in link handed back.
+    fn account_login(&self, params: &AccountLogin) -> Result<Login, Error> {
+        typed(self, Method::AccountLogin, params)
+    }
+
+    /// Hands the account's running remote login its answer: the code, or the callback address.
+    fn account_answer(&self, params: &AccountAnswer) -> Result<(), Error> {
+        unit(self, Method::AccountAnswer, params)
     }
 
     /// The token proxy's per-run keys, newest first.

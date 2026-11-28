@@ -94,10 +94,19 @@ unknown key is an error naming the file or the row. Look a record up with `by_id
 ## Testing: `shed_client::fake` (feature `fake`)
 
 `fake::Server::start()?` serves a real socket in a temp folder of its own, removed when it drops. It
-answers `hello` as shed does and any method it was not given `MethodNotFound` (so the client reports
-`Version`, naming the method). `answer(method, json)` sets a result, `fail(method, RpcError)` an error;
-for `events`, `screen.watch` and `attach` a JSON array is the stream's items, one line each, after which
-the stream ends. `seen()` is every call but `hello`, in order, with its params.
+answers `hello` as shed does; `run`, `get`, `ls`, `kill`, `rm`, `send`, `state`, `exec`, `file.read`,
+`file.write` and `events` from its `World` (its terminals, files, cued replies and event log); any other
+method `MethodNotFound` (so the client reports `Version`, naming the method). Over the built-in answers,
+`answer(method, json)` sets a result, `fail(method, RpcError)` an error and `handle(method, |world, params| …)`
+a handler with the `World`; for `screen.watch`, `attach` and an answered `events` a JSON array is the
+stream's items, one line each, after which the stream ends. `seen()` is every call but `hello`, in order.
+
+`events` is live: it replays the kept events after `since` (`reset` first when `since` is under a forgotten
+floor) and stays open for every event emitted after, until the test closes it. `with(|world| …)` drives the
+`World`: `run`, `report`, `exit(name, code)`, `cue(name, &["reply", …])` (each prompt gets `turn`, `text`,
+`reply` and the state `done`, the last reply repeated), `emit(name, kind)`, `forget(lost)`, `on_exec(cmd,
+result)`, `files`, `close_streams()`. `restart()` closes every connection as a shed restart does; the
+terminals and the event log live on.
 
 ## Examples
 

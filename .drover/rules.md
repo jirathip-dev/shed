@@ -25,4 +25,4 @@
 - Don't install toolchains, manage build caches (sccache, pnpm's store, cargo targets) or clean disk beyond shed's own state folder: a shed machine is only the link and processes; host setup is the runners repo's (build and CI machines), a lane's cache env drover's (enforced by: core/arch (`[[ban]]` on `sccache`, `pnpm`, `CARGO_TARGET_DIR`, `RUSTC_WRAPPER` in .drover/arch.toml))
 - Don't file a bug issue without `Root cause: #N` or `Root cause: new`: a bug issue names its root cause (enforced by: the `Root cause:` line in .github/ISSUE_TEMPLATE/bug.md, kept by local/root-cause)
 - Don't fail an active lesson check in this file (a shadow one only reports) (enforced by: core/rules (drover lesson-check))
-- Don't leave the code a slice replaces for a later PR: delete it in the same one, and its removed lines lower the size baseline and the cap (enforced by: local/shrink (scripts/shrink.py))
+- Don't leave the code a slice replaces for a later PR: delete it in the same one, and its removed lines lower the size baseline (enforced by: local/shrink (scripts/shrink.py))
