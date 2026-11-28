@@ -14,7 +14,8 @@ pub(super) fn call(cx: &mut Call<'_>) -> Reply {
         let why = "tool: exe must be an absolute path whose last part is its name";
         return Err(RpcError::new(ErrorCode::InvalidParams, why));
     }
-    let answer = Hello::answer(&p);
+    let mut answer = Hello::answer(&p);
+    answer.exe = (crate::lock(cx.registry).control.as_ref()).map(|c| c.again.exe.clone());
     cx.session.protocol = Some(answer.protocol);
     cx.session.tool = p.tool;
     json(&answer)

@@ -95,8 +95,12 @@ impl Host {
     }
 
     fn command(&self, args: &[&str]) -> Command {
+        self.command_via(&self.exe, args)
+    }
+
+    fn command_via(&self, exe: &Path, args: &[&str]) -> Command {
         let releases = format!("file://{}", self.dir.join("releases").display());
-        let mut shed = Command::new(&self.exe);
+        let mut shed = Command::new(exe);
         shed.arg("--dir").arg(&self.dir).args(args);
         let path = std::env::var("PATH").unwrap_or_default();
         let path = format!("{}:{path}", self.dir.join("fake-bin").display());
@@ -293,6 +297,59 @@ fn one_pass_installs_mains_release_and_hands_serve_over_keeping_the_terminals() 
         says(&again).contains(&format!("up to date on {}", host.main)),
         "{again:?}"
     );
+}
+
+#[test]
+fn a_pass_through_a_symlink_swaps_its_target_and_keeps_the_symlink() {
+    let mut host = Host::new("update-symlink");
+    host.serve();
+    let stamped = host.stamped();
+    host.release(&format!("build-{}", host.main), &stamped, None);
+    std::fs::create_dir(host.dir.join("link")).expect("link dir");
+    let link = host.dir.join("link/shed");
+    std::os::unix::fs::symlink(&host.exe, &link).expect("symlink");
+
+    let out = host
+        .command_via(&link, &["self-update"])
+        .output()
+        .expect("runs");
+    assert!(out.status.success(), "{out:?}");
+    let line = format!("updated {BUILD} -> {}; serve handed over", host.main);
+    assert!(says(&out).contains(&line), "{out:?}");
+    assert_eq!(
+        std::fs::read_link(&link).expect("still a symlink"),
+        host.exe
+    );
+    assert!(host.version().ends_with(&format!("({})", host.main)));
+    let prev = host.exe.with_extension("prev");
+    let prev_meta = std::fs::symlink_metadata(&prev).expect("prev kept");
+    assert!(prev_meta.is_file(), "prev is the old binary, not a symlink");
+    assert!(
+        !link.with_extension("prev").exists(),
+        "nothing beside the link"
+    );
+    eventually("serve on the new build", || {
+        Conn::connect(&host.socket()).is_ok_and(|c| c.server().build == host.main)
+    });
+}
+
+#[test]
+fn a_pass_from_another_binary_than_serves_names_both_and_swaps_nothing() {
+    let mut host = Host::new("update-other");
+    host.serve = Some(Server::start(&host.dir));
+    let stamped = host.stamped();
+    host.release(&format!("build-{}", host.main), &stamped, None);
+    let before = host.version();
+
+    let out = host.shed(&["self-update"]);
+    assert_eq!(out.status.code(), Some(1), "{out:?}");
+    let said = says(&out);
+    let serve = std::fs::canonicalize(SHED).expect("serve's binary");
+    assert!(said.contains(&serve.display().to_string()), "{said}");
+    assert!(said.contains(&host.exe.display().to_string()), "{said}");
+    assert!(!said.contains("pending"), "{said}");
+    assert_eq!(host.version(), before, "the live binary stays");
+    assert_eq!(host.serving(), BUILD, "serve stays");
 }
 
 fn update_jobs(dir: &Path, label: &str) -> Vec<PathBuf> {

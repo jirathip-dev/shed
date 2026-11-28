@@ -148,6 +148,9 @@ pub struct Hello {
     /// A client's own tool, which the `install` methods may move besides shed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<crate::Tool>,
+    /// A server's binary, the one it was started from and hands over to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exe: Option<std::path::PathBuf>,
 }
 
 impl Hello {
@@ -161,6 +164,7 @@ impl Hello {
             protocol: PROTOCOL,
             oldest: Some(OLDEST_PROTOCOL),
             tool: None,
+            exe: None,
         }
     }
 

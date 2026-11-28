@@ -412,3 +412,6 @@ All notable changes to this project are documented here. The format follows
   `scripts/soak.py` times throwaway terminals on real machines against `ci/soak.toml`, nightly.
 - A release of a main commit that lacks `scripts/fake-link.py` no longer fails: staging's release workflow skips
   `shed-fake-link.py` with a notice and still publishes the binaries.
+- `shed self-update` run through a symlink installs into the file the symlink points to and leaves the symlink
+  in place. When serve runs another binary than this one, the pass names both paths and swaps nothing instead
+  of reporting `serve pending`. `hello`'s answer gains the server's `exe`.

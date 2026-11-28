@@ -1479,6 +1479,17 @@
             ],
             "description": "A client's own tool, which the `install` methods may move besides shed."
           }
+        },
+        {
+          "name": "exe",
+          "required": false,
+          "schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A server's binary, the one it was started from and hands over to."
+          }
         }
       ],
       "result": {
@@ -6294,6 +6305,13 @@
               }
             ],
             "description": "A client's own tool, which the `install` methods may move besides shed."
+          },
+          "exe": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A server's binary, the one it was started from and hands over to."
           }
         },
         "required": [

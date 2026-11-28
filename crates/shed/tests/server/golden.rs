@@ -18,6 +18,7 @@ impl Goldens {
         let normal = |s: &str| {
             let s = s
                 .replace(self.dir.to_str().expect("utf-8 dir"), "$DIR")
+                .replace(env!("CARGO_BIN_EXE_shed"), "$SHED")
                 .replace(&format!("\"{VERSION}\""), "\"$VERSION\"")
                 .replace(&format!("\"{BUILD}\""), "\"$BUILD\"")
                 .replace(&format!("server {BUILD}:"), "server $BUILD:");
