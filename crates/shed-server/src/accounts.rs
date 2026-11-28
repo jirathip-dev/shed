@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 use shed_accounts::{Store, Token, check, choice, store};
-use shed_core::{Wake, clock};
+use shed_core::{Wake, clock, runner};
 
 use crate::call::{Call, blocking};
 use crate::proto::{
