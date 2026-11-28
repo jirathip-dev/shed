@@ -15,6 +15,7 @@ model_env = "ANTHROPIC_MODEL"
 effort_args = ["--effort", "{effort}"]
 efforts = ["low", "medium", "high", "xhigh", "max"]
 setup_files = ["CLAUDE.md", "settings.json", "rules", "agents", "commands", "skills", "plugins"]
+setup_ignore = ["skills/synced", "plugins/store", "plugins/synced", "plugins/.last_inuse_sweep"]
 session_files = ["projects/*/{session}.jsonl"]
 default_folder = "~/.claude"
 scrub = ["CLAUDE_CODE_OAUTH_TOKEN"]
