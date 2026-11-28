@@ -31,3 +31,6 @@ x86_64-unknown-linux-gnu = "fb3c10d02c3a1270fddc9c3984126cccb0779b9f2d15e31d74e2
 [docs.written]
 "skill/script/SKILL.md" = "the script skill's hand-written guide; its methods.md is generated"
 "skill/shed-client/SKILL.md" = "the client skill, written by hand"
+
+[rust.exported]
+"crates/shed-client/src/**" = "the client library other repos build against; its callers live outside this workspace"
