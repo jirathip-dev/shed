@@ -40,7 +40,7 @@ jobs:
       branch: ${{ steps.t.outputs.branch }}
       publish: ${{ steps.t.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: t
@@ -72,7 +72,7 @@ jobs:
     env:
       PUBLISH: ${{ needs.target.outputs.publish }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.target.outputs.sha }}
           fetch-depth: 0
@@ -93,10 +93,10 @@ jobs:
     env:
       SHA: ${{ needs.target.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.target.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: x86_64-unknown-linux-gnu
       - id: build
@@ -116,7 +116,7 @@ jobs:
             echo "::notice::scripts/fake-link.py is not at $SHA; the release ships without shed-fake-link.py"
           fi
       - if: steps.build.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux
           path: |
@@ -133,10 +133,10 @@ jobs:
     env:
       SHA: ${{ needs.target.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.target.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.120.0
         with:
           targets: aarch64-apple-darwin
       - id: build
@@ -163,7 +163,7 @@ jobs:
             echo "::error::signing, notarization or its check failed; nothing is published"
           fi
       - if: steps.sign.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos
           path: shed-aarch64-apple-darwin
@@ -180,7 +180,7 @@ jobs:
       SHA: ${{ needs.target.outputs.sha }}
       BRANCH: ${{ needs.target.outputs.branch }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           merge-multiple: true
       - name: publish

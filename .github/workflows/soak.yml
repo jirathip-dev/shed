@@ -24,7 +24,7 @@ jobs:
       SOAK_MACHINES: ${{ vars.SOAK_MACHINES }}
       OUT: soak-out
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: soak
         run: |
           # shellcheck disable=SC2086
@@ -32,7 +32,7 @@ jobs:
       - if: always()
         run: cat "$OUT/soak.md" >> "$GITHUB_STEP_SUMMARY"
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: soak
           path: soak-out
