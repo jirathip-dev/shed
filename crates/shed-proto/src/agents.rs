@@ -50,6 +50,10 @@ pub struct Provider {
     pub model_env: Option<String>,
     /// Variables its logins, status checks and runs on an account get.
     pub env: BTreeMap<String, String>,
+    /// The variable that names the program calling the agent.
+    pub caller_var: Option<String>,
+    /// Whether lanes start with `caller_var` set to `shed`, unless `env` sets it.
+    pub caller: bool,
     /// The adapter's arguments that set the effort, `{effort}` standing for one of `efforts`.
     pub effort_args: Vec<String>,
     /// The effort levels it takes.
