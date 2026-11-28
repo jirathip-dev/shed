@@ -17,8 +17,20 @@ platform = "linux"
 
 [off]
 "core/cap" = "drover has no line cap (#1812)"
+"rust/complexity" = "gatekeeper 1.7 reports functions reached through a build script's OUT_DIR (the generated methods.rs and the wait.rs it includes) by absolute path, so no baseline matches on two hosts"
 
 [pin]
 version = "1.7.0"
 aarch64-apple-darwin = "7f8810a7e5c1b73d0168ce7af2c45fb402279e98e13d05d273eeae4f396b7365"
 x86_64-unknown-linux-gnu = "fb3c10d02c3a1270fddc9c3984126cccb0779b9f2d15e31d74e204555a238cbb"
+
+[docs.records]
+"docs/cap-history/**" = "past line-cap changes, kept as written"
+"docs/decisions/**" = "decision records, kept as written"
+
+[docs.written]
+"skill/script/SKILL.md" = "the script skill's hand-written guide; its methods.md is generated"
+"skill/shed-client/SKILL.md" = "the client skill, written by hand"
+
+[rust.exported]
+"crates/shed-client/src/**" = "the client library other repos build against; its callers live outside this workspace"

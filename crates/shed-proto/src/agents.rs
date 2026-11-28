@@ -8,7 +8,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    BalanceProbe, CredentialsRecord, Price, ProxyRecord, StatusRead, TokenSetup, Tokens, UsageProbe,
+    BalanceProbe, CredentialsRecord, Price, ProxyRecord, RemoteLogin, StatusRead, TokenSetup,
+    Tokens, UsageProbe,
 };
 
 /// What shed knows about one agent, as data: a built-in file, overridden key by key, or added, by a file of
@@ -81,6 +82,8 @@ pub struct Provider {
     pub price: Option<Box<Price>>,
     /// The setup token.
     pub token: Option<TokenSetup>,
+    /// The login finished on another device.
+    pub remote_login: Option<RemoteLogin>,
     /// The token proxy.
     pub proxy: Option<ProxyRecord>,
     /// Where the login lives, for the drift check.

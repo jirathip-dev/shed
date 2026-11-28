@@ -1,4 +1,4 @@
-frozen = ["docs/acp/README.md", ".github/workflows/ci.yml"]
+frozen = ["docs/acp/README.md"]
 generated = [
     "CHANGELOG.md",
     "docs/protocol.md",

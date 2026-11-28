@@ -7,7 +7,7 @@ run = """
 set -eu
 dir=$(mktemp -d /tmp/shed-test.XXXXXX)
 trap 'rm -rf "${dir:?}"' EXIT
-if [ -n "${CI:-}" ]; then mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"; fi
+if [ "${GATEKEEPER_HOST:-}" = ci ]; then mkdir -p "${TMPDIR:-/tmp}/shed-acp-warm-1"; fi
 TMPDIR="$dir" scripts/budget.py
 if scripts/budget.py ci/fixtures/budget; then echo "the budget fixture passed: the time budget does not bite"; exit 1; fi
 scripts/temp-left.sh "$dir/"

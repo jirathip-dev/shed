@@ -69,6 +69,11 @@ command = "claude setup-token"
 prefix = "sk-ant-oat"
 days = 365
 
+# The login finished on another device (`shed account login --remote`): the printed link's page shows a code to paste.
+[remote_login]
+link = "https://claude.ai/oauth/authorize"
+answer = "paste"
+
 # Where the login lives: the keychain item, which Claude Code reads first, and the file beside it (drift check).
 [credentials]
 file = ".credentials.json"

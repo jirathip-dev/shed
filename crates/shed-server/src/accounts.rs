@@ -1,4 +1,5 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -9,13 +10,15 @@ use shed_core::{Wake, clock, runner};
 
 use crate::call::{Call, blocking};
 use crate::proto::{
-    Account, AccountLogin, AcpUsage, ErrorCode, Login, Money, Provider, RpcError, RunParams, State,
-    TerminalInfo, Tokens,
+    Account, AccountAnswer, AccountLogin, AcpUsage, ErrorCode, Login, LoginAnswer, Money, Provider,
+    RemoteLogin, RpcError, RunParams, SendParams, State, TerminalInfo, Tokens,
 };
 use crate::registry::Registry;
 use crate::{Shared, lock, providers};
 
 const LOGIN: Duration = Duration::from_mins(10);
+const LINK: Duration = Duration::from_secs(30);
+const CALLBACK: Duration = Duration::from_secs(15);
 const BEAT: Duration = Duration::from_mins(1);
 
 static PROBING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
@@ -218,47 +221,179 @@ pub(crate) async fn login(cx: &Call<'_>, p: AccountLogin) -> Result<Login, RpcEr
     let (store, provider) = open(cx, &p.provider).await?;
     let folder = store.folder(&provider, &p.name)?;
     let token = provider.token.as_ref().filter(|_| p.token);
-    let line = token.map(|t| &t.command).or(provider.login.as_ref());
-    let Some(line) = line.filter(|_| token.is_some() || !p.token) else {
+    let remote = provider.remote_login.clone().filter(|_| p.remote);
+    let line = match (&remote, token) {
+        (Some(r), None) => r.command.as_ref().or(provider.login.as_ref()),
+        (None, Some(t)) if !p.remote => Some(&t.command),
+        (None, None) if !p.remote && !p.token => provider.login.as_ref(),
+        _ => None,
+    };
+    let Some(line) = line else {
         let why = format!("{} has no login command for that", provider.agent);
         return Err(RpcError::new(ErrorCode::InvalidParams, why));
     };
     let prefix = token.map(|t| t.prefix.clone());
-    let mut reg = cx.reg()?;
-    if let Some(terminal) = login_running(&reg, &p.provider, &p.name) {
-        return Ok(Login { terminal });
-    }
-    let terminal = store::login_terminal(&p.provider, &p.name);
-    if reg.get(&terminal).is_ok() {
-        let (_, files) = reg.rm(&terminal)?;
-        files();
-    }
-    let none = std::collections::BTreeMap::new();
-    let mut cmd = check::command(&provider, folder.as_deref(), line, &none, &[]);
-    let installed = crate::agents::list(&reg.path).unwrap_or_default();
-    if let Some(agent) = installed.into_iter().find(|a| a.id == provider.id) {
-        cmd.push("sh".to_owned());
-        cmd.extend(agent.cmd);
-    }
-    let cwd = folder.unwrap_or_else(|| PathBuf::from("/"));
-    let run = RunParams {
-        name: Some(terminal.clone()),
-        cmd,
-        cwd,
-        cols: prefix.is_some().then_some(1000),
-        ..RunParams::default()
+    let registry = lock(cx.registry).path.clone();
+    let env = match remote {
+        Some(_) => no_browser(&registry).await?,
+        None => BTreeMap::new(),
     };
-    reg.run(run)?;
-    reg.mark_redacted(&terminal);
-    let term = reg.fresh(&terminal);
-    drop(reg);
-    if let Some(term) = term {
-        crate::serve::watch(cx.registry, terminal.clone(), Arc::clone(&term));
+    let (terminal, term, fresh) = {
+        let mut reg = cx.reg()?;
+        if let Some(terminal) = login_running(&reg, &p.provider, &p.name) {
+            let term = reg.live(&terminal).ok().map(Arc::clone);
+            (terminal, term, false)
+        } else {
+            let terminal = store::login_terminal(&p.provider, &p.name);
+            if reg.get(&terminal).is_ok() {
+                let (_, files) = reg.rm(&terminal)?;
+                files();
+            }
+            let mut cmd = check::command(&provider, folder.as_deref(), line, &env, &[]);
+            let installed = crate::agents::list(&reg.path).unwrap_or_default();
+            if let Some(agent) = installed.into_iter().find(|a| a.id == provider.id) {
+                cmd.push("sh".to_owned());
+                cmd.extend(agent.cmd);
+            }
+            let cwd = folder.unwrap_or_else(|| PathBuf::from("/"));
+            let run = RunParams {
+                name: Some(terminal.clone()),
+                cmd,
+                cwd,
+                cols: (prefix.is_some() || remote.is_some()).then_some(1000),
+                ..RunParams::default()
+            };
+            reg.run(run)?;
+            reg.mark_redacted(&terminal);
+            let term = reg.fresh(&terminal);
+            (terminal, term, true)
+        }
+    };
+    if let Some(term) = term.as_ref().filter(|_| fresh) {
+        crate::serve::watch(cx.registry, terminal.clone(), Arc::clone(term));
         let (registry, name) = (Arc::clone(cx.registry), terminal.clone());
         let account = (store, provider, p.name);
-        tokio::spawn(checked(registry, name, term, account, prefix));
+        tokio::spawn(checked(registry, name, Arc::clone(term), account, prefix));
     }
-    Ok(Login { terminal })
+    Ok(linked(terminal, term, remote.as_ref()).await)
+}
+
+async fn linked(
+    terminal: String,
+    term: Option<Arc<shed_core::Terminal>>,
+    remote: Option<&RemoteLogin>,
+) -> Login {
+    let mut login = Login {
+        terminal,
+        link: None,
+        code: None,
+        answer: remote.map(|r| r.answer),
+    };
+    let (Some(term), Some(remote)) = (term, remote) else {
+        return login;
+    };
+    let shown = |t: &shed_core::Terminal| remote.read(&t.screen()).is_some();
+    term.wait_until(shown, Some(clock::now() + LINK)).await.ok();
+    if let Some((link, code)) = remote.read(&term.screen()) {
+        (login.link, login.code) = (Some(link), code);
+    }
+    login
+}
+
+async fn no_browser(registry: &Path) -> Result<BTreeMap<String, String>, RpcError> {
+    let dir = registry.with_file_name("browser");
+    let path = crate::config::var_os("PATH").unwrap_or_default();
+    let env = BTreeMap::from([
+        (
+            "BROWSER".to_owned(),
+            dir.join("xdg-open").display().to_string(),
+        ),
+        (
+            "PATH".to_owned(),
+            format!("{}:{}", dir.display(), path.to_string_lossy()),
+        ),
+    ]);
+    blocking(move || {
+        std::fs::create_dir_all(&dir)?;
+        for name in ["open", "xdg-open"] {
+            let file = dir.join(name);
+            std::fs::write(&file, "#!/bin/sh\nprintf '%s\\n' \"$*\"\n")?;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755))?;
+        }
+        Ok::<_, std::io::Error>(())
+    })
+    .await?
+    .map_err(|e| RpcError::new(ErrorCode::Io, e.to_string()))?;
+    Ok(env)
+}
+
+pub(crate) async fn answer(cx: &Call<'_>, p: AccountAnswer) -> Result<(), RpcError> {
+    let (_, provider) = open(cx, &p.provider).await?;
+    let Some(remote) = provider.remote_login else {
+        let why = format!("{} has no remote login", provider.agent);
+        return Err(RpcError::new(ErrorCode::InvalidParams, why));
+    };
+    let text = p.answer.trim();
+    if text.is_empty() || text.chars().any(char::is_control) {
+        let why = "the answer is one line of text";
+        return Err(RpcError::new(ErrorCode::InvalidParams, why));
+    }
+    let Some(terminal) = login_running(&*cx.reg()?, &p.provider, &p.name) else {
+        let why = format!("no login runs for {}/{}", p.provider, p.name);
+        return Err(RpcError::new(ErrorCode::NoSuchTerminal, why));
+    };
+    match remote.answer {
+        LoginAnswer::Paste => {
+            let text = text.to_owned();
+            let send = SendParams {
+                name: terminal,
+                text,
+                ..SendParams::default()
+            };
+            let input = cx.reg()?.send(send)?;
+            input.write().await
+        }
+        LoginAnswer::Callback => callback(text).await,
+        LoginAnswer::None => {
+            let why = format!(
+                "{}'s login takes no answer: finish the link's page",
+                provider.agent
+            );
+            Err(RpcError::new(ErrorCode::InvalidParams, why))
+        }
+    }
+}
+
+async fn callback(address: &str) -> Result<(), RpcError> {
+    let local = ["http://localhost:", "http://127.0.0.1:"];
+    if !local.iter().any(|l| address.starts_with(l)) {
+        let why = "a callback is a http://localhost: or http://127.0.0.1: address";
+        return Err(RpcError::new(ErrorCode::InvalidParams, why));
+    }
+    let cmd = [
+        "curl",
+        "-sS",
+        "-o",
+        "/dev/null",
+        "--max-time",
+        "10",
+        "--",
+        address,
+    ];
+    let cmd: Vec<String> = cmd.iter().map(|&w| w.to_owned()).collect();
+    let none = BTreeMap::new();
+    let ran = runner::exec(&cmd, Path::new("/"), &none, Vec::new(), CALLBACK, 4096).await;
+    match ran {
+        Ok((status, _, _)) if status.success() => Ok(()),
+        Ok((_, _, err)) => {
+            let why = format!(
+                "the login took no callback: {}",
+                String::from_utf8_lossy(&err).trim()
+            );
+            Err(RpcError::new(ErrorCode::InvalidParams, why))
+        }
+        Err(e) => Err(RpcError::new(ErrorCode::Io, e.to_string())),
+    }
 }
 
 async fn checked(
