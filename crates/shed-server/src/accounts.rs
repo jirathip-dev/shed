@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::Value;
 use shed_accounts::{Store, Token, check, choice, store};
@@ -22,24 +22,6 @@ const CALLBACK: Duration = Duration::from_secs(15);
 const BEAT: Duration = Duration::from_mins(1);
 
 static PROBING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-static MONTH: Mutex<Option<(Instant, String)>> = Mutex::new(None);
-
-pub(crate) fn month() -> String {
-    let mut held = lock(&MONTH);
-    let now = clock::now();
-    if let Some((_, month)) = held
-        .as_ref()
-        .filter(|(at, _)| now.duration_since(*at) < BEAT)
-    {
-        return month.clone();
-    }
-    let out = runner::output("date", ["+%Y-%m"], &[]).map(|o| o.stdout);
-    let month = String::from_utf8_lossy(&out.unwrap_or_default())
-        .trim()
-        .to_owned();
-    *held = Some((now, month.clone()));
-    month
-}
 
 fn money(cost: Option<&Value>) -> Option<Money> {
     let cost = cost?;
@@ -212,7 +194,7 @@ pub(crate) fn shown(reg: &Registry, id: &str, account: Account) -> Account {
     Account {
         login: login_running(reg, &account.provider, &account.name),
         runs: reg.runs(id, &account.name),
-        spend: account.spend.filter(|s| s.month == month()),
+        spend: account.spend.filter(|s| s.month == check::month()),
         ..account
     }
 }

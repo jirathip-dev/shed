@@ -21,7 +21,7 @@ fn words(text: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn each_built_in_record_is_one_file_and_gemini_has_one_id() {
+fn each_built_in_record_is_one_file_under_its_id_and_gemini_has_one_id() {
     let catalog = Catalog::built_in();
     let ids: Vec<_> = catalog
         .iter()
@@ -33,8 +33,10 @@ fn each_built_in_record_is_one_file_and_gemini_has_one_id() {
             ("antigravity-acp", "built-in"),
             ("claude-acp", "built-in"),
             ("codex-acp", "built-in"),
-            ("", "built-in"),
-            ("gemini", "built-in")
+            ("deepseek", "built-in"),
+            ("gemini", "built-in"),
+            ("opencode", "built-in"),
+            ("pi-acp", "built-in")
         ]
     );
     let gemini = catalog.by_agent("gemini").cloned().unwrap_or_default();
@@ -67,6 +69,8 @@ fn a_host_file_sets_its_keys_over_the_built_in_record_and_a_bad_one_is_skipped()
         .map(|e| e.source.as_str());
     assert_eq!(fake, Some(file.as_str()));
     assert!(catalog.by_id("new-acp").is_none());
+    let keyed = catalog.by_id("keyed").map(|p| p.token_var.as_deref());
+    assert_eq!(keyed, Some(Some("KEYED_API_KEY")));
     let named: Vec<_> = bad
         .iter()
         .filter_map(|b| b.split(".toml: ").next())
@@ -97,6 +101,16 @@ fn an_apps_row_sets_its_keys_over_the_served_record_and_an_unknown_key_names_the
         .map(|e| e.source.as_str());
     assert_eq!(source, Some("app"));
     assert!(catalog.by_id("fake-acp").is_some());
+    let shared: Vec<_> = ["opencode", "pi-acp"]
+        .iter()
+        .filter_map(|id| catalog.by_id(id).map(|p| p.agent.as_str()))
+        .collect();
+    assert_eq!(shared, ["deepseek", "deepseek"]);
+    assert!(
+        catalog
+            .by_id("deepseek")
+            .is_some_and(|p| p.balance.is_some())
+    );
     let unknown = catalog
         .clone()
         .over("claude", "logins = \"x\"")

@@ -1,0 +1,11 @@
+# OpenCode (`opencode acp`) on a DeepSeek key: its accounts are the `deepseek` record's. OpenCode reads the key
+# from DEEPSEEK_API_KEY and its model from its config, which `{env:OPENCODE_MODEL}` fills with shed's model
+# (`deepseek/<model>`); with none, OpenCode drops the empty setting and picks its own.
+# A file of the same name in <config>/providers/ overrides keys of this one.
+id = "opencode"
+agent = "deepseek"
+token_var = "DEEPSEEK_API_KEY"
+model_env = "OPENCODE_MODEL"
+
+[env]
+OPENCODE_CONFIG_CONTENT = '{"model":"{env:OPENCODE_MODEL}"}'

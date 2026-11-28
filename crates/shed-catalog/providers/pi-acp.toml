@@ -1,0 +1,7 @@
+# Pi's ACP adapter on a DeepSeek key: its accounts are the `deepseek` record's. pi reads the key from
+# DEEPSEEK_API_KEY and, with no other provider's key, starts on DeepSeek. It has no model setting: pi-acp starts
+# `pi --mode rpc` with no model argument and pi reads no model variable.
+# A file of the same name in <config>/providers/ overrides keys of this one.
+id = "pi-acp"
+agent = "deepseek"
+token_var = "DEEPSEEK_API_KEY"

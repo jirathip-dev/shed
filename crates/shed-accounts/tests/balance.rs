@@ -1,6 +1,7 @@
 //! The balance probe against a fake provider: an account that is only a key is read with its key in the auth
 //! header, the reading lands on the account, the key appears in no output, and a 401 marks the key rejected
-//! and stops the probe until a new key is saved.
+//! and stops the probe until a new key is saved; the month's cost is the balance's drops while the lanes report
+//! no tokens.
 #![cfg(test)]
 
 use std::io::{BufRead as _, BufReader, Write as _};
@@ -9,7 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use shed_accounts::{Store, check};
-use shed_proto::{AccountAdd, AccountState, BalanceProbe, ErrorCode, Provider};
+use shed_proto::{AccountAdd, AccountState, BalanceProbe, ErrorCode, Money, Provider, Tokens};
 
 const KEY: &str = "sk-fake-balance-0123456789abcdef";
 
@@ -30,7 +31,9 @@ fn temp(name: &str) -> Temp {
 
 type Seen = Arc<Mutex<Vec<String>>>;
 
-fn provider_api(status: Arc<Mutex<&'static str>>) -> (u16, Seen) {
+type Answer = Arc<Mutex<&'static str>>;
+
+fn provider_api(status: Answer, total: Answer) -> (u16, Seen) {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bound");
     let port = listener.local_addr().expect("addr").port();
     let seen = Seen::default();
@@ -48,7 +51,10 @@ fn provider_api(status: Arc<Mutex<&'static str>>) -> (u16, Seen) {
                 head += &line;
             }
             kept.lock().expect("seen").push(head);
-            let body = r#"{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"42.50"}]}"#;
+            let total = *total.lock().expect("total");
+            let body = format!(
+                r#"{{"is_available":true,"balance_infos":[{{"currency":"CNY","total_balance":"{total}"}}]}}"#
+            );
             let status = *status.lock().expect("status");
             let answer = format!(
                 "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
@@ -88,7 +94,7 @@ fn add(name: &str, token_file: Option<PathBuf>, folder: Option<PathBuf>) -> Acco
 async fn a_key_only_account_reads_its_balance_and_shows_no_key() {
     let dir = temp("read");
     let status = Arc::new(Mutex::new("200 OK"));
-    let (port, seen) = provider_api(Arc::clone(&status));
+    let (port, seen) = provider_api(Arc::clone(&status), Arc::new(Mutex::new("42.50")));
     let provider = record(port);
     let store = Store::beside(&dir.0.join("state.json"));
     let file = dir.0.join("work.token");
@@ -160,4 +166,61 @@ async fn a_key_only_account_reads_its_balance_and_shows_no_key() {
 
     store.remove(&provider, "work").expect("removed");
     assert!(store.ls(&provider).is_empty());
+}
+
+fn key_account(dir: &Temp, provider: &Provider) -> Store {
+    let store = Store::beside(&dir.0.join("state.json"));
+    let file = dir.0.join("work.token");
+    std::fs::write(&file, KEY).expect("write");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    store
+        .add(provider, &add("work", Some(file), None))
+        .expect("added");
+    store
+}
+
+#[tokio::test]
+async fn with_no_tokens_reported_the_months_cost_is_the_balances_drops() {
+    let dir = temp("drop");
+    let total = Arc::new(Mutex::new("5.57"));
+    let (port, _) = provider_api(Arc::new(Mutex::new("200 OK")), Arc::clone(&total));
+    let provider = record(port);
+    let store = key_account(&dir, &provider);
+    let status = || check::status(&store, &provider, "work", "/".as_ref());
+    let cost = |a: &shed_proto::Account| {
+        let spend = serde_json::to_value(&a.spend).expect("json");
+        format!("{:.2}", spend["cost"]["amount"].as_f64().unwrap_or(-1.0))
+    };
+    let source = |a: &shed_proto::Account| a.spend.as_ref().map(|s| s.source);
+    let month = check::month();
+    assert_eq!(status().await.expect("status").spend, None);
+    let own = Money {
+        amount: 0.15,
+        currency: "CNY".into(),
+    };
+    let none = Tokens::default();
+    store
+        .spent(&provider, "work", &month, none, Some(own))
+        .expect("spent");
+    for (now, want) in [
+        ("5.37", "0.20"),
+        ("5.37", "0.20"),
+        ("6.00", "0.20"),
+        ("5.70", "0.50"),
+    ] {
+        *total.lock().expect("total") = now;
+        let read = status().await.expect("status");
+        assert_eq!(cost(&read), want, "at {now}");
+        assert_eq!(source(&read), Some(shed_proto::SpendSource::Balance));
+    }
+    let used = Tokens {
+        input: 1000,
+        ..Tokens::default()
+    };
+    store
+        .spent(&provider, "work", &month, used, None)
+        .expect("spent");
+    let read = store.account(&provider, "work").expect("account");
+    assert_eq!(read.spend.as_ref().map(|s| s.tokens), Some(used));
+    assert_eq!(source(&read), Some(shed_proto::SpendSource::Usage));
 }

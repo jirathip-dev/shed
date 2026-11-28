@@ -3267,6 +3267,11 @@
           "cost": {
             "$ref": "#/components/schemas/Cost",
             "description": "What they cost."
+          },
+          "source": {
+            "$ref": "#/components/schemas/SpendSource",
+            "description": "Where `cost` comes from.",
+            "default": "usage"
           }
         },
         "required": [
@@ -3353,6 +3358,21 @@
           }
         ],
         "description": "The `\"unknown\"` cost."
+      },
+      "SpendSource": {
+        "oneOf": [
+          {
+            "type": "string",
+            "const": "usage",
+            "description": "The lanes' usage: their own cost, else their tokens by the record's `[price]`."
+          },
+          {
+            "type": "string",
+            "const": "balance",
+            "description": "The balance's drops between readings, when the lanes reported no tokens."
+          }
+        ],
+        "description": "Where a month's cost comes from."
       },
       "TokenInfo": {
         "type": "object",

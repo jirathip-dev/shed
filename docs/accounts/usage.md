@@ -23,6 +23,7 @@ key), the keys and indexes down to the answer's `currency` and `total` (a number
 `fresh`, the seconds a reading stands. shed's built-in `deepseek` record has one:
 
 ```toml
+id = "deepseek"
 agent = "deepseek"
 token_var = "DEEPSEEK_API_KEY"
 [balance]
@@ -57,6 +58,11 @@ output = 1.10
 ```
 
 With neither, the tokens still count and the month's `cost` is `"unknown"` (also when two currencies meet).
-The totals are the account's `spend` (`month` as `YYYY-MM`, `tokens`, `cost`) in `account.ls` and
+
+Many agents report no tokens (no `[quota]`, and ACP's `usage_update` carries none). For a month whose lanes
+reported none, the cost is the balance's drops instead: each balance reading lower than the one before (same
+currency) adds the difference, and a rise (a top-up) adds nothing, so the cost trails the spend by at most one
+reading. `spend.source` says which it is: `usage` (the lanes' own cost or `[price]`) or `balance`.
+The totals are the account's `spend` (`month` as `YYYY-MM`, `tokens`, `cost`, `source`) in `account.ls` and
 `account.status`, kept in `accounts.json` across restarts and upgrades. They are this machine's only, and start
 again at the first usage of a new month in the machine's local time; a past month's are not shown.

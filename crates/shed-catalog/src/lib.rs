@@ -1,7 +1,8 @@
 //! The agent records in three layers, each a table of keys over the record of the same agent below it: the
-//! built-in `providers/<agent>.toml`, the host's `<config>/providers/<agent>.toml`, and an app's own rows.
+//! built-in `providers/<agent>.toml`, the host's `<config>/providers/<agent>.toml`, and an app's own rows. A
+//! record with no `id` takes its file's name.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -66,9 +67,11 @@ impl Catalog {
     /// The records a server holds, from its answer to `agents`.
     #[must_use]
     pub fn served(agents: &[AgentInfo]) -> Self {
+        let ids: BTreeSet<&str> = agents.iter().map(|a| a.id.as_str()).collect();
         let entry = |a: &AgentInfo| {
             let provider = a.provider.clone()?;
-            let agent = Some(provider.agent.clone()).filter(|n| !n.is_empty());
+            let agent = Some(provider.agent.clone())
+                .filter(|n| !n.is_empty() && (*n == a.id || !ids.contains(n.as_str())));
             let source = a.source.clone().unwrap_or_default();
             Some((
                 agent.unwrap_or_else(|| a.id.clone()),
@@ -118,6 +121,13 @@ impl Catalog {
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
         table.extend(row);
+        if table
+            .get("id")
+            .and_then(toml::Value::as_str)
+            .is_none_or(str::is_empty)
+        {
+            table.insert("id".to_owned(), agent.into());
+        }
         let provider = table
             .try_into()
             .map_err(|e: toml::de::Error| e.to_string())?;

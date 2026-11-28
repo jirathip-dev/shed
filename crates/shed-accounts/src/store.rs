@@ -11,7 +11,7 @@ use std::sync::{Mutex, PoisonError};
 use serde::{Deserialize, Serialize};
 use shed_proto::{
     Account, AccountAdd, AccountState, Balance, Drift, ErrorCode, Money, Provider, RpcError, Spend,
-    TokenInfo, Tokens, Usage,
+    SpendSource, TokenInfo, Tokens, Usage,
 };
 
 use crate::token::{self, Token};
@@ -52,6 +52,9 @@ pub struct Reading {
     /// Its tokens and cost this month; only `spent` writes it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spend: Option<Spend>,
+    /// Its balance's drops this month; only `fell` writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fell: Option<Spend>,
 }
 
 /// The accounts folder beside the state file.
@@ -288,7 +291,7 @@ impl Store {
             limited_until,
             usage: reading.usage,
             balance: reading.balance,
-            spend: reading.spend,
+            spend: Spend::of_month(reading.spend, reading.fell),
             token,
             runs: 0,
             login: None,
@@ -324,8 +327,17 @@ impl Store {
     pub fn keep(&self, provider: &Provider, name: &str, reading: Reading) -> Result<(), RpcError> {
         let key = format!("{}/{name}", provider.agent);
         self.update(|all| {
-            let spend = all.get(&key).and_then(|r| r.spend.clone());
-            all.insert(key, Reading { spend, ..reading });
+            let was = all.get(&key);
+            let spend = was.and_then(|r| r.spend.clone());
+            let fell = was.and_then(|r| r.fell.clone());
+            all.insert(
+                key,
+                Reading {
+                    spend,
+                    fell,
+                    ..reading
+                },
+            );
         })
     }
 
@@ -341,13 +353,44 @@ impl Store {
         tokens: Tokens,
         cost: Option<Money>,
     ) -> Result<(), RpcError> {
+        self.total(provider, name, month, tokens, cost, SpendSource::Usage)
+    }
+
+    /// Adds a drop of the account's balance to its drops for `month`; another month starts them again.
+    ///
+    /// # Errors
+    /// `IO` when `accounts.json` cannot be written.
+    pub fn fell(
+        &self,
+        provider: &Provider,
+        name: &str,
+        month: &str,
+        drop: Money,
+    ) -> Result<(), RpcError> {
+        let source = SpendSource::Balance;
+        self.total(provider, name, month, Tokens::default(), Some(drop), source)
+    }
+
+    fn total(
+        &self,
+        provider: &Provider,
+        name: &str,
+        month: &str,
+        tokens: Tokens,
+        cost: Option<Money>,
+        source: SpendSource,
+    ) -> Result<(), RpcError> {
         self.folder(provider, name)?;
         let key = format!("{}/{name}", provider.agent);
         self.update(|all| {
             let reading = all.entry(key).or_default();
-            reading.spend = Some(match reading.spend.take() {
+            let slot = match source {
+                SpendSource::Usage => &mut reading.spend,
+                SpendSource::Balance => &mut reading.fell,
+            };
+            *slot = Some(match slot.take() {
                 Some(s) => s.plus(month, tokens, cost),
-                None => Spend::new(month, tokens, cost),
+                None => Spend::new(month, tokens, cost, source),
             });
         })
     }

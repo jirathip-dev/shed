@@ -89,7 +89,8 @@ impl Registry {
         }
         if let Some(((acp, name), was, now)) = spend {
             let on = (acp.as_str(), name.as_str());
-            crate::accounts::spent(self, on, was.as_ref(), &now, &crate::accounts::month()).ok();
+            crate::accounts::spent(self, on, was.as_ref(), &now, &shed_accounts::check::month())
+                .ok();
         }
         if session {
             self.save();
@@ -232,10 +233,10 @@ mod tests {
         used(&mut reg, "a", 250_000, 30_000, None);
         used(&mut reg, "b", 1_000, 1_000, Some(0.5));
         used(&mut reg, "b", 3_000, 2_000, Some(0.75));
-        let month = crate::accounts::month();
+        let month = shed_accounts::check::month();
         let tokens = |input, output| json!({"input": input, "cache_read": 0, "cache_write": 0, "output": output});
-        let a = json!({"month": month, "tokens": tokens(250_000, 30_000), "cost": {"amount": 0.74, "currency": "USD"}});
-        let b = json!({"month": month, "tokens": tokens(3_000, 2_000), "cost": {"amount": 0.75, "currency": "USD"}});
+        let a = json!({"month": month, "tokens": tokens(250_000, 30_000), "cost": {"amount": 0.74, "currency": "USD"}, "source": "usage"});
+        let b = json!({"month": month, "tokens": tokens(3_000, 2_000), "cost": {"amount": 0.75, "currency": "USD"}, "source": "usage"});
         assert_eq!(spend(&reg, &store, "a"), a);
         assert_eq!(spend(&reg, &store, "b"), b);
         assert_eq!(spend(&reg, &store, "c"), Value::Null);
