@@ -51,12 +51,14 @@ fn diff(last: Option<&Snapshot>, now: &Snapshot, seq: u64) -> Option<ScreenUpdat
 }
 
 fn redacted(mut snap: Snapshot) -> Snapshot {
-    for row in &mut snap.rows {
-        let text: String = row.iter().map(|r| r.text.as_str()).collect();
-        let shown = shed_core::redact(&text);
+    let texts: Vec<String> = (snap.rows.iter())
+        .map(|row| row.iter().map(|r| r.text.as_str()).collect())
+        .collect();
+    let shown = shed_core::redact(&texts.join("\n"));
+    for ((row, text), shown) in snap.rows.iter_mut().zip(&texts).zip(shown.split('\n')) {
         if shown != text {
             *row = vec![shed_core::Run {
-                text: shown,
+                text: shown.to_owned(),
                 pen: shed_core::Pen::default(),
             }];
         }
