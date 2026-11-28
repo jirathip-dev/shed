@@ -17,6 +17,7 @@ platform = "linux"
 
 [off]
 "core/cap" = "drover has no line cap (#1812)"
+"rust/complexity" = "gatekeeper 1.7 reports functions reached through a build script's OUT_DIR (the generated methods.rs and the wait.rs it includes) by absolute path, so no baseline matches on two hosts"
 
 [pin]
 version = "1.7.0"
